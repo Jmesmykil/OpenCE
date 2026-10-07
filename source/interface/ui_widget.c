@@ -897,7 +897,7 @@ enum
 enum
 {
 	/* a held dpad direction repeats no faster than this */
-	DPAD_EVENT_REPEAT_MILLISECONDS = 250,
+	DPAD_EVENT_REPEAT_MILLISECONDS = 350,
 	NUMBER_OF_DPAD_DIRECTIONS =
 		_widget_event_dpad_right - _widget_event_dpad_up + 1
 };
