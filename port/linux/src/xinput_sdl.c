@@ -625,12 +625,53 @@ static int sdl_gamepads(SDL_Gamepad *gamepads[PORT_COUNT])
 		}
 	}
 #else
-	for (index = 0; index < count && found < PORT_COUNT; index++)
 	{
-		SDL_Gamepad *gamepad = SDL_GetGamepadFromID(ids[index]);
+		SDL_Gamepad *steam_deck = NULL;
 
-		if (gamepad)
+		/* Steam Input may expose both the active virtual layout and the
+		physical Deck controls. Keep the virtual gamepad in player one's
+		first slot and skip its duplicate physical device. */
+		for (index = 0; index < count; index++)
+		{
+			SDL_Gamepad *gamepad = SDL_GetGamepadFromID(ids[index]);
+			char const *name = gamepad ? SDL_GetGamepadName(gamepad) : NULL;
+
+			if (name && strstr(name, "Steam Virtual Gamepad"))
+			{
+				steam_deck = gamepad;
+				break;
+			}
+		}
+		if (!steam_deck)
+		{
+			for (index = 0; index < count; index++)
+			{
+				SDL_Gamepad *gamepad = SDL_GetGamepadFromID(ids[index]);
+
+				if (gamepad && SDL_GetGamepadVendor(gamepad) == 0x28de &&
+					SDL_GetGamepadProduct(gamepad) == 0x1205)
+				{
+					steam_deck = gamepad;
+					break;
+				}
+			}
+		}
+		if (steam_deck)
+			gamepads[found++] = steam_deck;
+
+		for (index = 0; index < count && found < PORT_COUNT; index++)
+		{
+			SDL_Gamepad *gamepad = SDL_GetGamepadFromID(ids[index]);
+
+			if (!gamepad || gamepad == steam_deck)
+				continue;
+			/* If the virtual Deck device was unavailable, use its physical
+			 * gamepad once; don't list a duplicate after the fallback. */
+			if (steam_deck && SDL_GetGamepadVendor(gamepad) == 0x28de &&
+				SDL_GetGamepadProduct(gamepad) == 0x1205)
+				continue;
 			gamepads[found++] = gamepad;
+		}
 	}
 #endif
 	SDL_free(ids);
@@ -859,7 +900,35 @@ DWORD WINAPI XInputGetState(HANDLE device, PXINPUT_STATE state)
 			else
 				keyboard_controls(&input, &state->Gamepad);
 		}
-		if (port_gamepad(gamepads, count, 0))
+		if (input.menus && !pc_menu_split_players())
+		{
+			int index, button;
+
+			/* Shared menus read every connected pad. Once local players split
+			 * or join, each pad stays on its own XInput port. */
+			for (index = 0; index < count; index++)
+			{
+				XINPUT_GAMEPAD gamepad_state;
+
+				memset(&gamepad_state, 0, sizeof(gamepad_state));
+				sdl_gamepad_state(gamepads[index], &gamepad_state);
+				state->Gamepad.wButtons |= gamepad_state.wButtons;
+				for (button = 0; button < 8; button++)
+				{
+					if (gamepad_state.bAnalogButtons[button] > state->Gamepad.bAnalogButtons[button])
+						state->Gamepad.bAnalogButtons[button] = gamepad_state.bAnalogButtons[button];
+				}
+				if (abs(gamepad_state.sThumbLX) > abs(state->Gamepad.sThumbLX))
+					state->Gamepad.sThumbLX = gamepad_state.sThumbLX;
+				if (abs(gamepad_state.sThumbLY) > abs(state->Gamepad.sThumbLY))
+					state->Gamepad.sThumbLY = gamepad_state.sThumbLY;
+				if (abs(gamepad_state.sThumbRX) > abs(state->Gamepad.sThumbRX))
+					state->Gamepad.sThumbRX = gamepad_state.sThumbRX;
+				if (abs(gamepad_state.sThumbRY) > abs(state->Gamepad.sThumbRY))
+					state->Gamepad.sThumbRY = gamepad_state.sThumbRY;
+			}
+		}
+		else if (port_gamepad(gamepads, count, 0))
 			sdl_gamepad_state(gamepads[0], &state->Gamepad);
 		test_input_gamepad(&state->Gamepad);
 		if (abs(state->Gamepad.sThumbRX) > STICK_AIMING_DEFLECTION ||

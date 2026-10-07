@@ -6,10 +6,13 @@ by the guest, including keyboard, mouse, and gamepad input. Gamepad IDs are
 made nonzero for SDL3, and the bridge maps SDL2 controller types and button
 positions to their SDL3 equivalents.
 
-This is an input integration prototype, not a complete OpenCE Switch port.
-OpenCE does not currently build or launch this adapter. The upstream Linux
-build continues to use its existing SDL input path, which already supports
-keyboard, mouse, and gamepads. The Steam Deck runs through that Linux path.
+The SDL bridge remains an input integration prototype, not a complete OpenCE
+Switch port. OpenCE does not currently build or launch this adapter. Linux
+already supports keyboard, mouse, and gamepads; this change also keeps those
+inputs active in shared menus while prioritizing Steam Input's virtual Deck
+gamepad over its duplicate physical device. Local split-screen and in-game
+controller-to-player assignments continue to use separate XInput ports. The
+Steam Deck uses the Linux path.
 
 The guest event buffer is 128 bytes. Event IDs and fields use SDL3's event
 ABI; the host writes scalar fields at their ABI offsets with `memcpy`, so it
@@ -31,8 +34,10 @@ The profile33 Switch host used a separate devkitPro/libnx NRO build, with
 SDL2, Switch Mesa, GLESv2, and EGL (`-march=armv8-a+crc+crypto`,
 `-mtune=cortex-a57`, `-fPIE`). It required a separately built guest ELF.
 That packaging path is not included here. No game files, signing keys, private
-credentials, or device-specific files are part of this prototype. Neither
-Switch nor Steam Deck hardware support is claimed as verified by this change.
+credentials, or device-specific files are part of this prototype. This change
+does not claim a complete Switch port. Steam Deck controller enumeration was
+observed with the virtual Deck gamepad first and a PS5 controller second;
+human button acceptance is still pending.
 
 Before integrating this adapter into an OpenCE Switch target, the project
 needs a supported guest build, a clean platform build target, and runtime input
