@@ -21,14 +21,16 @@ to nonzero guest IDs because SDL3 reserves ID zero. Gamepad events retain
 physical button positions across Xbox, PlayStation, and Nintendo controllers.
 
 The focused test in `tests/test_sdl_input_bridge.c` checks keyboard, mouse,
-and gamepad event serialization. Run it with the SDL2 development headers used
-by the Switch host:
+and gamepad event serialization. Run it with the SDL2 headers used by the
+Switch host:
 
 ```sh
-cc -std=c11 $(pkg-config --cflags sdl2) -Iport/switch \
+cc -std=c11 -Wall -Wextra -Werror -I"$SDL2_INCLUDE_DIR" -Iport/switch \
   port/switch/tests/test_sdl_input_bridge.c -o /tmp/test_sdl_input_bridge
 /tmp/test_sdl_input_bridge
 ```
+
+Set `SDL2_INCLUDE_DIR` to the directory that contains `SDL2/SDL.h`.
 
 The profile33 Switch host used a separate devkitPro/libnx NRO build, with
 SDL2, Switch Mesa, GLESv2, and EGL (`-march=armv8-a+crc+crypto`,

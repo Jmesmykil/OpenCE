@@ -6,6 +6,12 @@
 
 #include "../host_sdl_input.h"
 
+/* The event-added translation is compiled but isn't exercised by this test. */
+SDL_JoystickID SDL_JoystickGetDeviceInstanceID(int device_index)
+{
+    return (SDL_JoystickID)device_index;
+}
+
 static uint32_t event_u32(const uint8_t *event, unsigned offset)
 {
     uint32_t value;
