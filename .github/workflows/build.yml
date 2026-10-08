@@ -50,7 +50,7 @@ jobs:
         run: |
           printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
           pacman -Syu --noconfirm --needed git zstd python python-pytest ninja ccache \
-            clang lld gcc lib32-glibc lib32-gcc-libs lib32-sdl3
+            clang lld gcc lib32-glibc lib32-gcc-libs lib32-sdl3 sdl2
 
       - uses: actions/checkout@v4
 
@@ -70,6 +70,7 @@ jobs:
         run: |
           python -m pytest -q tools/test_linux_port.py
           python tools/test_light_storage.py
+          python tools/test_switch_input.py
 
       - name: Compile cache
         run: ccache --show-stats

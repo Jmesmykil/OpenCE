@@ -32,6 +32,11 @@ cc -std=c11 -Wall -Wextra -Werror -I"$SDL2_INCLUDE_DIR" -Iport/switch \
 ```
 
 Set `SDL2_INCLUDE_DIR` to the directory that contains `SDL2/SDL.h`.
+From the OpenCE repository root, `python tools/test_switch_input.py` builds
+and runs both that serialization test and the SDL-independent gamepad route
+test in a temporary directory. It requires a C compiler and SDL2 development
+headers, but no game files, runtime, or Switch hardware. Linux CI runs this
+smoke command alongside the native port tests.
 
 The profile33 Switch host used a separate devkitPro/libnx NRO build, with
 SDL2, Switch Mesa, GLESv2, and EGL (`-march=armv8-a+crc+crypto`,
@@ -42,3 +47,12 @@ does not claim a complete Switch port. The creator confirmed PS5 gameplay and me
 regressions through the production XInput device-change path cover reordering,
 delayed virtual controllers, disconnects, split ports and held-source replacement.
 Switch hardware acceptance and full platform integration remain unverified.
+
+The full fork build and its source are documented separately in
+[BUILD-SWITCH.md](https://github.com/Jmesmykil/NxHalo-Releases/blob/main/switch-unified/BUILD-SWITCH.md).
+The corresponding content-preview package is available at
+[release v0.2.9.4-switch-content-preview](https://github.com/Jmesmykil/NxHalo-Releases/releases/tag/v0.2.9.4-switch-content-preview),
+including the [NRO](https://github.com/Jmesmykil/NxHalo-Releases/releases/download/v0.2.9.4-switch-content-preview/halo.nro)
+and [sanitized source archive](https://github.com/Jmesmykil/NxHalo-Releases/releases/download/v0.2.9.4-switch-content-preview/halo-ce-switch-content-preview-2.9.4-source.zip).
+Those files document a separate fork build; they do not represent OpenCE
+integration or Switch hardware acceptance.
