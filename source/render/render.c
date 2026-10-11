@@ -648,6 +648,9 @@ void render_frame(
 	halo_screen_ui_offset(TRUE);
 	progress_bar_eachframe();
 	halo_screen_ui_offset(FALSE);
+	/* port: the pause screen and the settings it opens are the full frame;
+	a pane would show half of them */
+	render_ui_widgets_over_split_screen();
 	rasterizer_windows_end();
 	rasterizer_frame_end();
 

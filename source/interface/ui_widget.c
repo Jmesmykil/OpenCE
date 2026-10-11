@@ -7281,6 +7281,27 @@ void render_ui_widgets_postgame(
 	return;
 }
 
+/* port: a screen laid out for the whole frame (the pause menu, and the
+settings it opens), while each player is drawing into a pane of it. A
+layout already as short as one pane stays there. */
+static boolean widget_fullscreen_over_split(
+	struct widget_instance *widget)
+{
+	struct ui_widget_definition *definition;
+	short screen_height;
+	short design_height;
+
+	if (local_player_count() <= 1 || !widget)
+		return FALSE;
+	definition = ui_widget_definition_get(widget->definition_tag_index);
+	if (!definition)
+		return FALSE;
+	screen_height = rasterizer_globals.reserved04.screen_bounds.y1 -
+		rasterizer_globals.reserved04.screen_bounds.y0;
+	design_height = definition->bounds.y1 - definition->bounds.y0;
+	return screen_height > 0 && design_height > screen_height / 2 + 8;
+}
+
 /* renders the active widgets for one local player's viewport (or the whole
 screen), noting and settling the first player's tap targets in the frame's
 first render that can, and draws the debug view of the targets and the
@@ -7339,6 +7360,9 @@ void render_ui_widgets(
 					should_render = TRUE;
 				}
 			}
+			/* port: drawn once, over every pane, after the windows */
+			if (should_render && widget_fullscreen_over_split(widget))
+				should_render = FALSE;
 			if (should_render)
 			{
 				point2d offset;
@@ -7421,6 +7445,64 @@ void render_ui_widgets(
 	}
 	ui_debug_draw_targets(first_players_render);
 
+	return;
+}
+
+/* port: the pause screen and the settings it opens are a full 640x480 frame.
+Drawn in a pane, the other pane covers the rest. Drawn once the panes are
+done, on the whole screen, so the whole menu shows. */
+void render_ui_widgets_over_split_screen(
+	void)
+{
+	rectangle2d saved;
+	rectangle2d full;
+	rectangle2d bounds;
+	point2d offset;
+	long widget_index;
+	boolean any;
+
+	if (local_player_count() <= 1)
+		return;
+	any = FALSE;
+	for (widget_index = 0;
+		widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
+		widget_index++)
+	{
+		if (widget_fullscreen_over_split(widget_globals.active_widgets[widget_index]))
+			any = TRUE;
+	}
+	if (!any)
+		return;
+	saved = global_window_parameters.camera.viewport_bounds;
+	full = rasterizer_globals.reserved04.screen_bounds;
+	rasterizer_port_set_viewport(&full);
+	halo_screen_ui_offset(TRUE);
+	bounds.x0 = 0;
+	bounds.y0 = 0;
+	bounds.x1 = full.x1 - full.x0;
+	bounds.y1 = full.y1 - full.y0;
+	offset.x = 0;
+	offset.y = 0;
+	for (widget_index = 0;
+		widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
+		widget_index++)
+	{
+		struct widget_instance *widget = widget_globals.active_widgets[widget_index];
+
+		if (!widget_fullscreen_over_split(widget))
+			continue;
+		ui_mouse_noting_targets = !ui_mouse_targets_settled &&
+			(widget->local_player_index == NONE || widget->local_player_index == 0);
+		widget_instance_render_recursive(
+			widget,
+			&bounds,
+			offset,
+			TRUE,
+			FALSE);
+		ui_mouse_noting_targets = FALSE;
+	}
+	halo_screen_ui_offset(FALSE);
+	rasterizer_port_set_viewport(&saved);
 	return;
 }
 

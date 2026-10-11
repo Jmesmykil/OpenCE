@@ -106,6 +106,21 @@ void host_sd_unlock(void)
 	pthread_mutex_unlock(&log_lock);
 }
 
+/* The guest closes config.toml (and the profiles) through the ordinary
+file calls. close() does not commit the card's journal, and the game stops
+with _exit, which skips the commit libnx would have done on the way out.
+Without this, a setting written during the run is gone on the next one. */
+void host_storage_commit(void)
+{
+	Result result;
+
+	host_sd_lock();
+	result = fsdevCommitDevice("sdmc");
+	host_sd_unlock();
+	if (R_FAILED(result))
+		host_logf(HOST_LOG_WARN, "sd card: the filesystem was not committed (%08x)", result);
+}
+
 /* Seconds since the log was opened, for the front of every line.
 
  * The console copy of a line has a clock on it and the file copy never has,
@@ -343,6 +358,8 @@ void host_exit(int code)
 	host_dk_idle();
 	host_restore_clocks();
 	fflush(stderr);
+	/* after the last line: _exit does not commit the card */
+	host_storage_commit();
 	_exit(code);
 }
 

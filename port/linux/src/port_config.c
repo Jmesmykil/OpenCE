@@ -20,6 +20,12 @@ it exists, so that the player's edits and comments stay.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef HALO_SWITCH
+#include <unistd.h>
+/* the guest's write is not on the card until the host commits it
+(port/switch/host/host_main.c) */
+void host_storage_commit(void);
+#endif
 
 /* ---------- the settings */
 
@@ -764,7 +770,21 @@ static int config_write_file(const char *path, const char *text)
 	if (!file)
 		return 0;
 	written = fwrite(text, 1, strlen(text), file) == strlen(text);
-	return fclose(file) == 0 && written;
+	if (written)
+		fflush(file);
+#ifdef HALO_SWITCH
+	/* leaving the game is _exit, which does not flush the card; without a
+	commit here a setting is kept for this run and gone on the next */
+	if (written)
+		fsync(fileno(file));
+#endif
+	if (fclose(file) != 0)
+		written = 0;
+#ifdef HALO_SWITCH
+	if (written)
+		host_storage_commit();
+#endif
+	return written;
 #else
 	return SDL_SaveFile(path, text, strlen(text));
 #endif

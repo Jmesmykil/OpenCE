@@ -43,6 +43,9 @@ int host_errno(void);
  * this lock may log. */
 void host_sd_lock(void);
 void host_sd_unlock(void);
+/* write the SD card's journal, so a file closed by the guest is still there
+after _exit (host_main.c) */
+void host_storage_commit(void);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);
