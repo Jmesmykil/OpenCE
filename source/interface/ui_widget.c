@@ -3223,16 +3223,19 @@ static void widget_instance_set_focused_child_by_index(
 	return;
 }
 
-/* port: the postgame map select is opened with no screen behind it. Its
-wrapper has no B handler, so B is Back, which deletes that screen and
-leaves the menu background. The carnage report's other button leaves the
-match for the main menu. */
+/* port: the postgame map select is opened on the main menu's map with no
+screen behind it. Its wrapper has no B handler, so B is Back, which deletes
+that screen and leaves the menu background. The carnage report's other
+button leaves the match for the main menu. A match's pause menu closes the
+same way, and no widgets there is the game being played. */
 static void widget_back_left_nothing(
 	short widget_stack)
 {
 	long widget_index;
 
 	if (widget_stack < 0 || widget_stack >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	if (!we_are_at_the_main_menu)
 		return;
 	if (widget_globals.widget_stack[widget_stack])
 		return;
