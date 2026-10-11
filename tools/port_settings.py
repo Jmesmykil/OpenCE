@@ -214,6 +214,34 @@ SCREENS = {
     },
 }
 
+# Gyro Aim is its own screen, opened from Gamepads. The row is the Switch's
+# only: the other platforms do not show it, and it takes the place after
+# the last row, so they have no gap.
+_gamepads = SCREENS["gamepad_setup"]
+_gamepads["categories"] = [
+    ("GYRO AIM:", "gamepad_setup/gyro",
+     "Turn the view with the controller's gyroscope,\nas well as the stick.", "switch"),
+]
+SCREENS["gamepad_setup/gyro"] = {
+    "screen": "gyro_aim_screen", "header": _gamepads["header"], "spacing": 30,
+    "rows": [
+        ("GYRO AIM:", "input.gyro_aim", ON_OFF,
+         "Turn the view with the controller's gyroscope,\nas well as the stick.", None),
+        ("HORIZONTAL SENSITIVITY:", "input.gyro_sensitivity_horizontal",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns left and right.\n1 is the sensor's own turn.", None),
+        ("VERTICAL SENSITIVITY:", "input.gyro_sensitivity_vertical",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns up and down.\n1 is the sensor's own turn.", None),
+        ("INVERT HORIZONTAL:", "input.gyro_invert_horizontal", YES_NO,
+         "Turning the controller right looks left.", None),
+        ("INVERT VERTICAL:", "input.gyro_invert_vertical", YES_NO,
+         "Tilting the controller up looks down.", None),
+    ],
+}
+
 # Video Setup's categories open ordinary settings screens. Each has the same
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
@@ -424,18 +452,22 @@ def _setting_screen(folder: str, spec: dict) -> list:
                           ("header_bounds", "7 -13 19 -7" if wide else "7 -6 19 0"),
                           ("footer_bounds", "7 208 19 214" if wide else "7 150 19 156")],
                          ['<on event="created" run="port setting load"/>'])
-    for index, (label, category_folder, _) in enumerate(spec.get("categories", ())):
+    for index, category in enumerate(spec.get("categories", ())):
+        category_folder = category[1]
+        platform = category[3] if len(category) > 3 else None
         key = category_folder.rsplit("/", 1)[-1]
         row = f"{base}/op_{key}"
         target = f"{PE}/{category_folder}/{SCREENS[category_folder]['screen']}"
         if spec.get("platform_places"):
-            for name in places:
-                places[name] += 1
-            rows += _placed(row, None, list(places), places)
+            members = platform.split() if platform else list(places)
+            for name in members:
+                if name in places:
+                    places[name] += 1
+            rows += _placed(row, platform, members, places)
         else:
-            rows.append((row, None, place + 1 + index))
+            rows.append((row, platform, place + 1 + index))
         extra += _widget(row, [("width", 512), ("height", 28), ("flags", "pass_unhandled_to_focused_child"),
-                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF")],
+                               ("bitmap", "bitmaps/option_bkds"), ("color", "#FF2896FF"), ("platform", platform)],
                          [f'<on event="a" open="{target}"/>', f'<on event="start" open="{target}"/>',
                           '<on event="left_mouse" run="mouse emit accept event"/>',
                           f'<child widget="{base}/{key}_label"/>'])
@@ -452,7 +484,7 @@ def _setting_screen(folder: str, spec: dict) -> list:
     # (the help of the row whose label is string n is n + 1: the buttons' is 0)
     extra += _strings(f"{base}/help_strings",
                       [""] + [help_text.replace("\n", "\\n") for _, _, _, help_text, *_ in spec["rows"]] +
-                      [help_text.replace("\n", "\\n") for _, _, help_text in spec.get("categories", ())])
+                      [category[2].replace("\n", "\\n") for category in spec.get("categories", ())])
     return _screen(folder, spec, rows, ["port settings help"], [], extra)
 
 

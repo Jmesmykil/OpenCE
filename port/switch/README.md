@@ -111,14 +111,19 @@ and the settings file `config.toml` goes in `sdmc:/switch/halo/`.
 
 ## Gyro aiming
 
-The stick aims as it does anywhere else. `input.gyro_aim` in `config.toml`
-adds the controller's gyroscope: `false` by default, `true` to turn the view
-as the controller turns. `input.gyro_sensitivity` scales that turn (`1` is
-the sensor's own). Each local player reads their own controller. A Pro
-Controller, the console held in the hands, and a single Joy-Con each use
-their one sensor; when two Joy-Con are attached, the right one is read. The
-profile's invert look applies to the gyroscope here. It is not used in the
-menus.
+The stick aims as it does anywhere else. Open a profile, choose Gamepads, and
+then Gyro Aim. That screen is the Switch's only. Gyro Aim is off until it is
+set to on. Horizontal and vertical sensitivity are how far the view turns
+each way (`1` is the sensor's own turn; the screen goes from `0.25` to `10`).
+Invert horizontal and invert vertical are separate, and neither follows the
+stick's Invert Look. The same five are `input.gyro_aim`,
+`input.gyro_sensitivity_horizontal`, `input.gyro_sensitivity_vertical`,
+`input.gyro_invert_horizontal` and `input.gyro_invert_vertical` in
+`config.toml`. Each local player reads their own controller. A Pro Controller,
+the console held in the hands, and a single Joy-Con each use their one sensor;
+when two Joy-Con are attached, the right one is read. It is not used in the
+menus. In a split-screen match on this console alone, the pause menu's LEAVE
+GAME leaves the match for both players and returns to the main menu.
 
 ## The memory model
 

@@ -4657,23 +4657,20 @@ void network_game_reset_to_pregame_ui(
 	ui_widgets_close_all();
 	if (network_game_is_splitscreen_local())
 	{
-		if (network_game_is_quickstart_local())
+		/* port: the Xbox's split-screen postgame screens are not in a game
+		map, and the PC menus are what this build shows. The machine is the
+		host, so it gets the host's lobby. If that screen is not there, the
+		main menu: staying in the match with no screen cannot be left. */
+		char const *widget_name = network_game_is_quickstart_local() ?
+			pc_menus_screen("ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen") :
+			pc_menus_screen("ui\\shell\\main_menu\\multiplayer_type_select\\connected\\connected_map_select_postgame_wrapper");
+
+		if (global_network_game_server_get())
+			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);
+		if (!ui_widget_load_by_name_or_tag(widget_name, NONE, NULL, NONE, NONE, NONE, NONE))
 		{
-			if (!ui_widget_load_by_name_or_tag(
-				"ui\\shell\\main_menu\\multiplayer_type_select\\split_screen\\pregame\\splitscreen_pregame_wrapper_normal",
-				NONE, NULL, NONE, NONE, NONE, NONE))
-			{
-				error(_error_silent, "failed to load pregame screen after quickstart match");
-			}
-		}
-		else
-		{
-			if (!ui_widget_load_by_name_or_tag(
-				"ui\\shell\\main_menu\\multiplayer_type_select\\split_screen\\splitscreen_map_select_postgame_wrapper",
-				NONE, NULL, NONE, NONE, NONE, NONE))
-			{
-				error(_error_silent, "failed to load map select postgame screen");
-			}
+			error(_error_silent, "failed to load split screen postgame screen");
+			main_goto_main_menu();
 		}
 	}
 	else
@@ -8304,9 +8301,23 @@ static boolean ui_check_for_pause_game(
 							NONE,
 							NONE))
 					{
-						error(
-							_error_silent,
-							"failed to load multiplayer pause game window");
+						/* port: a custom map often has only the one-player
+						pause screen. Without a fallback the split-screen
+						match has no pause menu, and no way out of it. */
+						if (local_player_count <= 1 ||
+							!ui_widget_load_by_name_or_tag(
+								"ui\\shell\\multiplayer_game\\pause_game\\1p_pause_game",
+								NONE,
+								NULL,
+								controller_index,
+								NONE,
+								NONE,
+								NONE))
+						{
+							error(
+								_error_silent,
+								"failed to load multiplayer pause game window");
+						}
 					}
 				}
 				else

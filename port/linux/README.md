@@ -276,7 +276,9 @@ until then that gamepad shares controller 1 with the keyboard. Two players on on
 player's B in the lobby leaves the game alone, and the last player of the
 computer leaves it for all of them. In the game, each player's pause menu
 opens on their part of the screen, and its LEAVE GAME is theirs: their part
-of the screen stays until the game ends. A game under way shows its own
+of the screen stays until the game ends. A split-screen game on this machine
+alone (no other computers) is different: LEAVE GAME leaves the match for
+every player on it and returns to the main menu. A game under way shows its own
 screen before JOIN GAME: players join there the same way, START or ADD
 PLAYER then START, and JOIN GAME brings them all into the game.
 
@@ -367,8 +369,11 @@ the setting for one start of the game. It has priority over the file.
 | `input.mouse_vertical_sensitivity` | `0.0` | `HALO_MOUSE_VERTICAL_SENSITIVITY` | The multiplier for the vertical mouse aim. `0`: the same as `input.mouse_sensitivity`. |
 | `input.invert_mouse` | `false` | `HALO_MOUSE_INVERT=1` sets `true` | `true`: the vertical mouse aim is inverted. |
 | `input.mouse_aim_assist` | `false` | `HALO_MOUSE_AIM_ASSIST` | `true`: the magnetism of the controller also operates for the mouse. `false`: when the mouse moved after the right stick, the view is not slowed or dragged by a target. The autoaim of the bullets operates in both cases. |
-| `input.gyro_aim` | `false` | `HALO_GYRO_AIM` | Switch only. `true`: the controller's gyroscope turns the view, each local player from their own controller. `false`: the stick only. |
-| `input.gyro_sensitivity` | `1.0` | `HALO_GYRO_SENSITIVITY` | Switch only. How far the view turns for the gyroscope when `input.gyro_aim` is true. `1` is the sensor's own turn. |
+| `input.gyro_aim` | `false` | `HALO_GYRO_AIM` | Switch only. On a profile's Gamepads screen, under Gyro Aim, or here. `true`: the controller's gyroscope turns the view, each local player from their own controller. `false`: the stick only. |
+| `input.gyro_sensitivity_horizontal` | `1.0` | `HALO_GYRO_SENSITIVITY_HORIZONTAL` | Switch only. On that Gyro Aim screen, or here. How far the view turns left and right for the gyroscope when `input.gyro_aim` is true. `1` is the sensor's own turn. The screen offers `0.25` to `10`. |
+| `input.gyro_sensitivity_vertical` | `1.0` | `HALO_GYRO_SENSITIVITY_VERTICAL` | Switch only. On that Gyro Aim screen, or here. How far the view turns up and down. `1` is the sensor's own turn. The screen offers `0.25` to `10`. |
+| `input.gyro_invert_horizontal` | `false` | `HALO_GYRO_INVERT_HORIZONTAL` | Switch only. On that Gyro Aim screen, or here. `true`: turning the controller right looks left. The stick's invert is its own. |
+| `input.gyro_invert_vertical` | `false` | `HALO_GYRO_INVERT_VERTICAL` | Switch only. On that Gyro Aim screen, or here. `true`: tilting the controller up looks down. The stick's invert is its own. |
 | `controls.<action>` | (the table in "Controls") | `HALO_KEY_<ACTION>` | The keys and mouse buttons of an action, up to two, separated by a comma: `move_forward`, `move_backward`, `strafe_left`, `strafe_right`, `jump`, `crouch`, `fire`, `throw_grenade`, `melee`, `reload`, `zoom`, `switch_weapon`, `switch_grenade`, `action`, `flashlight`, `scoreboard`, `pause`, `screenshot`, `push_to_talk`. Keys by their names (`"W"`, `"Space"`, `"Left Ctrl"`, `"F1"`), and `"Mouse Left"`, `"Mouse Right"`, `"Mouse Middle"`, `"Mouse 4"`, `"Mouse 5"`, `"Wheel"` (either way), `"Wheel Up"`, `"Wheel Down"`. |
 | `game.console_log` | `"important"` | `HALO_CONSOLE_LOG` | What the console shows on the screen. `"important"`: bans, players that the host drops for cheating, the reasons that the game refuses a command, and the asserts that stop the game. `"all"`: all the lines. `"none"`: only the asserts that stop the game. The output of a command always shows. `debug.txt` gets all the lines. |
 | `game.language` | `""` | `HALO_LANGUAGE` | The language of the menus: `ja`, `de`, `fr`, `es` or `it`. Empty: English. |

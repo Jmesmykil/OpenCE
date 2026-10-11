@@ -1204,7 +1204,8 @@ static void get_local_player_input_blob(
 						stick's, so that it slows over a target and follows a moving
 						one (input.touch_aim_assist); the swipe inverted as the stick
 						is, the phone's gyroscope as the phone turns, and on the
-						Switch the controller's gyroscope with the profile's invert */
+						Switch the controller's gyroscope with its own horizontal
+						and vertical invert */
 						extern int halo_linux_touch_look(short gamepad_index, real *yaw, real *pitch, real *gyro_yaw,
 							real *gyro_pitch);
 						real touch_yaw;
@@ -1218,14 +1219,7 @@ static void get_local_player_input_blob(
 						{
 							touching = TRUE;
 							if (input_abstraction_port_look_inverted(gamepad_index))
-							{
 								touch_pitch = -touch_pitch;
-#ifdef HALO_SWITCH
-								/* port: the controller's gyroscope follows the profile's
-								invert, as the stick does; the phone's does not */
-								gyro_pitch = -gyro_pitch;
-#endif
-							}
 							look_delta.yaw += (touch_yaw + gyro_yaw) / touch_scale;
 							look_delta.pitch += (touch_pitch + gyro_pitch) / touch_scale;
 						}

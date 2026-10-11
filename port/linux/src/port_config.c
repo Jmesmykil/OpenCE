@@ -615,9 +615,22 @@ static const struct config_setting config_settings[] =
 		"the controller's turn to the view, each local player from their own\n"
 		"controller: a Pro Controller, the console held in the hands, or one\n"
 		"Joy-Con. When two Joy-Con are attached, the right one is read." },
-	{ "input.gyro_sensitivity", _config_real, "1.0", "HALO_GYRO_SENSITIVITY", _environment_value, _platform_android,
-		"How far the view turns for the controller's gyroscope, when input.gyro_aim\n"
-		"is true. 1 is the sensor's own turn." },
+	{ "input.gyro_sensitivity_horizontal", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_HORIZONTAL",
+		_environment_value, _platform_android,
+		"How far the view turns left and right for the controller's gyroscope, when\n"
+		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
+	{ "input.gyro_sensitivity_vertical", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_VERTICAL",
+		_environment_value, _platform_android,
+		"How far the view turns up and down for the controller's gyroscope, when\n"
+		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
+	{ "input.gyro_invert_horizontal", _config_boolean, "false", "HALO_GYRO_INVERT_HORIZONTAL",
+		_environment_value, _platform_android,
+		"Invert the gyroscope's yaw. false: turning the controller right looks right.\n"
+		"true: turning it right looks left. The stick's invert is its own." },
+	{ "input.gyro_invert_vertical", _config_boolean, "false", "HALO_GYRO_INVERT_VERTICAL",
+		_environment_value, _platform_android,
+		"Invert the gyroscope's pitch. false: tilting the controller up looks up.\n"
+		"true: tilting it up looks down. The stick's invert is its own." },
 	{ "debug.profiler", _config_boolean, "false", "HALO_PROFILER", _environment_set_is_true, _platform_android,
 		"Profile the game: sample where its threads are (debug.profile_hz times a\n"
 		"second) and write the counts to the profile folder every 20 s, for\n"

@@ -617,9 +617,15 @@ void WINAPI Direct3D_SetPushBufferSize(DWORD push_buffer_size, DWORD segment_cou
 
 /* each vertex constant register's serial is the value constants_serial took
 when the register last changed; a program's registers are current up to
-the serial it recorded when it last uploaded them */
-static unsigned long constant_serials[XGPU_VERTEX_CONSTANT_COUNT];
-static unsigned long constants_serial;
+the serial it recorded when it last uploaded them. The serials are 64-bit,
+as in d3d8_gl.c: a skinned model changes up to 132 registers a draw, and
+32 bits wrapped, after which a draw found none of its registers changed
+and kept what it last uploaded (the other split-screen window's view) */
+static unsigned long long constant_serials[XGPU_VERTEX_CONSTANT_COUNT];
+static unsigned long long constants_serial;
+/* set when a window's viewport changes: the next draw sends every constant,
+so one split-screen window cannot draw its map with the other's view */
+static BOOL constants_known;
 /* the register each of the latest serials changed, so a program that is
 only a little behind finds its changed registers without a full scan */
 #define CONSTANT_LOG_SIZE 1024
@@ -674,6 +680,11 @@ static void viewport_update_constants(void)
 		constants_store(XGPU_VERTEX_CONSTANT_BIAS - 38, device.viewport_scale, 1);
 		constants_store(XGPU_VERTEX_CONSTANT_BIAS - 37, device.viewport_offset, 1);
 	}
+	/* The view (c[-96]) is set with this viewport, once per split-screen
+	window. Sending every constant on the next draw keeps the map, which is
+	drawn after the objects and is the world itself, from keeping the other
+	window's view when the two cameras do not agree. */
+	constants_known = FALSE;
 }
 HRESULT WINAPI Direct3D_CreateDevice(UINT adapter, D3DDEVTYPE device_type, void *unused, DWORD behavior_flags,
 	D3DPRESENT_PARAMETERS *presentation_parameters, D3DDevice **returned_device)
@@ -1668,8 +1679,7 @@ static struct dk_vertex_format format_told;
 static BOOL format_known;
 static struct dk_command_textures textures_told;
 static BOOL textures_known;
-static unsigned long constants_told;
-static BOOL constants_known;
+static unsigned long long constants_told;
 
 /* the state the uniform blocks above come from: when none of it has changed
 they need no converting (most draws share it with the draw before) */
@@ -1802,7 +1812,7 @@ static void draw_constants_send(void)
 	}
 	else if (constants_serial - constants_told <= CONSTANT_LOG_SIZE)
 	{
-		unsigned long serial;
+		unsigned long long serial;
 
 		for (serial = constants_told + 1; serial <= constants_serial; serial++)
 		{

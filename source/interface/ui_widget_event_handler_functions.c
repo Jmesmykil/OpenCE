@@ -2440,6 +2440,19 @@ static boolean network_game_remove_local_player(
 		main_goto_main_menu();
 		return TRUE;
 	}
+	/* port: a split-screen game on this machine alone has no one else in it.
+	LEAVE GAME leaves the match for every local player and returns to the
+	main menu. One player's quit would leave the others in a match that
+	cannot be left. */
+	if (network_game_is_splitscreen_local())
+	{
+		short controller_index;
+
+		for (controller_index = 0; controller_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS; controller_index++)
+			network_game_client_local_player_quit(controller_index);
+		network_game_client_all_local_players_have_quit();
+		return TRUE;
+	}
 	network_game_client_local_player_quit(event->controller_index);
 	/* port: a split screen player who quit, the others staying, is not
 	joined to the next game */

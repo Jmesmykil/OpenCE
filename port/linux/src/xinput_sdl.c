@@ -200,8 +200,10 @@ the mouse's rate per pixel (the view applies its own sensitivity), each
 apart: player_control.c inverts the swipe as the profile inverts the stick,
 not the phone's gyroscope, which turns as the phone does, and makes them the
 stick's rate before the magnetism. On the Switch the controller's gyroscope
-takes that place (input.gyro_aim), for every local pad, and the profile's
-invert applies to it. Nothing but on Android, the web and the Switch. */
+takes that place (input.gyro_aim), for every local pad. Horizontal and vertical
+sensitivity and invert are their own (input.gyro_sensitivity_horizontal,
+input.gyro_sensitivity_vertical, input.gyro_invert_horizontal,
+input.gyro_invert_vertical). Nothing but on Android, the web and the Switch. */
 int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch)
 {
 	*yaw = 0.0f;
@@ -211,7 +213,10 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 #ifdef HALO_SWITCH
 	{
 		static int enabled;
-		static float sensitivity;
+		static int invert_horizontal;
+		static int invert_vertical;
+		static float sensitivity_horizontal;
+		static float sensitivity_vertical;
 		static unsigned long read_at = (unsigned long)-1;
 		SDL_Gamepad *gamepads[PORT_COUNT];
 		SDL_Gamepad *gamepad;
@@ -223,7 +228,10 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 		{
 			read_at = config_changes();
 			enabled = config_boolean("input.gyro_aim");
-			sensitivity = (float)config_real("input.gyro_sensitivity");
+			invert_horizontal = config_boolean("input.gyro_invert_horizontal");
+			invert_vertical = config_boolean("input.gyro_invert_vertical");
+			sensitivity_horizontal = (float)config_real("input.gyro_sensitivity_horizontal");
+			sensitivity_vertical = (float)config_real("input.gyro_sensitivity_vertical");
 		}
 		if (!enabled || gamepad_index < 0)
 			return FALSE;
@@ -232,8 +240,8 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 		if (!gamepad)
 			return FALSE;
 		host_sdl_gamepad_gyro((unsigned int)gamepad, &turn_yaw, &turn_pitch);
-		*gyro_yaw = turn_yaw * sensitivity;
-		*gyro_pitch = turn_pitch * sensitivity;
+		*gyro_yaw = (invert_horizontal ? -turn_yaw : turn_yaw) * sensitivity_horizontal;
+		*gyro_pitch = (invert_vertical ? -turn_pitch : turn_pitch) * sensitivity_vertical;
 		if (*gyro_yaw == 0.0f && *gyro_pitch == 0.0f)
 			return FALSE;
 		return TRUE;
