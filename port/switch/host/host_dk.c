@@ -787,6 +787,14 @@ uint32_t host_dk_retired(void)
 	return retired;
 }
 
+/* the queue drained, before a map's memory goes or the process exits: a
+submission still running reads that memory */
+void host_dk_idle(void)
+{
+	if (dk.ready)
+		dkQueueWaitIdle(dk.queue);
+}
+
 static int initialize(void)
 {
 	DkDeviceMaker device_maker;

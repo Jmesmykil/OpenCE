@@ -3552,6 +3552,12 @@ static boolean main_loop_iteration(
 			}
 			profile_scope_exit(main_network_start_frame_section)
 
+			/* port: the network game ended this frame and asked for the main
+			menu. Its widgets are already closed; updating or drawing the
+			match now faults. The menu loads at the start of the next frame. */
+			if (main_globals.want_to_be_at_main_menu)
+				goto network_game_ended_this_frame;
+
 			profile_scope(main_update_time_section, main_update_time();)
 			profile_scope_enter(main_ui_update_section)
 			process_ui_widgets();
@@ -3638,6 +3644,8 @@ static boolean main_loop_iteration(
 			{
 				profile_scope(main_present_section, main_present_frame();)
 			}
+network_game_ended_this_frame:
+			;
 		}
 
 		input_frame_end();

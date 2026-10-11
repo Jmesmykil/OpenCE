@@ -2913,10 +2913,11 @@ static boolean network_game_start_faster(
 
 	/* port: the second player's profile screen pauses the countdown, and
 	coming back to the lobby does not run its "net server allow start".
-	While the countdown is paused this request is ignored, so a split-screen
-	game never leaves the lobby. */
+	While the countdown is paused this request is ignored. The host applies
+	it here: the message below only shortens a countdown that is already
+	running, and only if this controller is already a player. */
 	if (server)
-		network_game_server_pause_countdown(server, FALSE);
+		network_game_server_countdown_hurry(server);
 	if (client)
 	{
 		struct network_game *game = network_game_client_get_game(client);

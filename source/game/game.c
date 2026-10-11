@@ -906,6 +906,10 @@ void game_precache_new_map(
 void game_dispose_from_old_map(
 	void)
 {
+	/* port: the Switch GPU may still be reading this map (port/switch/host/host_dk.c) */
+#ifdef HALO_SWITCH
+	halo_switch_renderer_idle();
+#endif
 	rasterizer_dispose_from_old_map();
 	game_state_dispose_from_old_map();
 	cheats_dispose_from_old_map();

@@ -260,6 +260,13 @@ Commands are written here over a frame and handed to the host half
 void host_dk_submit(unsigned int commands, unsigned int size);
 /* the highest submission the GPU has finished (host_dk.c) */
 unsigned int host_dk_retired(void);
+/* the queue drained (host_dk.c) */
+void host_dk_idle(void);
+
+void halo_switch_renderer_idle(void)
+{
+	host_dk_idle();
+}
 /* a visibility test slot's latest count (host_dk.c) */
 unsigned int host_dk_visibility(unsigned int index);
 

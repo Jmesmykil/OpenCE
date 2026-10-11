@@ -3126,10 +3126,17 @@ static boolean server_alone(
 boolean server_ok_to_countdown(
 	struct network_game_server *server)
 {
+	/* port: everyone in the game is on this machine (split screen, or a
+	host nobody else has joined). It can count down with the players who
+	are here, even on one team, and even under the variant's minimum. A
+	second machine still has to fill both teams and that minimum. */
+	boolean here_only = network_game_server_get_client_machine_count(server) <= 1;
+
 	if (server_has_enough_machines(server) &&
 		server_has_a_player_on_each_machine(server) &&
-		(!server_needs_more_teams(server) || server_alone(server)) &&
-		(server->game.player_count >= server->game.minimum_players || server_alone(server)))
+		(here_only || !server_needs_more_teams(server) || server_alone(server)) &&
+		(here_only || server->game.player_count >= server->game.minimum_players ||
+			server_alone(server)))
 	{
 		return TRUE;
 	}
@@ -3303,6 +3310,24 @@ void network_game_server_pause_countdown(
 		csmemset(&server->countdown_state, 0, sizeof(server->countdown_state));
 
 	server->countdown_state.paused = pause_countdown;
+
+	return;
+}
+
+/* port: the lobby's START NOW, on this machine's server. Unpauses (a
+profile screen leaves the countdown paused, and the request is ignored
+while it is) and starts at once. */
+void network_game_server_countdown_hurry(
+	struct network_game_server *server)
+{
+	match_assert(NETWORK_SERVER_MANAGER_FILE, 0x78C, server);
+
+	if (server->state != _network_game_server_state_pregame)
+		return;
+	network_game_server_pause_countdown(server, FALSE);
+	network_game_server_update_countdown(
+		server,
+		_network_game_server_countdown_event_start_immediately);
 
 	return;
 }
@@ -3778,8 +3803,6 @@ void network_game_server_update_countdown(
 			}
 			else
 			{
-				unsigned long now = system_milliseconds();
-
 				if (countdown_event == _network_game_server_countdown_event_start_immediately)
 				{
 					countdown_timer_set_time_remaining(&server->countdown_state.timer, 0);
@@ -3789,25 +3812,27 @@ void network_game_server_update_countdown(
 				}
 				else
 				{
-					if (network_game_should_accept_remote_connections() == FALSE ||
-						network_game_server_get_client_machine_count(server) > 1 ||
-						server_alone(server))
-					{
-						unsigned long countdown;
+					unsigned long countdown;
 
-						if (network_game_is_splitscreen_local())
-							countdown = NETWORK_GAME_SPLITSCREEN_COUNTDOWN_TIME;
-						else
-							countdown = NETWORK_GAME_COUNTDOWN_TIME;
+					/* port: two or more players on this machine alone are
+					ready. The countdown used to wait for a second machine
+					unless there was exactly one player, so a split-screen
+					lobby stayed on "Waiting for players" and START NOW,
+					which only shortens a countdown already running, did
+					nothing. */
+					if (network_game_is_splitscreen_local() ||
+						network_game_server_get_client_machine_count(server) <= 1)
+						countdown = NETWORK_GAME_SPLITSCREEN_COUNTDOWN_TIME;
+					else
+						countdown = NETWORK_GAME_COUNTDOWN_TIME;
 
-						server->countdown_state.active = TRUE;
-						countdown_timer_set_time_remaining(
-							&server->countdown_state.timer,
-							countdown);
-						server->countdown_state.adjusted_time_this_tick = FALSE;
-						server->countdown_state.last_countdown_message_time = 0;
-						network_game_server_countdown_started(server);
-					}
+					server->countdown_state.active = TRUE;
+					countdown_timer_set_time_remaining(
+						&server->countdown_state.timer,
+						countdown);
+					server->countdown_state.adjusted_time_this_tick = FALSE;
+					server->countdown_state.last_countdown_message_time = 0;
+					network_game_server_countdown_started(server);
 				}
 			}
 		}
@@ -4342,6 +4367,12 @@ static boolean network_game_server_handle_client_machines(
 		if (client_machine->machine_index == NONE)
 			continue;
 
+		/* port: a slot with no connection (already closed, or none was
+		opened) must not be asked if it is active: that asserts, and
+		leaving a match disposes the server while such a slot can remain */
+		if (!client_machine->connection)
+			continue;
+
 		if (!network_connection_active(client_machine->connection))
 		{
 			short machine_index = client_machine->machine_index;
@@ -4716,6 +4747,21 @@ static boolean network_game_server_idle_pregame_tasks(
 		}
 		else
 		{
+			/* port: a game on this machine alone counts down once its
+			players are in. Nothing else sends the event that begins it. */
+			if (!server->countdown_state.paused && server_ok_to_countdown(server))
+			{
+				boolean one_machine =
+					network_game_server_get_client_machine_count(server) <= 1;
+
+				if (!network_game_should_accept_remote_connections() ||
+					(one_machine && server->game.player_count >= 2))
+				{
+					network_game_server_update_countdown(
+						server,
+						_network_game_server_countdown_event_player_joined);
+				}
+			}
 			if ((unsigned long)now - (unsigned long)server->time_of_last_keep_alive >
 				5UL * MILLISECONDS_PER_SECOND)
 			{

@@ -339,6 +339,8 @@ void host_abort(const char *reason)
 void host_exit(int code)
 {
 	host_logf(HOST_LOG_INFO, "the game exited (%d)", code);
+	/* a submission still running faults as the process goes */
+	host_dk_idle();
 	host_restore_clocks();
 	fflush(stderr);
 	_exit(code);

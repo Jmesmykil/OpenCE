@@ -173,6 +173,8 @@ extern int host_dk_verify_compressed;
 /* host_dk.c: runs a frame's commands from the deko3d renderer's guest half
 (port/switch/guest/dk_commands.h); commands is a guest address */
 void host_dk_submit(uint32_t commands, uint32_t size);
+/* the queue drained (a map is going, or the process is exiting) */
+void host_dk_idle(void);
 /* set once deko3d has presented a frame, after which its swapchain paces
 the frames, not the stand-in window's swap */
 extern int host_dk_presenting;
