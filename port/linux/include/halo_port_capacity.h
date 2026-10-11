@@ -58,6 +58,9 @@ extern unsigned long platform_contiguous_size;
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT \
 	(platform_contiguous_size > 0x08000000UL ? platform_contiguous_size / 2 / 0x4000 : 0x580) /* (0x580) */
 #define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT 0x4000
+#elif defined(HALO_WEB)
+#define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x580 /* (0x580) */
+#define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT HALO_PORT_TEXTURE_CACHE_PAGE_COUNT
 #else
 #define HALO_PORT_TEXTURE_CACHE_PAGE_COUNT 0x4000 /* (0x580) */
 #define HALO_PORT_TEXTURE_CACHE_MAXIMUM_PAGE_COUNT HALO_PORT_TEXTURE_CACHE_PAGE_COUNT
@@ -71,9 +74,10 @@ the Xbox. Halo Custom Edition maps' sounds, converted when they load
 (port/linux/game/custom_edition_sounds.c), and those of sound tags loaded
 over a map's (loose_sounds.c), are longer than the Xbox maps' and fill it (a
 campaign map's dialogue and music did, "SOUND CACHE BLOWN" in debug.txt).
-The desktop builds' cache is 16 MB; Android's window keeps the Xbox's. */
+The desktop builds' cache is 16 MB; Android's and the web build's windows keep
+the Xbox's. */
 
-#ifdef HALO_ARM64_GUEST
+#if defined(HALO_ARM64_GUEST) || defined(HALO_WEB)
 #define HALO_PORT_SOUND_CACHE_SIZE 0x400000 /* (0x400000) */
 #else
 #define HALO_PORT_SOUND_CACHE_SIZE 0x1000000 /* (0x400000) */

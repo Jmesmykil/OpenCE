@@ -57,8 +57,9 @@ includes software developed by in <in@fishtank.com>.
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-/* (the desktop ports only: the Android app imports the game data itself) */
-#ifndef HALO_ANDROID
+/* (the desktop ports only: the Android app and the web page import the game
+data themselves) */
+#if !defined(HALO_ANDROID) && !defined(HALO_WEB)
 
 #ifdef HALO_EXTRACTOR_STANDALONE
 /* Built for the Switch host, which calls this from its own start-up rather

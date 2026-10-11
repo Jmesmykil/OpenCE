@@ -755,3 +755,71 @@ void posix_random_bytes(void *buffer, posix_ulong size)
 		bytes[index] = (unsigned char)(value >> 56);
 	}
 }
+
+/* ---------- internet play with browsers (port/linux/src/p2p_webrtc.c)
+
+The native builds hold WebRTC connections with browsers through DTLS
+(port/linux/src/posix_dtls.c, with Mbed TLS), which the Switch's host does not
+build: it has no certificate, so it says so (its machine is signalled as one
+without WebRTC, and no browser connects to it), and the rest are never asked.
+Games with other native machines do not use them. STUN's HMAC-SHA-1 is libnx's. */
+
+int posix_dtls_fingerprint(unsigned char *fingerprint)
+{
+	(void)fingerprint;
+	return 0;
+}
+
+int posix_dtls_open(void)
+{
+	return -1;
+}
+
+void posix_dtls_close(int handle)
+{
+	(void)handle;
+}
+
+void posix_dtls_input(int handle, const void *data, int size)
+{
+	(void)handle;
+	(void)data;
+	(void)size;
+}
+
+int posix_dtls_receive(int handle, posix_ulong now, void *buffer, int size)
+{
+	(void)handle;
+	(void)now;
+	(void)buffer;
+	(void)size;
+	return -1;
+}
+
+int posix_dtls_send(int handle, const void *data, int size)
+{
+	(void)handle;
+	(void)data;
+	(void)size;
+	return 0;
+}
+
+int posix_dtls_output(int handle, void *buffer, int size)
+{
+	(void)handle;
+	(void)buffer;
+	(void)size;
+	return 0;
+}
+
+int posix_dtls_peer_fingerprint(int handle, unsigned char *fingerprint)
+{
+	(void)handle;
+	(void)fingerprint;
+	return 0;
+}
+
+void posix_hmac_sha1(const void *key, int key_size, const void *data, int size, unsigned char *digest)
+{
+	hmacSha1CalculateMac(digest, key, (size_t)key_size, data, (size_t)size);
+}

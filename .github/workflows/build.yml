@@ -20,7 +20,8 @@ name: Build
 # A successful build of main is also published as a GitHub release, the
 # newest marked latest, so that
 # https://github.com/<repository>/releases/latest/download/<file> always
-# gives the latest build; the last five are kept.
+# gives the latest build; the last five are kept. Its web build is then the
+# site on GitHub Pages (https://halocombatevolved.com/, port/web/README.md).
 on:
   push:
     paths-ignore:
@@ -470,6 +471,41 @@ jobs:
             gh release delete "$tag" --cleanup-tag --yes
           done
 
+  pages:
+    # The release's web build to GitHub Pages, which serves it at
+    # https://halocombatevolved.com/ (port/web/README.md, "Hosting"). Only
+    # main, only once every platform built and the release is out (the site
+    # and the release are one build), and a deployment is never cancelled
+    # halfway. The repository's Pages source must be GitHub Actions.
+    # (not in this fork, which builds no web port: if: false)
+    needs: [release]
+    if: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: halo-web-release
+          path: site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
   notify:
     # A Discord embed for the run, to the DISCORD_WEBHOOK secret (nothing
     # without it): green when every platform built, red when one did not,
@@ -516,6 +552,9 @@ jobs:
           downloads="[Android]($latest/download/halo-android-release.zip) · [Switch]($latest/download/halo-switch-release.zip) ([all builds]($latest))"
           if [ -n "$RELEASE_TAG" ]; then
             release="[$RELEASE_TAG]($SERVER/$REPOSITORY/releases/tag/$RELEASE_TAG)"
+            if [ "$PAGES" = success ]; then
+              release="$release, on [the site]($SITE_URL)"
+            fi
           else
             release="None (only a successful build of main makes one)"
           fi

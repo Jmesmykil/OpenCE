@@ -134,6 +134,11 @@ large as the largest */
 extern unsigned long platform_contiguous_size;
 #define PLATFORM_CONTIGUOUS_SIZE (platform_contiguous_size)
 #define PLATFORM_CONTIGUOUS_MAXIMUM 0x20000000UL
+#elif defined(HALO_WEB)
+/* 128 MB, a development kit's: the web build's WebAssembly memory ends with
+it (tools/web_build.py) */
+#define PLATFORM_CONTIGUOUS_SIZE 0x08000000UL
+#define PLATFORM_CONTIGUOUS_MAXIMUM PLATFORM_CONTIGUOUS_SIZE
 #else
 /* 512 MB on the desktop builds, whose caches outgrow the Xbox's (Custom
 Edition maps' textures and geometry: halo_port_capacity.h). Its pages are

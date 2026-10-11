@@ -387,8 +387,21 @@ static long current_line(struct reader *reader)
 	return (long)XML_GetCurrentLineNumber(reader->parser);
 }
 
-/* whether the element is for this platform (its platform attribute: one or
-more of "desktop", "android" and "switch", separated by spaces) */
+/* this build's platform, as the platform attribute names it (the Switch's
+game is built as Android's, with HALO_SWITCH too: "android" is the Android
+app's) */
+#if defined(HALO_SWITCH)
+#define MENU_PLATFORM "switch"
+#elif defined(HALO_ANDROID)
+#define MENU_PLATFORM "android"
+#elif defined(HALO_WEB)
+#define MENU_PLATFORM "web"
+#else
+#define MENU_PLATFORM "desktop"
+#endif
+
+/* whether the element is for this platform (its platform attribute: the
+platforms it is for, separated by spaces) */
 static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 {
 	int index;
@@ -397,35 +410,28 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 	{
 		if (!strcmp(attributes[index], "platform"))
 		{
-			const char *at = attributes[index + 1];
+			const char *name = attributes[index + 1];
 			int found = 0;
 
-			while (*at)
+			while (*name)
 			{
-				size_t length;
+				size_t length = strcspn(name, " ");
 
-				while (*at == ' ')
-					at++;
-				length = strcspn(at, " ");
-				if (!length)
-					break;
-				if (!((length == 7 && !strncmp(at, "desktop", 7)) || (length == 7 && !strncmp(at, "android", 7)) ||
-					(length == 6 && !strncmp(at, "switch", 6))))
+				if (length)
 				{
-					reader_error(reader, "platform=\"%s\" names one that is not \"desktop\", \"android\" or \"switch\"",
-						attributes[index + 1]);
-					return 1;
+					if ((length != 7 || strncmp(name, "desktop", 7)) && (length != 7 || strncmp(name, "android", 7)) &&
+						(length != 3 || strncmp(name, "web", 3)) && (length != 6 || strncmp(name, "switch", 6)))
+					{
+						reader_error(reader, "platform=\"%s\" names one that is not desktop, android, switch or web",
+							attributes[index + 1]);
+						return 1;
+					}
+					if (length == strlen(MENU_PLATFORM) && !strncmp(name, MENU_PLATFORM, length))
+						found = 1;
 				}
-				/* (the Switch's game is built as Android's, with HALO_SWITCH too:
-				"android" is the Android app's) */
-#if defined(HALO_SWITCH)
-				found |= length == 6 && !strncmp(at, "switch", 6);
-#elif defined(HALO_ANDROID)
-				found |= length == 7 && !strncmp(at, "android", 7);
-#else
-				found |= length == 7 && !strncmp(at, "desktop", 7);
-#endif
-				at += length;
+				name += length;
+				while (*name == ' ')
+					name++;
 			}
 			return found;
 		}
