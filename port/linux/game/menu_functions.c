@@ -7,11 +7,12 @@ calls them from PC_MENU_FUNCTION_BASE on):
 
 - "port quit game" (and the PC version's "main menu quit game") quits, as
   closing the window does;
-- the PC version's "profile set edit begin" begins editing the first player
-  profile, as its settings screens need, and fails with none: the main
-  menu's then asks for a new one's name, as the menu's other items do, and
-  its handlers open the screens that make the profile ("new campaign
-  decision", after which Settings' is the one being edited);
+- the PC version's "profile set edit begin" begins editing a profile, as
+  its settings screens need, and fails with none: the main menu's is the
+  first player's, and then asks for a new one's name, as the menu's other
+  items do, and its handlers open the screens that make the profile ("new
+  campaign decision", after which Settings' is the one being edited); a
+  game's pause menu edits the profile of the player who opened it;
 - "gamespy screen init" hides the server browser's error and filter panels,
   and the title of the mode "mp type set mode" did not choose (Internet or
   LAN);
@@ -541,10 +542,25 @@ menu's other items do ("new game if no plyr profiles"), and fails: the
 screens its handler then opens make the profile and edit it
 (new_profile_decision). Without the name asked, they made none, and showed
 "new campaign decision" as failed. The pause menu's has no such screens,
-and only fails. */
+and only fails. The main menu's is player 1's profile. The pause menu's is
+the profile of the player who opened it (split screen's second player has
+their own). */
 static boolean profile_edit_begin(struct widget_instance *widget, struct event_record *event,
 	boolean *widget_deleted)
 {
+	if (!main_menu_is_active())
+	{
+		short controller = controller_of(widget);
+		long index = player_ui_get_active_player_profile_index(controller);
+		struct player_profile profile;
+
+		if (index != NONE && player_profile_get(index, &profile))
+		{
+			player_ui_begin_editing_profile(index);
+			return TRUE;
+		}
+		return FALSE;
+	}
 	if (pc_menu_profile_edit_begin())
 		return TRUE;
 	/* (a press: the profile is made on its controller) */
