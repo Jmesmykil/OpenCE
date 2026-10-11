@@ -610,6 +610,14 @@ static const struct config_setting config_settings[] =
 		"written out as a part when it fills." },
 #endif
 #ifdef HALO_SWITCH
+	{ "input.gyro_aim", _config_boolean, "false", "HALO_GYRO_AIM", _environment_value, _platform_android,
+		"Aim with the controller's gyroscope. false is the stick only. true adds\n"
+		"the controller's turn to the view, each local player from their own\n"
+		"controller: a Pro Controller, the console held in the hands, or one\n"
+		"Joy-Con. When two Joy-Con are attached, the right one is read." },
+	{ "input.gyro_sensitivity", _config_real, "1.0", "HALO_GYRO_SENSITIVITY", _environment_value, _platform_android,
+		"How far the view turns for the controller's gyroscope, when input.gyro_aim\n"
+		"is true. 1 is the sensor's own turn." },
 	{ "debug.profiler", _config_boolean, "false", "HALO_PROFILER", _environment_set_is_true, _platform_android,
 		"Profile the game: sample where its threads are (debug.profile_hz times a\n"
 		"second) and write the counts to the profile folder every 20 s, for\n"

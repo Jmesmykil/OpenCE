@@ -109,6 +109,17 @@ The game checks for `sdmc:/switch/halo/maps/ui.map` and, with no image
 either, refuses to start and says so. Saves go in `sdmc:/switch/halo/save/`,
 and the settings file `config.toml` goes in `sdmc:/switch/halo/`.
 
+## Gyro aiming
+
+The stick aims as it does anywhere else. `input.gyro_aim` in `config.toml`
+adds the controller's gyroscope: `false` by default, `true` to turn the view
+as the controller turns. `input.gyro_sensitivity` scales that turn (`1` is
+the sensor's own). Each local player reads their own controller. A Pro
+Controller, the console held in the hands, and a single Joy-Con each use
+their one sensor; when two Joy-Con are attached, the right one is read. The
+profile's invert look applies to the gyroscope here. It is not used in the
+menus.
+
 ## The memory model
 
 This is the part of the port that is not like the others, and it is worth

@@ -219,7 +219,24 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
     import json
     config: Dict[str, Any] = json.loads(config_path.read_text(encoding="utf-8"))
 
-    toolchain = ndk / "toolchains" / "llvm" / "prebuilt" / "linux-x86_64"
+    # llvm-ar and ld.lld live in the NDK prebuilt for this machine. On macOS
+    # that directory is darwin-x86_64, and the same NDK on Linux is linux-x86_64.
+    prebuilt = ndk / "toolchains" / "llvm" / "prebuilt"
+    host_tag = os.environ.get("ANDROID_NDK_HOST_TAG", "")
+    if not host_tag:
+        if sys.platform == "darwin":
+            host_tag = "darwin-x86_64"
+        elif os.name == "nt":
+            host_tag = "windows-x86_64"
+        else:
+            host_tag = "linux-x86_64"
+    if not (prebuilt / host_tag).is_dir():
+        tags = sorted(entry.name for entry in prebuilt.iterdir() if entry.is_dir()) if prebuilt.is_dir() else []
+        if not tags:
+            n.comment("Switch build: the NDK has no LLVM toolchain")
+            return
+        host_tag = tags[0]
+    toolchain = prebuilt / host_tag
     sysroot_include = toolchain / "sysroot" / "usr" / "include"
     ndk_bin = toolchain / "bin"
     guest_cc = getattr(sln, "android_guest_cc", None) or "clang"

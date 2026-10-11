@@ -15,3 +15,6 @@ host_dk_shader_pending
 host_dk_shader_loading
 host_dk_shader_preload_done
 host_dk_shader_loose_loads
+# the controller's gyroscope (port/switch/host/host_sdl2.c). yaw and pitch are
+# guest addresses of the turn since the last call, in radians
+host_sdl_gamepad_gyro

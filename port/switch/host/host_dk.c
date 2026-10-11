@@ -912,13 +912,22 @@ static void clear(const struct dk_command_clear *command)
 		mask = 0;
 	if (!mask && !depth && !stencil)
 		return;
-	/* (a clear sets the scissor to each rectangle) */
+	/* A clear is drawn into the current viewport. Binding the target left
+	that as the whole target, so a later split-screen window's clear would
+	erase the earlier one (player 1 is drawn first). The rectangle is the
+	window, and the viewport is set to it as the scissor is; the next draw
+	puts both back (state_dirty). */
 	dk.state_dirty = 1;
 	for (index = 0; index < command->rectangle_count; index++)
 	{
 		const uint32_t *rectangle = command->rectangles[index];
+		DkViewport viewport = { (float)rectangle[0], (float)rectangle[1], (float)rectangle[2],
+			(float)rectangle[3], 0.0f, 1.0f };
 		DkScissor scissor = { rectangle[0], rectangle[1], rectangle[2], rectangle[3] };
 
+		if (!rectangle[2] || !rectangle[3])
+			continue;
+		dkCmdBufSetViewports(dk.commands, 0, &viewport, 1);
 		dkCmdBufSetScissors(dk.commands, 0, &scissor, 1);
 		if (mask)
 			dkCmdBufClearColorFloat(dk.commands, 0, mask, command->color[0], command->color[1], command->color[2],

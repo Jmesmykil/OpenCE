@@ -3,7 +3,8 @@ GUEST_HOST.H
 
 The host services the guest imports (the guest's view; the host defines
 them in port/android/host). Every name here must also be listed in
-port/android/host_imports.list, which generates the import stubs.
+port/android/host_imports.list, which generates the import stubs, except
+the Switch's own, which are listed in port/switch/host_imports.list.
 
 Parameter types follow the rules in halo_android_abi.h: 32-bit values are
 int or unsigned int, 64-bit values long long, and pointers are passed as
@@ -82,6 +83,10 @@ int host_sdl_gamepad_axis(unsigned int gamepad, int axis);
 int host_sdl_gamepad_button(unsigned int gamepad, int button);
 int host_sdl_gamepad_type(unsigned int gamepad);
 int host_sdl_rumble_gamepad(unsigned int gamepad, unsigned int low, unsigned int high, unsigned int milliseconds);
+/* the Switch host only (port/switch/host_imports.list): the controller's turn
+since the last call, in radians, into yaw and pitch. Other hosts do not
+provide it. */
+void host_sdl_gamepad_gyro(unsigned int gamepad, float *yaw, float *pitch);
 void host_sdl_close_gamepad(unsigned int gamepad);
 /* callback: void (*)(void *userdata, unsigned int stream, int additional, int total),
 called on the audio thread */
