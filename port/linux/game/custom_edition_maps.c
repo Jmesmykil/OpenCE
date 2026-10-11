@@ -424,9 +424,10 @@ static void custom_edition_map_add(
 	csprintf(map->level_name, "%s%s", CUSTOM_EDITION_LEVEL_NAME_PREFIX, name);
 	display_name_make(name, FALSE, map->display_name);
 	custom_edition_map_description_read(map);
-	/* (named for its hash, renamed: map_share_files.c) */
-	if (!map_share_name_hashed(name))
-		map_share_name_map(folder, name);
+	/* (named for its hash, renamed: map_share_files.c). A subfolder's copy
+	stays where it is; the file in custom_maps itself is named. */
+	if (!category[0] && !map_share_name_hashed(name))
+		map_share_name_map(root, name);
 
 	return;
 }

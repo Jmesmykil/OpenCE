@@ -608,6 +608,12 @@ void xgpu_gl_state_invalidate(void)
 {
 }
 
+/* menu art deletes a texture (menu_files.c); deko3d keeps no binding to forget */
+void xgpu_gl_texture_deleted(unsigned int texture)
+{
+	(void)texture;
+}
+
 /* ---------- device creation */
 
 Direct3D *WINAPI Direct3DCreate8(UINT sdk_version)

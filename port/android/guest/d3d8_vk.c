@@ -844,6 +844,12 @@ void xgpu_gl_state_invalidate(void)
 {
 }
 
+/* menu art deletes a texture (menu_files.c); Vulkan keeps no binding to forget */
+void xgpu_gl_texture_deleted(unsigned int texture)
+{
+	(void)texture;
+}
+
 /* ---------- debug.vk_self_test: the data a draw reads is copied at the draw (phase 3)
 
 A buffer of three vertices in the game's memory, a red triangle that covers the target,
