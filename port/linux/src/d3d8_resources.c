@@ -374,7 +374,12 @@ static void lock_level(const DWORD *resource, unsigned long face, unsigned long 
 	pitch = xgpu_texture_level_pitch(&description, level);
 	bits = (char *)resource_data(resource[1]);
 	if (bits)
+	{
 		bits += face * xgpu_texture_face_size(&description) + xgpu_texture_level_offset(&description, level);
+		/* (the level, which the game locks to write) */
+		memory_watch_prepare_write(bits, pitch * (description.compressed ?
+			(level_dimension(description.height, level) + 3) / 4 : level_dimension(description.height, level)));
+	}
 	if (rectangle && bits)
 	{
 		/* swizzled textures cannot be addressed by rectangle; only linear
@@ -438,7 +443,10 @@ void WINAPI D3DVolumeTexture_LockBox(D3DVolumeTexture *texture, UINT level, D3DL
 	slice = row_pitch * level_dimension(description.height, level);
 	bits = (char *)resource_data(resource[1]);
 	if (bits)
+	{
 		bits += xgpu_texture_level_offset(&description, level);
+		memory_watch_prepare_write(bits, slice * level_dimension(description.depth, level));
+	}
 	if (box && bits)
 		bits += box->Front * slice + box->Top * row_pitch + box->Left * (row_pitch / level_dimension(description.width, level));
 	locked->RowPitch = (INT)row_pitch;
@@ -545,27 +553,27 @@ void WINAPI D3DVertexBuffer_Lock(D3DVertexBuffer *buffer, UINT offset, UINT size
 		vertex_buffer_rename(buffer);
 	lock_wait(buffer, flags);
 #else
+	/* (whatever the flags say: the decals' vertices are written under
+	D3DLOCK_READONLY) */
 	(void)flags;
 #endif
 	*data = buffer->Data ? (BYTE *)resource_data(buffer->Data) + offset : NULL;
-#ifdef HALO_SWITCH
-	/* as lock_level: the vertex mirror (d3d8_gl.c) cannot see the write
-	coming, so the lock says it (the detail objects - grass - rebuild their
-	vertices in a locked buffer every frame). Size 0 is the whole buffer. */
 	if (*data)
 	{
+#ifdef HALO_SWITCH
+		/* as lock_level: the vertex mirror (d3d8_gl.c) cannot see the write
+		coming, so the lock says it (the detail objects - grass - rebuild their
+		vertices in a locked buffer every frame). Size 0 is the whole buffer. */
 		if (!size)
 		{
 			unsigned long length = platform_contiguous_block_size(resource_data(buffer->Data));
 
 			size = length > offset ? (UINT)(length - offset) : 0;
 		}
+#endif
 		if (size)
 			memory_watch_prepare_write(*data, size);
 	}
-#else
-	(void)size;
-#endif
 }
 
 HRESULT WINAPI D3DDevice_CreateIndexBuffer(UINT length, DWORD usage, D3DFORMAT format, D3DPOOL pool, D3DIndexBuffer **result)
@@ -633,15 +641,18 @@ void WINAPI D3DPalette_Lock(D3DPalette *palette, D3DCOLOR **colors, DWORD flags)
 	(void)flags;
 #endif
 	*colors = (D3DCOLOR *)resource_data(palette->Data);
-#ifdef HALO_SWITCH
-	/* as lock_level */
 	if (*colors)
 	{
-		unsigned long length = platform_contiguous_block_size(*colors);
+#ifdef HALO_SWITCH
+		unsigned long length;
 
+		/* as lock_level */
+		length = platform_contiguous_block_size(*colors);
 		memory_watch_prepare_write(*colors, length ? length : 256 * sizeof(D3DCOLOR));
-	}
+#else
+		memory_watch_prepare_write(*colors, 256 * sizeof(D3DCOLOR));
 #endif
+	}
 }
 
 /* ---------- D3DX */
