@@ -4659,11 +4659,12 @@ void network_game_reset_to_pregame_ui(
 	{
 		/* port: the Xbox's split-screen postgame screens are not in a game
 		map, and the PC menus are what this build shows. The machine is the
-		host, so it gets the host's lobby. If that screen is not there, the
-		main menu: staying in the match with no screen cannot be left. */
-		char const *widget_name = network_game_is_quickstart_local() ?
-			pc_menus_screen("ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen") :
-			pc_menus_screen("ui\\shell\\main_menu\\multiplayer_type_select\\connected\\connected_map_select_postgame_wrapper");
+		host, so it gets the lobby. That screen's created event lets the
+		countdown run; the map select screen does not, so a match opened
+		there never starts. If the lobby is not there, the main menu:
+		staying in the match with no screen cannot be left. */
+		char const *widget_name = pc_menus_screen(
+			"ui\\shell\\main_menu\\multiplayer_type_select\\connected\\pregame\\connected_pregame_screen");
 
 		if (global_network_game_server_get())
 			network_game_server_pause_countdown(global_network_game_server_get(), TRUE);

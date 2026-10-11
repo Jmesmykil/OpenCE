@@ -2250,12 +2250,19 @@ static void draw_write(D3DPRIMITIVETYPE type, unsigned long count, unsigned long
 
 	for (stream = 0; stream < DK_STREAM_COUNT; stream++)
 		streams += (format_told.stream_mask >> stream) & 1;
-	command = stream_command(DK_COMMAND_DRAW, sizeof(*command) + streams * 2 * sizeof(uint32_t));
+	/* the indices are copied into the command: the game keeps one dynamic
+	index buffer and fills it again for the next split-screen window before
+	the host runs this frame, so a later read of the buffer is the other
+	window's triangles (the map, which is those indices into the static
+	world vertices) */
+	command = stream_command(DK_COMMAND_DRAW, sizeof(*command) + streams * 2 * sizeof(uint32_t) +
+		(indices ? count * sizeof(WORD) : 0));
 	command->primitive = primitive_of(type);
 	command->count = (uint32_t)count;
-	command->index_address = (uint32_t)(uintptr_t)indices;
+	command->index_address = 0;
 	command->vertex_offset = (int32_t)vertex_offset;
 	command->inline_bytes = 0;
+	command->index_inline = 0;
 	command->stream_count = (uint32_t)streams;
 	for (stream = 0; stream < DK_STREAM_COUNT; stream++)
 	{
@@ -2267,6 +2274,11 @@ static void draw_write(D3DPRIMITIVETYPE type, unsigned long count, unsigned long
 			(uint32_t)(first * stride);
 		command->streams[slot][1] = (uint32_t)(stride ? stride * vertex_count : STRIDELESS_STREAM_BYTES);
 		slot++;
+	}
+	if (indices)
+	{
+		memcpy(&command->streams[slot], indices, count * sizeof(WORD));
+		command->index_inline = (uint32_t)(count * sizeof(WORD));
 	}
 	/* (after the command: writing it may have handed the stream over, and the
 	draw is in the submission it is written to) */
@@ -2373,6 +2385,7 @@ void WINAPI D3DDevice_End(void)
 	command->index_address = 0;
 	command->vertex_offset = 0;
 	command->inline_bytes = (uint32_t)(count * stride);
+	command->index_inline = 0;
 	command->stream_count = 1;
 	command->streams[0][0] = 0;
 	command->streams[0][1] = (uint32_t)(count * stride);

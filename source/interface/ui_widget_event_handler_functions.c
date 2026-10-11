@@ -912,6 +912,7 @@ symbols in this file:
 #include "bungie_net/network/transport.h"
 #include "bungie_net/network/transport_endpoint_winsock.h"
 #include "cseries/errors.h"
+#include "game/game.h"
 #include "game/game_engine.h"
 #include "game/players.h"
 #include "interface/marketing_and_strategic_business_development.h"
@@ -2441,10 +2442,12 @@ static boolean network_game_remove_local_player(
 		return TRUE;
 	}
 	/* port: a split-screen game on this machine alone has no one else in it.
-	LEAVE GAME leaves the match for every local player and returns to the
-	main menu. One player's quit would leave the others in a match that
-	cannot be left. */
-	if (network_game_is_splitscreen_local())
+	LEAVE GAME, once the match is going, leaves it for every local player
+	and returns to the main menu. One player's quit would leave the others
+	in a match that cannot be left. Not in the lobby: that leave is another
+	function, and ending the session here would throw a game away as it is
+	created. */
+	if (network_game_is_splitscreen_local() && game_in_progress())
 	{
 		short controller_index;
 
@@ -2904,9 +2907,16 @@ static boolean network_game_start_faster(
 	boolean *widget_deleted)
 {
 	void *client = global_network_game_client_get();
+	void *server = global_network_game_server_get();
 	short machine_index;
 	long player_index;
 
+	/* port: the second player's profile screen pauses the countdown, and
+	coming back to the lobby does not run its "net server allow start".
+	While the countdown is paused this request is ignored, so a split-screen
+	game never leaves the lobby. */
+	if (server)
+		network_game_server_pause_countdown(server, FALSE);
 	if (client)
 	{
 		struct network_game *game = network_game_client_get_game(client);

@@ -2691,7 +2691,16 @@ static void draw(const struct dk_command_draw *command)
 		extents[binding].size = sizeof(dk.format.constants);
 		binding++;
 	}
-	if (command->index_address)
+	if (command->index_inline)
+	{
+		index_gpu = upload_copy(inline_data + command->inline_bytes, command->index_inline);
+		if (!index_gpu)
+		{
+			draw_problem("the indices could not be copied");
+			return;
+		}
+	}
+	else if (command->index_address)
 	{
 		index_gpu = range_read((const void *)(uintptr_t)command->index_address, command->count * sizeof(uint16_t));
 		if (!index_gpu)

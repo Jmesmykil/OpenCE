@@ -463,7 +463,9 @@ each stream in the format's stream_mask, lowest first: the vertices the draw
 reads, from the first one it reads (the host reads them where they are,
 cleaning the CPU's cache, or copies them if they are not in one chunk of the
 window). If inline_bytes is not 0 the draw's one stream, immediate mode's, is
-not at an address but follows the pairs, in the command itself. */
+not at an address but follows the pairs, in the command itself. If
+index_inline is not 0, that many bytes of 16-bit indices follow the streams
+and those inline vertices. */
 struct dk_command_draw
 {
 	struct dk_command_header header;
@@ -471,12 +473,18 @@ struct dk_command_draw
 	uint32_t primitive;
 	/* vertices, or indices */
 	uint32_t count;
-	/* 0: not indexed. Else the guest address of the draw's count 16-bit
+	/* 0: not indexed, or the indices are copied into the command
+	(index_inline). Else the guest address of the draw's count 16-bit
 	indices, and the number added to the vertex each names (the streams start
 	at the lowest vertex the draw reads) */
 	uint32_t index_address;
 	int32_t vertex_offset;
 	uint32_t inline_bytes;
+	/* 16-bit indices copied after the streams and any inline vertices. The
+	game's one dynamic index buffer is rewritten for each split-screen
+	window before the GPU reads the frame, so a draw keeps the indices it
+	was given. 0: use index_address, or the draw is not indexed. */
+	uint32_t index_inline;
 	uint32_t stream_count;
 	uint32_t streams[][2];
 };

@@ -1240,6 +1240,7 @@ def _lobby() -> list:
                                                        ("flags", "pass_unhandled_to_focused_child"),
                                                        ("bitmap", "bitmaps/gradient")],
                      ['<on event="created" run="net server defer start"/>',
+                      '<on event="deleted" run="net server allow start"/>',
                       '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
                       f'<child widget="{base}/player_profile_list"/>',
                       f'<child widget="{base}/header_add_player"/>',
