@@ -64,6 +64,9 @@ menus (source/render/render.c): the window's bounds on the screen */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
+/* TRUE when B steps out of a custom-map folder or the Map screen's
+difficulties and the screen stays (port/linux/game/menu_functions.c) */
+unsigned char menu_port_back(void *widget);
 /* the Switch GPU, waited on before a map's memory goes
 (port/switch/guest/d3d8_dk.c) */
 #ifdef HALO_SWITCH

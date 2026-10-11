@@ -7930,9 +7930,15 @@ static void widget_instance_process_one_event_recursive(
 			}
 			if (!handled_by_event_handler)
 			{
-				widget_instance_go_back_to_previous(widget);
+				/* port: a custom-map folder, or this Map screen's
+				difficulty list, steps back and the screen stays
+				(menu_functions.c) */
+				if (!menu_port_back(widget))
+				{
+					widget_instance_go_back_to_previous(widget);
+					widget_deleted = TRUE;
+				}
 				audio_feedback = _ui_audio_feedback_back;
-				widget_deleted = TRUE;
 				event_handled = TRUE;
 			}
 		}

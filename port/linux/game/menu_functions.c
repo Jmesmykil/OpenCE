@@ -1071,14 +1071,211 @@ static void custom_map_text(boolean campaign, short map, wchar_t *text)
 	text[ROW_TEXT_LENGTH - 1] = 0;
 }
 
-static void custom_campaign_map_text(short map, wchar_t *text)
+/* one level of custom_maps: the top is loose maps and folder names, and a
+folder's rows are the maps in it. Rebuilt when the kind or folder changes. */
+struct map_browse_entry
 {
-	custom_map_text(TRUE, map, text);
+	boolean folder;
+	/* the map's index in custom_edition_maps_count's list; a folder's is
+	one map in that folder, so its name can be read */
+	short flat;
+};
+
+static struct map_browse_entry map_browse_entries[CUSTOM_EDITION_MAPS_MAXIMUM];
+static short map_browse_count_cache;
+static boolean map_browse_campaign_cache;
+static char map_browse_category_cache[CUSTOM_EDITION_MAP_CATEGORY_LENGTH];
+static boolean map_browse_valid;
+static boolean map_browse_sorting_campaign;
+
+static void map_browse_forget(void)
+{
+	map_browse_valid = FALSE;
 }
 
-static void custom_multiplayer_map_text(short map, wchar_t *text)
+static void map_browse_entry_text(boolean campaign, struct map_browse_entry const *entry, wchar_t *text)
 {
-	custom_map_text(FALSE, map, text);
+	short index;
+
+	if (entry->folder)
+	{
+		char const *name = custom_edition_maps_category(campaign, entry->flat);
+
+		if (!name)
+			name = "";
+		for (index = 0; name[index] && index < ROW_TEXT_LENGTH - 1; index++)
+			text[index] = (wchar_t)(unsigned char)name[index];
+		text[index] = 0;
+		return;
+	}
+	custom_map_text(campaign, entry->flat, text);
+}
+
+static int map_browse_compare(void const *left, void const *right)
+{
+	wchar_t left_name[ROW_TEXT_LENGTH];
+	wchar_t right_name[ROW_TEXT_LENGTH];
+
+	map_browse_entry_text(map_browse_sorting_campaign, left, left_name);
+	map_browse_entry_text(map_browse_sorting_campaign, right, right_name);
+
+	return wcsicmp(left_name, right_name);
+}
+
+/* the rows of `category` (empty: the maps folder's loose maps and its
+folders). Inside a folder the maps are already sorted by name. */
+static void map_browse_build(boolean campaign, char const *category)
+{
+	short total;
+	short index;
+	short count;
+	char const *open = category ? category : "";
+
+	if (map_browse_valid && map_browse_campaign_cache == campaign &&
+		!csstrcasecmp(map_browse_category_cache, open))
+	{
+		return;
+	}
+	csstrncpy(map_browse_category_cache, open, sizeof(map_browse_category_cache) - 1);
+	map_browse_category_cache[sizeof(map_browse_category_cache) - 1] = 0;
+	map_browse_campaign_cache = campaign;
+	map_browse_valid = TRUE;
+	total = custom_edition_maps_count(campaign);
+	count = 0;
+	if (open[0])
+	{
+		for (index = 0; index < total && count < CUSTOM_EDITION_MAPS_MAXIMUM; index++)
+		{
+			char const *map_category = custom_edition_maps_category(campaign, index);
+
+			if (map_category && !csstrcasecmp(map_category, open))
+			{
+				map_browse_entries[count].folder = FALSE;
+				map_browse_entries[count].flat = index;
+				count++;
+			}
+		}
+	}
+	else
+	{
+		for (index = 0; index < total && count < CUSTOM_EDITION_MAPS_MAXIMUM; index++)
+		{
+			char const *map_category = custom_edition_maps_category(campaign, index);
+			short have;
+
+			if (!map_category || !map_category[0])
+			{
+				map_browse_entries[count].folder = FALSE;
+				map_browse_entries[count].flat = index;
+				count++;
+				continue;
+			}
+			for (have = 0; have < count; have++)
+			{
+				char const *have_category;
+
+				if (!map_browse_entries[have].folder)
+					continue;
+				have_category = custom_edition_maps_category(campaign, map_browse_entries[have].flat);
+				if (have_category && !csstrcasecmp(have_category, map_category))
+					break;
+			}
+			if (have == count)
+			{
+				map_browse_entries[count].folder = TRUE;
+				map_browse_entries[count].flat = index;
+				count++;
+			}
+		}
+		map_browse_sorting_campaign = campaign;
+		if (count > 1)
+			qsort(map_browse_entries, (size_t)count, sizeof(map_browse_entries[0]), map_browse_compare);
+	}
+	map_browse_count_cache = count;
+}
+
+static short map_browse_count(boolean campaign, char const *category)
+{
+	map_browse_build(campaign, category);
+
+	return map_browse_count_cache;
+}
+
+static boolean map_browse_folder(boolean campaign, char const *category, short entry)
+{
+	map_browse_build(campaign, category);
+	if (entry < 0 || entry >= map_browse_count_cache)
+		return FALSE;
+
+	return map_browse_entries[entry].folder;
+}
+
+/* the map's index, or NONE when the row is a folder or past the list */
+static short map_browse_flat(boolean campaign, char const *category, short entry)
+{
+	map_browse_build(campaign, category);
+	if (entry < 0 || entry >= map_browse_count_cache || map_browse_entries[entry].folder)
+		return NONE;
+
+	return map_browse_entries[entry].flat;
+}
+
+static char const *map_browse_folder_name(boolean campaign, char const *category, short entry)
+{
+	char const *name;
+
+	map_browse_build(campaign, category);
+	if (entry < 0 || entry >= map_browse_count_cache || !map_browse_entries[entry].folder)
+		return "";
+	name = custom_edition_maps_category(campaign, map_browse_entries[entry].flat);
+
+	return name ? name : "";
+}
+
+/* the top list's row for the folder `name`, or NONE */
+static short map_browse_find_folder(boolean campaign, char const *name)
+{
+	short entry;
+
+	map_browse_build(campaign, "");
+	for (entry = 0; entry < map_browse_count_cache; entry++)
+	{
+		char const *folder;
+
+		if (!map_browse_entries[entry].folder)
+			continue;
+		folder = custom_edition_maps_category(campaign, map_browse_entries[entry].flat);
+		if (folder && name && !csstrcasecmp(folder, name))
+			return entry;
+	}
+
+	return NONE;
+}
+
+/* the row of the map `flat` in `category`, or NONE */
+static short map_browse_find(boolean campaign, char const *category, short flat)
+{
+	short entry;
+
+	map_browse_build(campaign, category);
+	for (entry = 0; entry < map_browse_count_cache; entry++)
+	{
+		if (!map_browse_entries[entry].folder && map_browse_entries[entry].flat == flat)
+			return entry;
+	}
+
+	return NONE;
+}
+
+static void map_browse_text(boolean campaign, char const *category, short entry, wchar_t *text)
+{
+	map_browse_build(campaign, category);
+	if (entry < 0 || entry >= map_browse_count_cache)
+	{
+		text[0] = 0;
+		return;
+	}
+	map_browse_entry_text(campaign, &map_browse_entries[entry], text);
 }
 
 /* the description's map (each list's has both kinds' widgets): a campaign
@@ -1115,7 +1312,8 @@ static void map_description_show(struct widget_instance *description, short leve
 MULTIPLAYER's maps, played alone to walk around (no game engine: a campaign
 game on the map); CUSTOM SINGLEPLAYER's maps played as the campaign's levels
 are, at the difficulty chosen next, and CUSTOM MULTIPLAYER's walked around
-as MULTIPLAYER's are */
+as MULTIPLAYER's are. A custom folder's name is a row; choosing it lists
+the maps in that folder (B returns here). */
 static struct
 {
 	short kind;
@@ -1123,10 +1321,15 @@ static struct
 	/* the multiplayer maps (ui_widget_port_multiplayer_maps) */
 	char const *const *map_names;
 	short map_count;
+	/* the custom folder open, or empty at the top; category_entry is that
+	folder's row, focused on the way out */
+	char category[CUSTOM_EDITION_MAP_CATEGORY_LENGTH];
+	short category_entry;
 } level_list;
 
-/* a map list's entries of a kind (the Map screen's difficulties aside) */
-static short map_kind_count(short kind, short multiplayer_map_count)
+/* a map list's entries of a kind (the Map screen's difficulties aside).
+`category` is the custom folder open, or empty at the top. */
+static short map_kind_count(short kind, short multiplayer_map_count, char const *category)
 {
 	switch (kind)
 	{
@@ -1135,9 +1338,9 @@ static short map_kind_count(short kind, short multiplayer_map_count)
 	case MAP_KIND_MULTIPLAYER:
 		return xbox_multiplayer_map_count(multiplayer_map_count);
 	case MAP_KIND_CUSTOM_SINGLEPLAYER:
-		return custom_edition_maps_count(TRUE);
+		return map_browse_count(TRUE, category);
 	default:
-		return custom_edition_maps_count(FALSE);
+		return map_browse_count(FALSE, category);
 	}
 }
 
@@ -1178,7 +1381,10 @@ static boolean level_list_initialize(struct widget_instance *list, short control
 		level = 0;
 	campaign.shown_level = level;
 	level_list.map_count = ui_widget_port_multiplayer_maps(&level_list.map_names, &last_used);
+	map_browse_forget();
 	level_list.kind = MAP_KIND_SINGLEPLAYER;
+	level_list.category[0] = 0;
+	level_list.category_entry = 0;
 	level_list.chosen = level;
 	level_list.first = map_kind_first(level, NUMBER_OF_SINGLE_PLAYER_LEVELS);
 	map_kind_set(list, level_list.kind);
@@ -1191,6 +1397,48 @@ static void level_row_text(short level, wchar_t *text)
 	string_get("pc\\main_menu\\map_list", campaign.levels[level].available ? level : LEVEL_UNAVAILABLE, text);
 }
 
+static void level_list_custom_text(short entry, wchar_t *text)
+{
+	map_browse_text(level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER, level_list.category, entry, text);
+}
+
+/* choosing a folder lists its maps; B (level_folder_back) returns */
+static void level_folder_open(struct widget_instance *list, short entry)
+{
+	boolean campaign = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	char const *name = map_browse_folder_name(campaign, level_list.category, entry);
+
+	level_list.category_entry = entry;
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	csstrncpy(level_list.category, name, sizeof(level_list.category) - 1);
+	level_list.category[sizeof(level_list.category) - 1] = 0;
+	map_browse_forget();
+	level_list.chosen = 0;
+	level_list.first = 0;
+	map_kind_focus(list, 0, 0);
+}
+
+static boolean level_folder_back(struct widget_instance *list)
+{
+	short count;
+	short entry;
+
+	if (!level_list.category[0] ||
+		(level_list.kind != MAP_KIND_CUSTOM_SINGLEPLAYER && level_list.kind != MAP_KIND_CUSTOM_MULTIPLAYER))
+	{
+		return FALSE;
+	}
+	entry = level_list.category_entry;
+	level_list.category[0] = 0;
+	map_browse_forget();
+	count = map_kind_count(level_list.kind, level_list.map_count, "");
+	level_list.chosen = (short)PIN(entry, 0, MAX(count - 1, 0));
+	level_list.first = map_kind_first(level_list.chosen, count);
+	map_kind_focus(list, level_list.first, level_list.chosen);
+
+	return TRUE;
+}
+
 /* "solo map list update" */
 static void level_list_update(struct widget_instance *list)
 {
@@ -1200,22 +1448,37 @@ static void level_list_update(struct widget_instance *list)
 	if (kind != level_list.kind)
 	{
 		level_list.kind = kind;
+		level_list.category[0] = 0;
 		level_list.first = level_list.chosen = 0;
 	}
-	count = map_kind_count(kind, level_list.map_count);
+	count = map_kind_count(kind, level_list.map_count, level_list.category);
 	entry = map_kind_rows_update(list, &level_list.first, count,
 		kind == MAP_KIND_SINGLEPLAYER ? level_row_text :
-		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
-		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
+		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text : level_list_custom_text);
 	if (entry != NONE)
 		level_list.chosen = entry;
 	if (kind != MAP_KIND_SINGLEPLAYER)
 	{
-		map_description_show(description, NONE,
-			level_list.chosen < count ? map_kind_display_index(kind, level_list.chosen) : NONE);
+		short display = NONE;
+
+		if (kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER)
+		{
+			short flat = map_browse_flat(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, level_list.category,
+				level_list.chosen);
+
+			if (flat != NONE)
+				display = custom_edition_maps_display_index_of(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, flat);
+		}
+		else if (level_list.chosen < count)
+		{
+			display = map_kind_display_index(kind, level_list.chosen);
+		}
+		visible_set(named(description, "replay_level_right_item", 0), display != NONE);
+		map_description_show(description, NONE, display);
 		profile_name_show(description);
 		return;
 	}
+	visible_set(named(description, "replay_level_right_item", 0), TRUE);
 	map_description_show(description, 0, NONE);
 	campaign.shown_level = level_list.chosen;
 	level = campaign.shown_level;
@@ -1228,19 +1491,30 @@ static void level_list_update(struct widget_instance *list)
 
 /* "solo level set map": the level shown, if reached, or the Custom Edition
 campaign map, for the difficulty menu; or the multiplayer map, played at
-once (FALSE: no difficulty menu) */
-static boolean level_choose(short controller)
+once (FALSE: no difficulty menu). A custom folder opens and stays here. */
+static boolean level_choose(struct widget_instance *list, short controller)
 {
 	short level = campaign.shown_level;
-	short count = map_kind_count(level_list.kind, level_list.map_count);
+	short count = map_kind_count(level_list.kind, level_list.map_count, level_list.category);
+	boolean custom = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER ||
+		level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER;
+	boolean custom_campaign = level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	short flat = NONE;
 
+	if (custom)
+		flat = map_browse_flat(custom_campaign, level_list.category, level_list.chosen);
 	if (level_list.kind != MAP_KIND_SINGLEPLAYER && (level_list.chosen < 0 || level_list.chosen >= count))
 		return campaign_fail();
+	if (custom && map_browse_folder(custom_campaign, level_list.category, level_list.chosen))
+	{
+		level_folder_open(list, level_list.chosen);
+		return FALSE;
+	}
 	if (level_list.kind == MAP_KIND_MULTIPLAYER || level_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
 	{
 		struct player_profile profile;
 		char const *map_name = level_list.kind == MAP_KIND_MULTIPLAYER ? level_list.map_names[level_list.chosen] :
-			custom_map_level_name(level_list.kind, level_list.chosen);
+			custom_map_level_name(level_list.kind, flat);
 
 		if (!map_name || !campaign_profile(controller, &profile))
 			return campaign_fail();
@@ -1249,7 +1523,7 @@ static boolean level_choose(short controller)
 	}
 	if (level_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER)
 	{
-		char const *map_name = custom_map_level_name(level_list.kind, level_list.chosen);
+		char const *map_name = custom_map_level_name(level_list.kind, flat);
 
 		if (!map_name)
 			return campaign_fail();
@@ -2555,6 +2829,10 @@ static struct
 	/* the level or Custom Edition campaign map (the kind's entry) whose
 	difficulties are listed */
 	short level;
+	/* the custom folder open, or empty at the top; category_entry is that
+	folder's row, focused on the way out */
+	char category[CUSTOM_EDITION_MAP_CATEGORY_LENGTH];
+	short category_entry;
 } map_list;
 
 #define SERVER_SETUP_NAME "pc\\main_menu\\multiplayer_type_select\\server_settings\\server_settings_screen"
@@ -2563,7 +2841,7 @@ static short map_step_count(void)
 {
 	if (map_list.step == MAP_STEP_DIFFICULTIES)
 		return NUMBER_OF_GAME_DIFFICULTY_LEVELS;
-	return map_kind_count(map_list.kind, map_list.map_count);
+	return map_kind_count(map_list.kind, map_list.map_count, map_list.category);
 }
 
 /* opens a step at the entry given */
@@ -2588,6 +2866,54 @@ static void map_difficulty_text(short difficulty, wchar_t *text)
 	string_get("pc\\main_menu\\player_profiles_select\\difficulty_names", difficulty, text);
 }
 
+static void map_list_custom_text(short entry, wchar_t *text)
+{
+	map_browse_text(map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER, map_list.category, entry, text);
+}
+
+static boolean map_list_custom(void)
+{
+	return map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER || map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER;
+}
+
+/* choosing a folder lists its maps */
+static void map_folder_open(struct widget_instance *list, short entry)
+{
+	boolean campaign = map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	char const *name = map_browse_folder_name(campaign, map_list.category, entry);
+
+	map_list.category_entry = entry;
+	ui_play_audio_feedback_sound(SOUND_FORWARD);
+	csstrncpy(map_list.category, name, sizeof(map_list.category) - 1);
+	map_list.category[sizeof(map_list.category) - 1] = 0;
+	map_browse_forget();
+	map_list.step = MAP_STEP_MAPS;
+	map_list.chosen = 0;
+	map_list.first = 0;
+	map_kind_focus(list, 0, 0);
+}
+
+/* difficulties, then an open folder, back to the list they were chosen
+from. FALSE when Back should leave the screen. */
+static boolean map_folder_back(struct widget_instance *list)
+{
+	short entry;
+
+	if (map_list.step == MAP_STEP_DIFFICULTIES)
+	{
+		map_step_open(list, MAP_STEP_MAPS, map_list.level);
+		return TRUE;
+	}
+	if (!map_list.category[0] || !map_list_custom())
+		return FALSE;
+	entry = map_list.category_entry;
+	map_list.category[0] = 0;
+	map_browse_forget();
+	map_step_open(list, MAP_STEP_MAPS, entry);
+
+	return TRUE;
+}
+
 /* "mp level list initialize": on the multiplayer map used last */
 static boolean map_list_initialize(struct widget_instance *list)
 {
@@ -2597,13 +2923,33 @@ static boolean map_list_initialize(struct widget_instance *list)
 	map_list.hosting = global_network_game_server_get() != NULL && !network_game_is_splitscreen_local();
 	/* (the maps folders looked for again as the list opens) */
 	custom_edition_maps_look_again();
+	map_browse_forget();
 	map_list.map_count = ui_widget_port_multiplayer_maps(&names, &last_used);
 	/* (a Custom Edition map's kind, when it was one) */
 	map_list.kind = MAP_KIND_MULTIPLAYER;
+	map_list.category[0] = 0;
+	map_list.category_entry = 0;
+	map_list.step = MAP_STEP_MAPS;
 	if (last_used >= xbox_multiplayer_map_count(map_list.map_count))
 	{
+		char const *category;
+		short flat;
+
 		map_list.kind = MAP_KIND_CUSTOM_MULTIPLAYER;
-		last_used -= xbox_multiplayer_map_count(map_list.map_count);
+		flat = (short)(last_used - xbox_multiplayer_map_count(map_list.map_count));
+		category = custom_edition_maps_category(FALSE, flat);
+		last_used = flat;
+		if (category && category[0])
+		{
+			short folder_row = map_browse_find_folder(FALSE, category);
+			short view;
+
+			csstrncpy(map_list.category, category, sizeof(map_list.category) - 1);
+			map_list.category[sizeof(map_list.category) - 1] = 0;
+			map_list.category_entry = folder_row == NONE ? 0 : folder_row;
+			view = map_browse_find(FALSE, map_list.category, flat);
+			last_used = view == NONE ? 0 : view;
+		}
 	}
 	map_kind_set(list, map_list.kind);
 	map_step_open(list, MAP_STEP_MAPS, last_used);
@@ -2617,33 +2963,45 @@ static void map_list_update(struct widget_instance *list)
 	struct widget_instance *description = list->parameters.list.extended_description;
 	short kind = map_kind_shown(list, map_list.hosting, map_list.kind), count, entry;
 	short shown;
+	short display = NONE;
+	boolean custom = kind == MAP_KIND_CUSTOM_SINGLEPLAYER || kind == MAP_KIND_CUSTOM_MULTIPLAYER;
 
 	if (kind != map_list.kind)
 	{
 		map_list.kind = kind;
 		map_list.step = MAP_STEP_MAPS;
+		map_list.category[0] = 0;
 		map_list.first = map_list.chosen = 0;
 	}
 	count = map_step_count();
 	entry = map_kind_rows_update(list, &map_list.first, count, map_list.step == MAP_STEP_DIFFICULTIES ?
 		map_difficulty_text : kind == MAP_KIND_SINGLEPLAYER ? map_level_text :
-		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text :
-		kind == MAP_KIND_CUSTOM_SINGLEPLAYER ? custom_campaign_map_text : custom_multiplayer_map_text);
+		kind == MAP_KIND_MULTIPLAYER ? multiplayer_map_text : map_list_custom_text);
 	if (entry != NONE)
 		map_list.chosen = entry;
-	visible_set(named(description, "mp_map_right_item", 0), map_list.chosen < count);
 	/* (the map whose difficulties are listed, else the one chosen) */
 	shown = map_list.step == MAP_STEP_DIFFICULTIES ? map_list.level : map_list.chosen;
 	if (kind == MAP_KIND_SINGLEPLAYER)
 	{
+		visible_set(named(description, "mp_map_right_item", 0), map_list.chosen < count);
 		map_description_show(description, shown, NONE);
 		level_description(description, "replay_level", shown, FALSE, NULL, NONE);
 	}
 	else
 	{
-		map_description_show(description, NONE,
-			map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count ? map_kind_display_index(kind, shown) :
-			NONE);
+		if (custom)
+		{
+			short flat = map_browse_flat(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, map_list.category, shown);
+
+			if (flat != NONE && (map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count))
+				display = custom_edition_maps_display_index_of(kind == MAP_KIND_CUSTOM_SINGLEPLAYER, flat);
+		}
+		else if (map_list.step == MAP_STEP_DIFFICULTIES || map_list.chosen < count)
+		{
+			display = map_kind_display_index(kind, shown);
+		}
+		visible_set(named(description, "mp_map_right_item", 0), display != NONE);
+		map_description_show(description, NONE, display);
 	}
 	profile_name_show(description);
 }
@@ -2654,13 +3012,24 @@ screen (the gametypes open on TRUE). */
 static boolean map_list_choose(struct widget_instance *list, boolean *widget_deleted)
 {
 	short chosen = map_list.chosen;
+	boolean custom_campaign = map_list.kind == MAP_KIND_CUSTOM_SINGLEPLAYER;
+	short flat = NONE;
 
 	if (chosen >= map_step_count())
 		return campaign_fail();
+	if (map_list.step == MAP_STEP_MAPS && map_list_custom() &&
+		map_browse_folder(custom_campaign, map_list.category, chosen))
+	{
+		map_folder_open(list, chosen);
+		return FALSE;
+	}
+	if (map_list_custom())
+		flat = map_browse_flat(custom_campaign, map_list.category,
+			map_list.step == MAP_STEP_DIFFICULTIES ? map_list.level : chosen);
 	if (map_list.step == MAP_STEP_DIFFICULTIES)
 	{
 		char const *map_name = map_list.kind == MAP_KIND_SINGLEPLAYER ? main_get_solo_level_name(map_list.level) :
-			custom_map_level_name(map_list.kind, map_list.level);
+			custom_map_level_name(map_list.kind, flat);
 
 		/* the co-op game set up, then Server Setup in the gametypes' place */
 		if (!ui_widget_port_cooperative_level_choose(map_name, chosen))
@@ -2672,7 +3041,7 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 	if (map_list.kind == MAP_KIND_MULTIPLAYER)
 		return ui_widget_port_multiplayer_map_choose(chosen);
 	if (map_list.kind == MAP_KIND_CUSTOM_MULTIPLAYER)
-		return ui_widget_port_multiplayer_map_choose((short)(xbox_multiplayer_map_count(map_list.map_count) + chosen));
+		return ui_widget_port_multiplayer_map_choose((short)(xbox_multiplayer_map_count(map_list.map_count) + flat));
 	ui_play_audio_feedback_sound(SOUND_FORWARD);
 	map_list.level = chosen;
 	map_step_open(list, MAP_STEP_DIFFICULTIES, (short)PIN(main_get_difficulty(), 0, NUMBER_OF_GAME_DIFFICULTY_LEVELS - 1));
@@ -2680,18 +3049,33 @@ static boolean map_list_choose(struct widget_instance *list, boolean *widget_del
 }
 
 /* "port map list back" (B on the list): from the difficulties back to the
-level, else out of the Map screen */
+level, from a folder back to the folders, else out of the Map screen */
 static boolean map_list_back(struct widget_instance *list, boolean *widget_deleted)
 {
 	ui_play_audio_feedback_sound(SOUND_BACK);
-	if (map_list.step == MAP_STEP_DIFFICULTIES)
-	{
-		map_step_open(list, MAP_STEP_MAPS, map_list.level);
+	if (map_folder_back(list))
 		return TRUE;
-	}
 	ui_widget_port_go_back(list);
 	*widget_deleted = TRUE;
 	return TRUE;
+}
+
+/* port: the screen around a custom map list has no B handler, so this runs
+before that screen closes (ui_widget.c). TRUE steps out of a folder, or the
+Map screen's difficulties, and the screen stays. */
+unsigned char menu_port_back(void *screen)
+{
+	struct widget_instance *widget = screen;
+	struct widget_instance *list;
+
+	list = named(widget, "mp_map_select_list_2", 0);
+	if (list)
+		return map_folder_back(list) ? 1 : 0;
+	list = named(widget, "solo_level_select_list", 0);
+	if (list)
+		return level_folder_back(list) ? 1 : 0;
+
+	return 0;
 }
 
 /* (the gametype editor's: Server Setup's copy of the game's gametype) */
@@ -5761,7 +6145,7 @@ boolean pc_menu_event_function_invoke(
 		}
 		else if (!strcmp(name, "solo level set map"))
 		{
-			return level_choose(controller);
+			return level_choose(widget, controller);
 		}
 		else if (!strcmp(name, "difficulty item select"))
 		{

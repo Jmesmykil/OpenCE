@@ -32,6 +32,7 @@ where its offset falls in their combined offset space.
 #include "tag_schema.h"
 
 #include <stdlib.h>
+#include <xtl.h>
 
 /* ---------- constants */
 
@@ -204,8 +205,50 @@ static boolean maps_folder_has(
 	return file_path_exists(path);
 }
 
+/* <folder>\<subfolder>\<name><extension>, the first subfolder that has it.
+One level only, the same order the menus scan (custom_edition_maps.c). */
+static boolean maps_subfolder_has(
+	char const *folder,
+	char const *name,
+	char const *extension,
+	char *path)
+{
+	char pattern[MAP_PATH_SIZE];
+	WIN32_FIND_DATAA data;
+	HANDLE find;
+
+	if (folder == maps_folder(1) && !custom_edition_install_present())
+		return FALSE;
+	if (strlen(folder) + 3 >= MAP_PATH_SIZE)
+		return FALSE;
+	sprintf(pattern, "%s*.*", folder);
+	find = FindFirstFileA(pattern, &data);
+	if (find == INVALID_HANDLE_VALUE)
+		return FALSE;
+	do
+	{
+		char nested[MAP_PATH_SIZE];
+
+		if (!(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+			continue;
+		if (!strcmp(data.cFileName, ".") || !strcmp(data.cFileName, ".."))
+			continue;
+		if (strlen(folder) + strlen(data.cFileName) + 1 + strlen(name) + strlen(extension) >= MAP_PATH_SIZE)
+			continue;
+		sprintf(nested, "%s%s\\", folder, data.cFileName);
+		if (maps_folder_has(nested, name, extension, path))
+		{
+			CloseHandle(find);
+			return TRUE;
+		}
+	} while (FindNextFileA(find, &data));
+	CloseHandle(find);
+
+	return FALSE;
+}
+
 /* the file that holds the map `map_name` names (a level name or a file
-name): <custom maps folder>\<name>.map */
+name): <custom maps folder>\<name>.map, or one subfolder of it */
 static boolean custom_edition_map_path(
 	char const *map_name,
 	char *path)
@@ -215,7 +258,8 @@ static boolean custom_edition_map_path(
 
 	for (folder = 0; folder < NUMBER_OF_MAPS_FOLDERS; folder++)
 	{
-		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path))
+		if (maps_folder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path) ||
+			maps_subfolder_has(maps_folder(folder), name, MAP_FILE_EXTENSION, path))
 		{
 			return TRUE;
 		}
