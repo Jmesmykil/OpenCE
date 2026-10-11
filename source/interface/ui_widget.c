@@ -1349,6 +1349,9 @@ static void widget_instance_set_focused_child_by_index(
 	short child_index);
 static void widget_instance_go_back_to_previous(
 	struct widget_instance *widget);
+/* port: Back that closes the last screen (ui_widget.c) */
+static void widget_back_left_nothing(
+	short widget_stack);
 static __inline struct widget_instance *widget_instance_find_by_tag_index(
 	long tag_index);
 static void widget_instance_reload_recursive(
@@ -3220,6 +3223,34 @@ static void widget_instance_set_focused_child_by_index(
 	return;
 }
 
+/* port: the postgame map select is opened with no screen behind it. Its
+wrapper has no B handler, so B is Back, which deletes that screen and
+leaves the menu background. The carnage report's other button leaves the
+match for the main menu. */
+static void widget_back_left_nothing(
+	short widget_stack)
+{
+	long widget_index;
+
+	if (widget_stack < 0 || widget_stack >= MAXIMUM_NUMBER_OF_LOCAL_PLAYERS)
+		return;
+	if (widget_globals.widget_stack[widget_stack])
+		return;
+	for (widget_index = 0;
+		widget_index < MAXIMUM_NUMBER_OF_LOCAL_PLAYERS;
+		widget_index++)
+	{
+		if (widget_globals.active_widgets[widget_index])
+			return;
+	}
+	if (global_network_game_server_get() || global_network_game_client_get())
+		network_game_abort();
+	else
+		main_goto_main_menu();
+
+	return;
+}
+
 static void widget_instance_go_back_to_previous(
 	struct widget_instance *widget)
 {
@@ -3258,6 +3289,7 @@ static void widget_instance_go_back_to_previous(
 				data.focused_child_index);
 		}
 	}
+	widget_back_left_nothing(widget_stack);
 
 	return;
 }
@@ -8726,6 +8758,7 @@ void process_ui_widgets(
 					}
 				}
 			}
+			widget_back_left_nothing((short)widget_index);
 		}
 	}
 	if (widgets_processed)
