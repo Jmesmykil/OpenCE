@@ -35,12 +35,8 @@ enum tag_field_type
 
 /* ---------- macros */
 
-#ifdef HALO_ANDROID
 /* port: an element in range found inline (tag_block_get_element_fast, below) */
 #define TAG_BLOCK_GET_ELEMENT(block_address, index, type) ((type *)tag_block_get_element_fast((block_address), (index), sizeof(type)))
-#else
-#define TAG_BLOCK_GET_ELEMENT(block_address, index, type) ((type *)tag_block_get_element_with_size((block_address), (index), sizeof(type)))
-#endif
 
 /* ---------- structures */
 
@@ -161,23 +157,33 @@ static inline void *tag_block_address_inline(struct tag_block const *block)
 
 #define TAG_DATA_ADDRESS(data) tag_data_address_inline(&(data))
 #define TAG_BLOCK_ADDRESS(block) tag_block_address_inline(&(block))
-
-/* TAG_BLOCK_GET_ELEMENT's element where it is in range, inline;
-tag_block_get_element_with_size, which asserts and reports, for anything
-else (5% of a phone's game thread was that call, from the BSP's tests) */
-static inline void *tag_block_get_element_fast(struct tag_block const *block, long index, long element_size)
-{
-	if (block && index >= 0 && index < block->count && block->address &&
-		(!block->definition || block->definition->element_size == element_size))
-	{
-		return (byte *)PORT_WINDOW_REBASE(block->address) + index * element_size;
-	}
-	return tag_block_get_element_with_size(block, index, element_size);
-}
 #else
 #define TAG_DATA_ADDRESS(data) ((data).address)
 #define TAG_BLOCK_ADDRESS(block) ((block).address)
 #endif
+
+/* port: tag_block_get_element_with_size without a call where all it checks
+holds (the game's most frequent call: the collision and visibility code takes
+a block element for each BSP node it passes), and that function where
+something does not, which notes and handles it; the element where the window
+is (__inline__: msvc_comdat.c makes __inline weak, which a static function
+cannot be) */
+static __inline__ void *tag_block_get_element_fast(
+	struct tag_block const *block,
+	long index,
+	long element_size)
+{
+	if (block && index >= 0 && index < block->count && block->address &&
+		(!block->definition || block->definition->element_size == element_size))
+	{
+#ifdef HALO_ANDROID
+		return (byte *)PORT_WINDOW_REBASE(block->address) + index * element_size;
+#else
+		return (char *)block->address + index * element_size;
+#endif
+	}
+	return tag_block_get_element_with_size(block, index, element_size);
+}
 
 /* the same, where the block is already a pointer: a macro that took the
 structure by value cannot be used on one */

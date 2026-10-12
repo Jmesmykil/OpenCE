@@ -759,6 +759,14 @@ int halo_ui_pointer_update(int menus_active, struct halo_ui_pointer *pointer)
 	return 0;
 }
 
+/* menu_files.c says when it deletes a menu picture's GL texture, for the
+OpenGL renderer's bindings (d3d8_gl.c); this renderer keeps images of its
+own and has none of those */
+void xgpu_gl_texture_deleted(unsigned int texture)
+{
+	(void)texture;
+}
+
 /* the scoreboard's: none, as on Android's OpenGL ES (d3d8_gl.c); a vote to
 kick starts from the console (votekick) */
 int halo_scoreboard_pointer_update(int offered, struct halo_ui_pointer *pointer)
