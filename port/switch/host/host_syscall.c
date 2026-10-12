@@ -33,6 +33,7 @@ same file, and any change to one is a change to both. */
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -502,6 +503,19 @@ int unlinkat(int directory, const char *path, int flags)
 		host_sd_unlock();
 		return result;
 	}
+}
+
+/* (map sharing names a map file for its hash: port/linux/game/map_share.c) */
+static int guest_renameat(int old_directory, const char *old_path, int new_directory, const char *new_path)
+{
+	int result;
+
+	if (old_directory >= 0 || new_directory >= 0)
+		return -EBADF;
+	host_sd_lock();
+	result = rename(old_path, new_path);
+	host_sd_unlock();
+	return result;
 }
 
 int mkdirat(int directory, const char *path, mode_t mode)
@@ -1649,6 +1663,8 @@ static long long host_syscall_inner(long long number, long long a, long long b, 
 		return result_of(faccessat((int)a, GUEST(const char *, b), (int)c, 0));
 	case SYS_unlinkat:
 		return result_of(unlinkat((int)a, GUEST(const char *, b), (int)c));
+	case SYS_renameat:
+		return result_of(guest_renameat((int)a, GUEST(const char *, b), (int)c, GUEST(const char *, d)));
 	case SYS_mkdirat:
 		return result_of(mkdirat((int)a, GUEST(const char *, b), (mode_t)c));
 	case SYS_fchmod:
