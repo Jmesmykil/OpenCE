@@ -4,7 +4,8 @@
 `ninja android_apk` makes an app from it:
 `port/android/app/build/outputs/apk/debug/app-debug.apk`.
 
-The game shows its graphics with OpenGL ES 3. It plays sound through SDL3
+The game shows its graphics with Vulkan (the default) or OpenGL ES 3
+(refer to "Graphics: OpenGL ES and Vulkan"). It plays sound through SDL3
 (AAudio). It accepts input from game controllers, for example a PlayStation
 5 DualSense on Bluetooth, and from the touchscreen (refer to "Controls").
 The app needs Android 9 (API 28) or later. It operates on 64-bit-only

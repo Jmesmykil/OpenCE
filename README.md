@@ -1,128 +1,224 @@
-# Halo: Combat Evolved for Linux, Windows, Android and the Nintendo Switch
+<div align="center">
 
-[![Join our Discord](https://invidget.switchblade.xyz/9gqcHyr5km)](https://discord.gg/9gqcHyr5km)
+# OpenCE Ports
 
-This project is a port of the Halo: Combat Evolved decompilation to Linux,
-Windows, Android and the Nintendo Switch. The decompilation is of the Xbox build 2342
-(`cachebeta.exe`, SHA-256
-`4cc87b45f721270392a96f1674ed2b5cd4a7bb4355faeab4531d1cf1884d9520`).
+**Halo: Combat Evolved on Android phones and handhelds and on the Nintendo Switch, built from the decompilation of the Xbox game.**
 
-<img width="1289" height="995" alt="The game on Linux" src="https://github.com/user-attachments/assets/0d3ad50f-f8b8-46cf-aef8-e3661da2a7d7" />
+[![Latest release](https://img.shields.io/github/v/release/thelinkin3000/halo-ce-universal?label=latest&color=2ea44f)](https://github.com/thelinkin3000/halo-ce-universal/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/thelinkin3000/halo-ce-universal/total?color=blue)](https://github.com/thelinkin3000/halo-ce-universal/releases)
+[![Android](https://img.shields.io/badge/Android-Vulkan%20%C2%B7%20Turnip%20%C2%B7%20OpenGL%20ES-3ddc84?logo=android&logoColor=white)](#android)
+[![Nintendo Switch](https://img.shields.io/badge/Switch-deko3d-e60012)](#nintendo-switch)
+[![License: CC0](https://img.shields.io/badge/license-CC0--1.0-lightgrey)](LICENSE.md)
+[![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/9gqcHyr5km)
 
-The port starts from the decompilation of [bnunu/halo-1](https://github.com/bnunu/halo-1).
-That project is a fork of [punpckhdq/halo](https://github.com/punpckhdq/halo).
+[**Download**](#download) ·
+[Install](#install) ·
+[Graphics](#graphics-vulkan-turnip-and-deko3d) ·
+[Multiplayer](#multiplayer) ·
+[Controls](#controls) ·
+[Report a problem](#reporting-a-problem) ·
+[Building](#building) ·
+[Discord](https://discord.gg/9gqcHyr5km)
+
+<!-- Videos and screenshots from a contributor go here: one large capture,
+then a row of three, each taken on a phone or on a Switch. -->
+
+</div>
+
+It is not an emulator. The game's own code, decompiled from the Xbox build
+2342, is compiled for the device's ARM processor. Its Direct3D 8 rendering
+is translated to **Vulkan** on Android and to **deko3d**, the Switch's own
+GPU interface, on the Switch.
+
+> [!IMPORTANT]
+> **No game data is included.** You need your own **Xbox** disc image of
+> Halo: Combat Evolved (`.iso` or `.xiso`, any region). The game unpacks
+> its maps from it on the first start.
+
+> [!WARNING]
+> **Official sources.** The only official downloads are the
+> [releases on this repository](https://github.com/thelinkin3000/halo-ce-universal/releases). Builds,
+> "updates" or donation requests offered anywhere else under this project's
+> name are not from us.
+
+## Contents
+
+- [What works](#what-works) · [Known issues](#known-issues)
+- [Download](#download) · [Install](#install): [Android](#android), [Nintendo Switch](#nintendo-switch), [updating](#updating)
+- [Graphics: Vulkan, Turnip and deko3d](#graphics-vulkan-turnip-and-deko3d)
+- [Multiplayer](#multiplayer) · [Controls](#controls)
+- [Reporting a problem](#reporting-a-problem)
+- [Building](#building) · [Credits](#credits)
+
+## What works
+
+| | |
+| --- | --- |
+| 🎮 **Campaign** | The whole campaign, with checkpoints, saves and cinematics. Xbox maps of every region; PAL maps are made to play as NTSC ones. |
+| 🖼️ **Vulkan on Android** | The default renderer. On Qualcomm Adreno GPUs the app can download and use **Turnip**, Mesa's open-source driver, in place of the phone's own. OpenGL ES 3 is still there as a fallback. |
+| 🟥 **deko3d on the Switch** | A renderer written for the console's GPU, docked at 1080p or handheld at 720p, switching on its own when you dock. |
+| 👥 **Split screen** | Up to four players on one device, with one controller each. |
+| 🌐 **Multiplayer** | System link on the local network and internet play through invite links and the server browser, with voice chat. |
+| 🗺️ **Custom maps** | Xbox maps and Halo PC / Custom Edition maps, downloaded from the host when you join without them. |
+| ✋ **Touch** | On Android: touch controls in game with swipe aiming, optional gyro aiming, a layout editor; taps work in every menu. |
+| 🔠 **High-res HUD and text** | The HUD, the menus' text and their titles redrawn at high resolution. |
+| 🔄 **Self-updating** | Both builds look for a newer release when they start and offer to install it. |
+
+### Known issues
+
+- Bink movies don't play: the game skips them.
+- **Android:** kernels with 16 KB memory pages (a developer option on
+  Android 15, and some newer phones) can't run the game: the Xbox memory
+  uses 4 KB pages. The app also needs Android 9 or later and a 64-bit
+  ARM CPU.
+- **Android, Vulkan:** the first time a scene shows, a few parts can be
+  missing for a moment while the phone compiles their shaders.
+- **Switch:** Custom Edition maps need a 512 MB memory window. Now and then
+  the console hands out only 256 MB; the main menu then says so, and
+  restarting the game usually fixes it.
+
+The current list is in the [issues](https://github.com/thelinkin3000/halo-ce-universal/issues).
 
 ## Download
 
-GitHub Actions builds the game for Android and the Switch for each commit
-(for Linux and Windows, see the upstream project,
-[OpenCE](https://github.com/OpenCommunityEdition/OpenCE)). These links
-download the builds of the latest release:
+Every build of `main` that passes is a release. These links always point to
+the latest one:
 
-| Platform | Release | Debug |
+| Platform | Play | Debug (for reports) |
 | --- | --- | --- |
 | Android | [halo-android-release.zip](https://github.com/thelinkin3000/halo-ce-universal/releases/latest/download/halo-android-release.zip) | [halo-android-debug.zip](https://github.com/thelinkin3000/halo-ce-universal/releases/latest/download/halo-android-debug.zip) |
 | Nintendo Switch | [halo-switch-release.zip](https://github.com/thelinkin3000/halo-ce-universal/releases/latest/download/halo-switch-release.zip) | [halo-switch-debug.zip](https://github.com/thelinkin3000/halo-ce-universal/releases/latest/download/halo-switch-debug.zip) |
 
 Use the release build to play. The debug build stops at the first failed
-assertion and writes it to the log. Use the debug build to find and report
-problems.
+assertion and writes it to the log, which makes it the one to use when
+you're chasing a problem. The [releases page](https://github.com/thelinkin3000/halo-ce-universal/releases)
+keeps the last five builds, if the latest one has a problem.
 
-The game updates itself. At start-up it looks for a newer release, and asks
-if you want to install it. Refer to "Updates" in
-[port/linux/README.md](port/linux/README.md#updates). The web site offers
-each new build when it is out.
+For Windows and Linux, see the upstream project,
+[OpenCE](https://github.com/OpenCommunityEdition/OpenCE).
 
-Each build of the `main` branch that passes on all four platforms is a new
-release. The [Releases](https://github.com/thelinkin3000/halo-ce-universal/releases)
-page keeps the last five releases. If the latest build has a problem, get
-an older build from that page.
+## Install
 
-## Game data
+### Android
 
-The port does not include the game data. Download an Xbox disc image
-(`.xiso` or `.iso`) of Halo: Combat Evolved. All versions of the game
-operate. The maps of the European (PAL) version were made for a slower
-console. The port changes them to play as the North American (NTSC) maps do,
-so players of the two versions can play together.
+1. Unzip the download and install the APK.
+2. Copy your Xbox disc image to the phone.
+3. Start the app. On the first start it asks for the disc image: pick it,
+   and it unpacks the maps (about 1.7 GB) into its own data folder.
 
-1. Start the game.
-2. At the first start, the game asks for the disc image. Select it.
-3. The game extracts the `maps/` folder. Then the game starts.
-
-On Linux and Windows, the game puts `maps/` next to the executable. On
-Android, copy the disc image to the phone first. The app puts `maps/` in its
-data folder. Refer to [port/android/README.md](port/android/README.md). On
-the web, the page copies `maps/` out of the disc image into the browser's
-storage for the site; nothing is uploaded. Refer to
-[port/web/README.md](port/web/README.md).
-
-On the Nintendo Switch there is no file browser to pick the image with, so put
-the disc image on the card yourself:
-
-```
-sdmc:/switch/halo/halo.iso
-```
-
-The game finds it there on the first run and unpacks `maps/` itself, which
-takes a few minutes and writes about 1.7 GB, so leave the card in and keep that
-much space free. The log says which file it is copying and how far it has got.
-If you would rather unpack it yourself, `maps/` still works: put it at
-`sdmc:/switch/halo/maps/` and the game uses it as it is. Refer to
-[port/switch/README.md](port/switch/README.md).
-
-## Platforms
-
-Each platform has its own instructions:
-
-| Platform | Instructions |
-| --- | --- |
-| Linux (32-bit x86 executable, OpenGL 4.5, SDL3) | [port/linux/README.md](port/linux/README.md) |
-| Windows (32-bit x86 executable, OpenGL 4.5, SDL3) | [port/windows/README.md](port/windows/README.md) |
-| Android (arm64 app, Vulkan or OpenGL ES 3, SDL3) | [port/android/README.md](port/android/README.md) |
-| Nintendo Switch (homebrew program, deko3d, SDL2) | [port/switch/README.md](port/switch/README.md) |
-
-The Linux README also gives the controls, the settings and the multiplayer
-functions. These are almost the same on all platforms.
-
-## Graphics backends
-
-On Android, the game can draw with Vulkan (the default) or with OpenGL ES.
-To change it, open **SETTINGS** from the main menu, choose a profile, and
-open **VIDEO SETUP**:
-
-- **GRAPHICS BACKEND:** `VULKAN` or `OPENGL`.
-- **VULKAN DRIVER** (only when the backend is `VULKAN`): `STOCK`, the
-  phone's own driver, or `TURNIP`, the open-source Mesa driver for
-  Qualcomm Adreno GPUs, which the app downloads.
-
-Select **OK**, then close the game and start it again: the backend and the
-driver change only when the game starts. The line below the version number
-in the main menu shows the backend and driver that run. For more, such as
-a driver archive of your own, refer to "Graphics: OpenGL ES and Vulkan" in
+The app needs Android 9 or later on 64-bit ARM. More, including where the
+data folder is and how to keep your saves across a reinstall, is in
 [port/android/README.md](port/android/README.md).
 
-The Switch draws with deko3d, the console's own graphics interface, and
-has no backend setting. Linux and Windows draw with OpenGL.
+### Nintendo Switch
+
+The Switch build is a homebrew program, for a console that runs custom
+firmware (Atmosphère). Run it with **title takeover** (hold R while you
+start a game, or use a forwarder), not from the album: the game needs the
+memory that only a full title gets.
+
+1. Unzip the download into `sdmc:/switch/halo/` on the SD card, so that
+   you have `sdmc:/switch/halo/halo.nro` and `sdmc:/switch/halo/halo_guest.elf`.
+2. Put your disc image next to them as `sdmc:/switch/halo/halo.iso`.
+3. Start `halo.nro`. On the first start it unpacks the maps (about 1.7 GB;
+   it takes a few minutes, and the screen shows how far it has got).
+
+An already unpacked `maps/` folder at `sdmc:/switch/halo/maps/` works as
+well. Saves go in `sdmc:/switch/halo/save/` and settings in
+`sdmc:/switch/halo/config.toml`. See
+[port/switch/README.md](port/switch/README.md).
+
+### Updating
+
+The game updates itself: when it starts, it looks for a newer release and
+asks whether you want it. `update.auto = false` in `config.toml` turns the
+check off. To update by hand, install the new APK over the old one, or
+copy the new files over the old ones on the SD card. Your saves and settings stay.
+
+## Graphics: Vulkan, Turnip and deko3d
+
+**Android** draws with Vulkan by default. To change it, open **SETTINGS**
+from the main menu, choose a profile, and open **VIDEO SETUP**:
+
+- **GRAPHICS BACKEND:** `VULKAN` or `OPENGL` (OpenGL ES 3).
+- **VULKAN DRIVER** (with `VULKAN`): `STOCK`, the phone's own driver, or
+  `TURNIP`, the open-source Mesa driver for Qualcomm Adreno GPUs, which the
+  app downloads. On Adreno, Turnip is often the more correct of the two.
+
+Select **OK**, then close the game and start it again: the backend and the
+driver change only at start-up. The line below the version number in the
+main menu shows which ones are running. For driver archives of your own and
+what to send when something looks wrong, see "Graphics: OpenGL ES and
+Vulkan" in [port/android/README.md](port/android/README.md).
+
+**The Switch** draws with deko3d, the console's native graphics interface,
+through a renderer written for it ([port/switch/DEKO3D.md](port/switch/DEKO3D.md)).
+There is nothing to set.
 
 ## Multiplayer
 
-The game can play system link games on a local network and on the internet:
+- **System link** on a local network, with up to 128 players. Android phones
+  and Switches on the same network see each other's games.
+- **Internet play:** the host's invite link (Android puts it on the
+  clipboard, and opens `halo://join/...` links), or the server browser.
+  No server of this project is needed.
+- **Voice chat**, with the phone's microphone or a headset in the Switch's
+  jack.
+- **Split screen** for up to four players on one device.
+- **Custom maps** are sent by the host to players who don't have them.
 
-- A system link game can have up to 128 players on up to 128 machines.
-- Linux, Windows and Android machines and browsers can play in the same
-  game. On a local network, the native builds play system link; browsers
-  play each other in rooms, over WebRTC
-  ([port/web/README.md](port/web/README.md)).
-- An invite link, or the server browser, lets a machine join a game on the
-  internet, browsers too: a native build takes a browser's WebRTC
-  ([port/linux/README.md](port/linux/README.md), "Browsers"). No server of
-  this project is necessary.
-- The netcode is new. Each machine moves its own player at once,
-  and the host makes the decisions for the game. Refer to
-  [port/linux/NETCODE.md](port/linux/NETCODE.md).
+The netcode is new: each machine moves its own player at once, and the host
+makes the decisions for the game. See [port/linux/NETCODE.md](port/linux/NETCODE.md).
+Keep the game in the front during a network game on Android: in the
+background, Android stops it and the others drop it after 15 seconds.
 
-## Build the game
+## Controls
+
+Any controller that Android knows works, and on the Switch the Joy-Con,
+the Pro Controller and the Lite's own buttons, with rumble. The first
+controller is player 1 and the others are players 2 to 4. The buttons
+follow the Xbox controller's:
+
+| Xbox | DualSense | In game |
+| --- | --- | --- |
+| left / right stick | left / right stick | move / look |
+| right trigger | R2 | fire |
+| left trigger | L2 | throw a grenade |
+| A | Cross | jump, accept |
+| B | Circle | melee, back |
+| X | Square | action, reload |
+| Y | Triangle | change weapon |
+| white / black | L1 / R1 | flashlight / change grenade |
+| stick clicks | L3 / R3 | crouch / zoom |
+| start / back | Options / Create | pause / scoreboard |
+
+On Android without a controller, touch controls show in game: a move stick,
+swipe to look (with the controller's aim assist), and buttons that you can
+move, resize, hide or copy from **Options** at the top of the screen.
+Gyro aiming is there too. In menus, tap an item to pick it and drag to
+scroll. All of it is in "Controls" in
+[port/android/README.md](port/android/README.md).
+
+The settings, which are the same on every platform, are described in
+[port/linux/README.md](port/linux/README.md#settings).
+
+## Reporting a problem
+
+Open an [issue](https://github.com/thelinkin3000/halo-ce-universal/issues) or ask on
+[Discord](https://discord.gg/9gqcHyr5km), and include:
+
+- the device (phone model and GPU, or Switch / Switch Lite / OLED) and the
+  build number from the main menu;
+- on Android, the renderer and driver line from the main menu;
+- `debug.txt` and `halo.log` from the game's folder
+  (`sdmc:/switch/halo/` on the Switch, the app's data folder on Android);
+- on the Switch, if it crashed, the newest report in
+  `sdmc:/atmosphere/crash_reports/`;
+- screenshots or a video of what looks wrong.
+
+A debug build gives the most useful logs.
+
+## Building
 
 You do not need the Xbox SDK. The port supplies the SDK declarations that
 the game uses. Refer to [port/include/xdk](port/include/xdk/README.md).
@@ -239,3 +335,26 @@ Enter `adb pull` to copy the recording parts to a computer.
 
 A profiling build plays with normal builds. It does not use
 `--pgo=train`.
+
+## Credits
+
+- The decompilation: [punpckhdq/halo](https://github.com/punpckhdq/halo),
+  continued in [bnunu/halo-1](https://github.com/bnunu/halo-1). It is of the
+  Xbox build 2342 (`cachebeta.exe`, SHA-256
+  `4cc87b45f721270392a96f1674ed2b5cd4a7bb4355faeab4531d1cf1884d9520`).
+- [OpenCE](https://github.com/OpenCommunityEdition/OpenCE), the upstream
+  port to Windows and Linux, which these ports follow and share the game
+  code, netcode and menus with.
+- [Mesa](https://mesa3d.org/)'s Turnip driver, in the builds of
+  [K11MCH1/AdrenoToolsDrivers](https://github.com/K11MCH1/AdrenoToolsDrivers).
+- [deko3d](https://github.com/devkitPro/deko3d), [libnx](https://github.com/switchbrew/libnx)
+  and devkitPro, for the Switch.
+- [SDL](https://www.libsdl.org/), on both platforms.
+
+Halo is a trademark of Microsoft. This project is not affiliated with or
+endorsed by Microsoft, Bungie or 343 Industries.
+
+## License
+
+[CC0 1.0](LICENSE.md). Third-party code under `port/third_party` keeps its
+own license.

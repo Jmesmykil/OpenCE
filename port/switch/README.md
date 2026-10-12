@@ -13,8 +13,8 @@ NDK supplies that clang along with `llvm-ar` and `ld.lld`; devkitA64 cannot
 build the guest, because it is LP64 only.
 
 The host is the Android host library (`port/android/host`) with three files
-replaced and two more added, linked by devkitA64 against libnx, SDL2 and
-Mesa. Refer to [port/android/README.md](../android/README.md) for the guest
+replaced and two more added, linked by devkitA64 against libnx, SDL2,
+Mesa and deko3d. Refer to [port/android/README.md](../android/README.md) for the guest
 and the platform layer, and [port/linux/README.md](../linux/README.md) for
 the platform layer the two share.
 
@@ -28,7 +28,7 @@ The host changes are these:
 | `host_gl.c` | Mesa is linked in, so there is no `libGLESv3.so` to open |
 | `host_mman.c` | `mmap`/`mprotect` over the console's memory services |
 | `host_futex.c` | futuxes over libnx's mutex and condition variable |
-| `host_net_stub.c` | stands in for `posix_net.c`; see Internet play |
+| `host_net.c` | the network calls over libnx's sockets; see Internet play |
 
 ## Requirements
 
@@ -173,21 +173,20 @@ early. devkitPro's SDL2 is built with `--disable-filesystem` and links
 `switch-mesa`: Mesa 20.1.0 over `libdrm_nouveau`, statically. SDL2's Switch
 video driver puts an EGL surface on the console's default `nwindow`, so
 `SDL_GL_CreateContext` and `SDL_GL_SwapWindow` — the two calls the renderer
-makes — work as they do anywhere else. There is no deko3d and no NVN here,
-and the tile-based renderer work that the Anbernic port carries for its
-Mali-G31 is not applicable to this GPU.
+makes — work as they do anywhere else. The port started out drawing that
+way. The game now draws with deko3d, the console's native interface,
+through its own renderer (`port/switch/guest/d3d8_dk.c` and
+`port/switch/host/host_dk.c`; see [DEKO3D.md](DEKO3D.md)); Mesa remains
+linked because SDL2 needs it.
 
 ## Internet play
 
-`host_net_stub.c` stands in for `posix_net.c`, which cannot be built here:
-there are no sockets. Every network entry point answers failure, which
-leaves the menus saying the feature is unavailable rather than crashing.
-`posix_random_bytes` is the exception and is really implemented, since the
-game uses it for nonces and it needs no network.
-
-Bringing internet play to the Switch means a socket layer - lwIP over libnx
-is what the homebrew scene uses - and then a `posix_net.c` that speaks to
-it. The stub is written so that replacing it is that change and no other.
+`host_net.c` gives the game libnx's BSD sockets, through the same
+translation to Winsock that `posix_net.c` does on the other builds, so
+system link and internet play work as on Android. The desktop-only parts of
+`posix_net.c` (URL schemes, Discord, UPnP) are answered as having nothing
+to offer. Voice chat records from a headset in the console's jack
+(`host_microphone.c`).
 
 ## What the port does not have
 
