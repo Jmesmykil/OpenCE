@@ -242,11 +242,30 @@ int host_memory_range_is_reserved(uint64_t address, uint64_t size)
 (host_memory_hold_image_range); 0 to 0 when nothing is held */
 static uint64_t image_hold_base, image_hold_end;
 
+/* The range the largest window can take, held from the start of main too
+(host_memory_hold_window_range) until the window is placed. A window of
+HALO_GUEST_WINDOW_MAXIMUM is on a multiple of its size, and below 4 GB the
+console maps only in its stack region, to 0x80000000: of 0x20000000,
+0x40000000 and 0x60000000, the game image is in the first and Custom
+Edition's tag cache in the second, and in the third libnx's thread stacks
+and the host's first mappings landed by the time the window was placed, so
+most runs had 256 or 128 MB. A window starts on a whole number of 256 MB
+(place_window), so this holds every place a 512 MB one can go but 0x40000000:
+the kernel puts the threads' local storage pages where it likes, one of them
+in a held range on some runs, and two places are more often both free than
+one. 0 to 0 when nothing is held. */
+#define WINDOW_HOLD_BASE 0x50000000ULL
+#define WINDOW_HOLD_END 0x80000000ULL
+static uint64_t window_hold_base, window_hold_end;
+static VirtmemReservation *window_hold;
+
 static int range_claimed(uint64_t address, uint64_t size)
 {
 	int index;
 
 	if (address < image_hold_end && image_hold_base < address + size)
+		return 1;
+	if (address < window_hold_end && window_hold_base < address + size)
 		return 1;
 	for (index = 0; index < reservation_count; index++)
 	{
@@ -329,6 +348,31 @@ void host_memory_hold_image_range(void)
 	if (!hold)
 		host_logf(HOST_LOG_ERROR, "libnx would not hold the guest image's range at %08x; a thread's stack may "
 			"land in it", HALO_GUEST_IMAGE_BASE);
+}
+
+void host_memory_hold_window_range(void)
+{
+	window_hold_base = WINDOW_HOLD_BASE;
+	window_hold_end = WINDOW_HOLD_END;
+	virtmemLock();
+	window_hold = virtmemAddReservation((void *)(uintptr_t)WINDOW_HOLD_BASE, WINDOW_HOLD_END - WINDOW_HOLD_BASE);
+	virtmemUnlock();
+	if (!window_hold)
+		host_logf(HOST_LOG_ERROR, "libnx would not hold the window's range at %08llx; a thread's stack may land in it",
+			WINDOW_HOLD_BASE);
+}
+
+/* the held range given back, the window placed (in it or elsewhere) */
+static void window_hold_release(void)
+{
+	if (window_hold)
+	{
+		virtmemLock();
+		virtmemRemoveReservation(window_hold);
+		virtmemUnlock();
+		window_hold = NULL;
+	}
+	window_hold_base = window_hold_end = 0;
 }
 
 /* Where the kernel put this process's regions, said once at start.
@@ -624,18 +668,58 @@ uint32_t host_memory_image_base(void)
  * port's behaviour is sensitive to where things land. One fixed address is
  * one less variable.
  *
- * Last, the first free range on a whole number of the window's own size (or
- * of HALO_GUEST_WINDOW_ALIGNMENT, where that is larger) that the console
- * will map. The trial mapping is of heap memory as large as the window, so
- * a size the console has not the memory for fails here too. */
+ * Last, the first free range on a whole number of HALO_GUEST_WINDOW_ALIGNMENT
+ * that the console will map. The trial mapping is of heap memory as large as
+ * the window, so a size the console has not the memory for fails here too.
+ *
+ * A window need not start on a whole number of its own size: the port turns
+ * an offset into an address and back by adding and subtracting the base
+ * (platform.h's PLATFORM_PHYSICAL_TO_VIRTUAL), not by masking, and what that
+ * needs is a base at least the window's size, so that no address in it reads
+ * as an offset. It starts on a whole number of CHUNK_SIZE, the pieces it is
+ * made real and handed to the GPU in: a 512 MB window takes any free 512 MB
+ * of the held range, where on a whole number of 256 MB it had two places,
+ * and a thread's stack or local storage page in each kept it from both. */
 static uint64_t place_window(uint64_t size)
 {
-	uint64_t alignment = size > HALO_GUEST_WINDOW_ALIGNMENT ? size : HALO_GUEST_WINDOW_ALIGNMENT;
-	uint64_t minimum = LOW_START;
+	uint64_t alignment = CHUNK_SIZE;
+	uint64_t minimum = LOW_START > size ? LOW_START : size;
 	int attempt;
 
 	if (host_can_map_at(HALO_GUEST_WINDOW_BASE, size) && reserve(HALO_GUEST_WINDOW_BASE, size, 1) == 0)
 		return HALO_GUEST_WINDOW_BASE;
+	/* the range held for it from the start, its own claim lifted to take it:
+	the free ranges in it the kernel reports (find_gap; what the loader and
+	the kernel put there before the program ran - the main thread's stack, a
+	thread's local storage page - is not), each tried */
+	if (window_hold_end && size <= window_hold_end - window_hold_base)
+	{
+		uint64_t held = window_hold_base, held_end = window_hold_end;
+		uint64_t from = held > size ? held : size;
+
+		window_hold_base = window_hold_end = 0;
+		for (attempt = 0; attempt < 32; attempt++)
+		{
+			uint64_t start = find_gap(size, from, alignment);
+
+			if (!start || start + size > held_end)
+				break;
+			from = start + alignment;
+			if (host_can_map_at(start, size) && reserve(start, size, 1) == 0)
+			{
+				host_logf(HOST_LOG_INFO, "the window takes the range held for it at %08llx", (unsigned long long)start);
+				return start;
+			}
+			host_logf(HOST_LOG_INFO, "the range held for the window at %08llx will not take %u MB",
+				(unsigned long long)start, (unsigned int)(size / (1024 * 1024)));
+			log_conflicts(start, size);
+		}
+		host_logf(HOST_LOG_INFO, "the range held for the window (%08llx-%08llx) has no %u MB free",
+			(unsigned long long)held, (unsigned long long)held_end, (unsigned int)(size / (1024 * 1024)));
+		log_conflicts(held, held_end - held);
+		window_hold_base = held;
+		window_hold_end = held_end;
+	}
 	host_logf(HOST_LOG_INFO, "the window's usual address %08llx will not take %u MB; looking elsewhere",
 		(unsigned long long)HALO_GUEST_WINDOW_BASE, (unsigned int)(size / (1024 * 1024)));
 	if (HALO_SWITCH_WINDOW_FALLBACK % alignment == 0 &&
@@ -745,6 +829,8 @@ int host_memory_initialize(uint32_t base, uint32_t size)
 		return -1;
 	}
 	window_end = window_base + window_size;
+	/* (what of the held range the window did not take is free again) */
+	window_hold_release();
 	/* Where the window moved, the range it was linked for is kept empty.
 	 * The guest moves any value it reads out of the game data that lies
 	 * there (halo_port_window.h), so memory of its own at those addresses

@@ -72,6 +72,10 @@ uint64_t host_memory_reserved_region(uint64_t size);
 /* Keeps libnx's own mappings (thread stacks) out of the guest image's fixed
  * address. Called first thing in main, before any thread exists. */
 void host_memory_hold_image_range(void);
+/* holds the largest window's range from the start of main, as the image's
+is, so libnx's thread stacks and the host's first mappings do not take it
+(host_memory.c) */
+void host_memory_hold_window_range(void);
 /* logs where the kernel put the process's address space, heap, alias and
  * stack regions (host_memory.c) */
 void host_memory_log_regions(void);
