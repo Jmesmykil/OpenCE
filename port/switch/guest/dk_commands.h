@@ -464,6 +464,14 @@ reads, from the first one it reads (the host reads them where they are,
 cleaning the CPU's cache, or copies them if they are not in one chunk of the
 window). If inline_bytes is not 0 the draw's one stream, immediate mode's, is
 not at an address but follows the pairs, in the command itself. */
+/* index_address: the indices are in the command. The Xbox's
+DrawIndexedVertices copied a draw's indices into the push buffer as it was
+made, and the game reuses the memory at once - in split screen it builds
+the second view's lists of a level's visible triangles where the first's
+were - so indices the game may write again are read when the draw is made,
+not when the host or the GPU get to it */
+#define DK_INDEX_INLINE 1u
+
 struct dk_command_draw
 {
 	struct dk_command_header header;
@@ -472,8 +480,9 @@ struct dk_command_draw
 	/* vertices, or indices */
 	uint32_t count;
 	/* 0: not indexed. Else the guest address of the draw's count 16-bit
-	indices, and the number added to the vertex each names (the streams start
-	at the lowest vertex the draw reads) */
+	indices, or DK_INDEX_INLINE: they follow the streams (after any inline
+	bytes, at a multiple of 4); and the number added to the vertex each names
+	(the streams start at the lowest vertex the draw reads) */
 	uint32_t index_address;
 	int32_t vertex_offset;
 	uint32_t inline_bytes;

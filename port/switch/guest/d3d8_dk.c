@@ -25,6 +25,8 @@ and presenting go there; a draw and a visibility test do nothing yet.
 #include "dk_commands.h"
 #include "dk_shaders.h"
 #include "dk_textures.h"
+#include "halo_port_capacity.h"
+#include "../../linux/game/cache_file_formats.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -2240,18 +2242,42 @@ the bytes a stride-0 stream (one value for every vertex) is given */
 /* writes the draw of vertices [first, first + count) of the streams the
 format reads (a lowest vertex of first, so a stream's data starts there);
 indices, if not NULL, is the guest address of the draw's indices */
+/* the most a draw's indices copied into its command take (DK_INDEX_INLINE):
+a larger list is read where it is, as before */
+#define INLINE_INDEX_LIMIT (256 * 1024)
+
+void *physical_memory_get_tag_cache_base_address(void);
+
+/* whether a draw's indices are in a map's tag data, which nothing writes
+while the map is loaded: they may be read when the host or the GPU get to
+the draw. Any others are copied as the draw is made (DK_INDEX_INLINE) */
+static BOOL indices_fixed(const WORD *indices, unsigned long count)
+{
+	unsigned long start = (unsigned long)(uintptr_t)indices, end = start + count * sizeof(WORD);
+	unsigned long tags = (unsigned long)(uintptr_t)physical_memory_get_tag_cache_base_address();
+	unsigned long custom = (unsigned long)(uintptr_t)halo_custom_edition_tag_cache();
+
+	if (tags && start >= tags && end <= tags + HALO_PORT_TAG_CACHE_SIZE)
+		return TRUE;
+	return custom && start >= custom && end <= custom + CUSTOM_EDITION_TAG_CACHE_BYTES;
+}
+
 static void draw_write(D3DPRIMITIVETYPE type, unsigned long count, unsigned long first, unsigned long vertex_count,
 	const WORD *indices, long vertex_offset)
 {
 	struct dk_command_draw *command;
 	unsigned long stream, streams = 0, slot = 0;
+	unsigned long index_bytes = indices && count * sizeof(WORD) <= INLINE_INDEX_LIMIT && !indices_fixed(indices, count) ?
+		(count * sizeof(WORD) + 3) & ~3UL : 0;
 
 	for (stream = 0; stream < DK_STREAM_COUNT; stream++)
 		streams += (format_told.stream_mask >> stream) & 1;
-	command = stream_command(DK_COMMAND_DRAW, sizeof(*command) + streams * 2 * sizeof(uint32_t));
+	command = stream_command(DK_COMMAND_DRAW, sizeof(*command) + streams * 2 * sizeof(uint32_t) + index_bytes);
 	command->primitive = primitive_of(type);
 	command->count = (uint32_t)count;
-	command->index_address = (uint32_t)(uintptr_t)indices;
+	command->index_address = index_bytes ? DK_INDEX_INLINE : (uint32_t)(uintptr_t)indices;
+	if (index_bytes)
+		memcpy(&command->streams[streams], indices, count * sizeof(WORD));
 	command->vertex_offset = (int32_t)vertex_offset;
 	command->inline_bytes = 0;
 	command->stream_count = (uint32_t)streams;
