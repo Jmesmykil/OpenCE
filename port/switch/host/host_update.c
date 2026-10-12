@@ -149,23 +149,38 @@ static int automatic_updates(void)
 	return value;
 }
 
-/* the latest release's build number, 0 if it cannot be learned */
+/* the latest release's build number, 0 if it cannot be learned. If the
+repository has been renamed, GitHub first redirects to /releases/latest under
+the new name, and that is asked in turn. */
 static long latest_build(void)
 {
+	char url[HOST_HTTPS_MAXIMUM_URL];
 	char location[HOST_HTTPS_MAXIMUM_URL];
 	char error[256];
 	const char *tag;
-	int status = host_https_get("https://github.com/" UPDATE_REPOSITORY "/releases/latest", 0, NULL, NULL,
-		location, sizeof(location), error, sizeof(error));
+	int status, hop;
 
-	if (status < 300 || status >= 400)
+	snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/latest");
+	for (hop = 0; hop < 3; hop++)
 	{
-		if (status >= 0)
-			host_logf(HOST_LOG_INFO, "update: GitHub answered %d for the latest release", status);
-		return 0;
+		status = host_https_get(url, 0, NULL, NULL, location, sizeof(location), error, sizeof(error));
+		if (status < 300 || status >= 400)
+		{
+			if (status >= 0)
+				host_logf(HOST_LOG_INFO, "update: GitHub answered %d for the latest release", status);
+			return 0;
+		}
+		tag = strstr(location, "/releases/tag/build-");
+		if (tag)
+			return strtol(tag + strlen("/releases/tag/build-"), NULL, 10);
+		if (!strstr(location, "/releases/latest"))
+			return 0;
+		if (location[0] == '/')
+			snprintf(url, sizeof(url), "https://github.com%s", location);
+		else
+			snprintf(url, sizeof(url), "%s", location);
 	}
-	tag = strstr(location, "/releases/tag/build-");
-	return tag ? strtol(tag + strlen("/releases/tag/build-"), NULL, 10) : 0;
+	return 0;
 }
 
 /* ---------- unpacking as it downloads */
