@@ -6,8 +6,10 @@ The native ports' settings (port_config.h), parsed with tomlc17
 type, default, the HALO_* environment variable that overrides it and the
 comment written into a new file. The file is read once, on the first
 question; unknown keys and values of the wrong type are reported in the log
-and the defaults used instead, and the file itself is never rewritten once
-it exists, so that the player's edits and comments stay.
+and the defaults used instead. A missing setting is added to an existing
+file, and a section that was opened twice is joined into one (a repeated
+key keeps its earlier line). Anything else is left as it is, so the
+player's edits and comments stay.
 */
 
 #include "platform.h"
@@ -25,6 +27,12 @@ it exists, so that the player's edits and comments stay.
 /* the guest's write is not on the card until the host commits it
 (port/switch/host/host_main.c) */
 void host_storage_commit(void);
+#endif
+
+#ifdef HALO_CONFIG_SECTIONS_TEST
+/* platform.h declares this. Repeated so the section check can be compiled
+without that header */
+void platform_log(const char *format, ...);
 #endif
 
 /* ---------- the settings */
@@ -889,11 +897,15 @@ static void config_append_setting(struct config_text *text, const struct config_
 	config_append(text, buffer);
 }
 
-/* the file with every setting of this build at its default */
+/* the file with every setting of this build at its default. A section is
+opened once, the first time one of its settings appears, so a later setting
+in a section already opened (display.viewmodel_shield after [game], the
+gyroscope's input.gyro_aim after [debug]) does not open it again */
 static char *config_default_text(void)
 {
 	struct config_text text = { NULL, 0, 0 };
-	char section[32] = "";
+	char sections[32][32];
+	size_t section_count = 0;
 	size_t index;
 
 #ifdef HALO_ANDROID
@@ -914,18 +926,54 @@ static char *config_default_text(void)
 	{
 		const struct config_setting *setting = &config_settings[index];
 		const char *dot = strchr(setting->name, '.');
-		char buffer[64];
+		size_t length;
+		size_t section_index;
+		int seen = 0;
 
 		if (!(setting->platforms & CONFIG_PLATFORM) || !dot)
 			continue;
-		if (strncmp(section, setting->name, (size_t)(dot - setting->name)) ||
-			section[dot - setting->name] != 0)
+		length = (size_t)(dot - setting->name);
+		if (!length || length >= sizeof(sections[0]))
+			continue;
+		for (section_index = 0; section_index < section_count; section_index++)
 		{
-			snprintf(section, sizeof(section), "%.*s", (int)(dot - setting->name), setting->name);
-			snprintf(buffer, sizeof(buffer), "\n[%s]\n", section);
-			config_append(&text, buffer);
+			if (strlen(sections[section_index]) == length &&
+				!strncmp(sections[section_index], setting->name, length))
+			{
+				seen = 1;
+				break;
+			}
 		}
-		config_append_setting(&text, setting);
+		if (seen)
+			continue;
+		if (section_count == sizeof(sections) / sizeof(sections[0]))
+		{
+			platform_log("settings: too many sections to write %s", setting->name);
+			continue;
+		}
+		memcpy(sections[section_count], setting->name, length);
+		sections[section_count][length] = 0;
+		section_count++;
+	}
+	for (index = 0; index < section_count; index++)
+	{
+		char buffer[64];
+		size_t setting_index;
+		size_t length = strlen(sections[index]);
+
+		snprintf(buffer, sizeof(buffer), "\n[%s]\n", sections[index]);
+		config_append(&text, buffer);
+		for (setting_index = 0; setting_index < NUMBER_OF_CONFIG_SETTINGS; setting_index++)
+		{
+			const struct config_setting *setting = &config_settings[setting_index];
+			const char *dot = strchr(setting->name, '.');
+
+			if (!(setting->platforms & CONFIG_PLATFORM) || !dot)
+				continue;
+			if ((size_t)(dot - setting->name) != length || strncmp(setting->name, sections[index], length))
+				continue;
+			config_append_setting(&text, setting);
+		}
 	}
 	return text.buffer;
 }
@@ -1145,6 +1193,10 @@ static void config_report_unknown_keys(toml_datum_t table)
 	}
 }
 
+/* defined with the line readers below: a file whose section headers repeat,
+joined so it parses, or NULL if it should be left alone */
+static char *config_repair_repeated_sections(const char *text, toml_result_t *parsed);
+
 static void config_load(void)
 {
 	char path[1024];
@@ -1174,8 +1226,29 @@ static void config_load(void)
 	if (text)
 	{
 		toml_result_t result = toml_parse(text, (int)size);
+		char *parsed = text;
+		int ok = result.ok;
 
-		if (result.ok)
+		if (!ok)
+		{
+			char reason[200];
+			char *repaired;
+
+			snprintf(reason, sizeof(reason), "%s", result.errmsg);
+			toml_free(result);
+			repaired = config_repair_repeated_sections(text, &result);
+			if (!repaired)
+			{
+				platform_log("config.toml: %s; using the defaults", reason);
+			}
+			else
+			{
+				parsed = repaired;
+				ok = 1;
+				platform_log("settings: %s had a section twice; a repeated key keeps its earlier value", path);
+			}
+		}
+		if (ok)
 		{
 			char *completed;
 
@@ -1183,16 +1256,14 @@ static void config_load(void)
 				config_set_from_file(&config_values[index], &config_settings[index], result.toptab);
 			config_report_unknown_keys(result.toptab);
 			platform_log("settings: %s", path);
-			completed = config_add_missing(text, result.toptab);
-			if (completed && !config_write_file(path, completed))
+			completed = config_add_missing(parsed, result.toptab);
+			if ((parsed != text || completed) && !config_write_file(path, completed ? completed : parsed))
 				platform_log("settings: cannot write %s", path);
 			free(completed);
+			toml_free(result);
 		}
-		else
-		{
-			platform_log("config.toml: %s; using the defaults", result.errmsg);
-		}
-		toml_free(result);
+		if (parsed != text)
+			free(parsed);
 		free(text);
 	}
 	else
@@ -1281,6 +1352,177 @@ static int config_line_section(const char *line, const char *end, char *section,
 	memcpy(section, line + 1, (size_t)(close - line - 1));
 	section[close - line - 1] = 0;
 	return 1;
+}
+
+/* the line's key, if it is "key = ..." (after spaces) */
+static int config_line_key_name(const char *line, const char *end, char *key, size_t size)
+{
+	const char *start;
+	size_t length;
+
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	start = line;
+	while (line < end && *line != ' ' && *line != '\t' && *line != '=' && *line != '\r')
+		line++;
+	length = (size_t)(line - start);
+	if (!length || length >= size)
+		return 0;
+	while (line < end && (*line == ' ' || *line == '\t'))
+		line++;
+	if (line >= end || *line != '=')
+		return 0;
+	memcpy(key, start, length);
+	key[length] = 0;
+	return 1;
+}
+
+static void config_append_span(struct config_text *text, const char *start, const char *end)
+{
+	char *copy = config_copy(start, (size_t)(end - start));
+
+	if (copy)
+	{
+		config_append(text, copy);
+		free(copy);
+	}
+}
+
+static int config_text_has_key(const struct config_text *text, const char *key)
+{
+	const char *line;
+
+	if (!text->buffer)
+		return 0;
+	for (line = text->buffer; *line; )
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+
+		if (config_line_key(line, end, key))
+			return 1;
+		line = next;
+	}
+	return 0;
+}
+
+#define CONFIG_SECTION_LIMIT 32
+
+struct config_section_piece
+{
+	char name[64];
+	struct config_text text;
+};
+
+static void config_pieces_free(struct config_text *preamble, struct config_section_piece *pieces, size_t count)
+{
+	size_t index;
+
+	free(preamble->buffer);
+	preamble->buffer = NULL;
+	for (index = 0; index < count; index++)
+	{
+		free(pieces[index].text.buffer);
+		pieces[index].text.buffer = NULL;
+	}
+}
+
+/* a section header the default file used to open again when a later setting
+returned to an earlier section. The second header makes the whole file fail
+to parse, so every setting stays at its default while the saved lines are
+still in the file. Joined into the first header. A key that appears twice
+keeps its earlier line, which is the one a menu save writes. NULL if no
+header or key was repeated, or the text cannot be rebuilt */
+static char *config_collapse_repeated_sections(const char *text)
+{
+	struct config_text preamble = { 0 };
+	struct config_section_piece pieces[CONFIG_SECTION_LIMIT];
+	struct config_text out = { 0 };
+	size_t count = 0;
+	size_t index;
+	long current = -1;
+	int repeated = 0;
+	int overflow = 0;
+	const char *line;
+
+	memset(pieces, 0, sizeof(pieces));
+	for (line = text; *line && !overflow; )
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+		char name[64];
+		char key[64];
+
+		if (config_line_section(line, end, name, sizeof(name)))
+		{
+			current = -1;
+			for (index = 0; index < count; index++)
+			{
+				if (!strcmp(pieces[index].name, name))
+				{
+					current = (long)index;
+					break;
+				}
+			}
+			if (current >= 0)
+			{
+				repeated = 1;
+				line = next;
+				continue;
+			}
+			if (count >= CONFIG_SECTION_LIMIT)
+			{
+				platform_log("settings: too many sections to join %s", name);
+				overflow = 1;
+				break;
+			}
+			snprintf(pieces[count].name, sizeof(pieces[count].name), "%s", name);
+			current = (long)count;
+			count++;
+		}
+		else if (current >= 0 && config_line_key_name(line, end, key, sizeof(key)) &&
+			config_text_has_key(&pieces[current].text, key))
+		{
+			repeated = 1;
+			line = next;
+			continue;
+		}
+		config_append_span(current < 0 ? &preamble : &pieces[current].text, line, next);
+		line = next;
+	}
+	if (!repeated || overflow)
+	{
+		config_pieces_free(&preamble, pieces, count);
+		return NULL;
+	}
+	if (preamble.buffer)
+		config_append(&out, preamble.buffer);
+	for (index = 0; index < count; index++)
+	{
+		if (pieces[index].text.buffer)
+			config_append(&out, pieces[index].text.buffer);
+	}
+	config_pieces_free(&preamble, pieces, count);
+	return out.buffer;
+}
+
+/* that text, if it then parses. NULL if there is nothing to join or the
+joined text still does not parse, and the file is left alone. parsed
+receives the successful parse */
+static char *config_repair_repeated_sections(const char *text, toml_result_t *parsed)
+{
+	char *collapsed = config_collapse_repeated_sections(text);
+
+	if (!collapsed)
+		return NULL;
+	*parsed = toml_parse(collapsed, (int)strlen(collapsed));
+	if (!parsed->ok)
+	{
+		toml_free(*parsed);
+		free(collapsed);
+		return NULL;
+	}
+	return collapsed;
 }
 
 /* sets a setting, for now and in config.toml, from its value as text
@@ -1498,3 +1740,135 @@ const char *config_string(const char *name)
 
 	return string ? string : "";
 }
+
+#ifdef HALO_CONFIG_SECTIONS_TEST
+/* tools/test_linux_port.py compiles this file with these defined and runs
+it. Not part of the game. */
+
+void platform_log(const char *format, ...)
+{
+	(void)format;
+}
+
+#ifdef HALO_SWITCH
+void host_storage_commit(void)
+{
+}
+#endif
+
+static int config_header_count(const char *text, const char *header)
+{
+	int count = 0;
+	const char *line;
+
+	for (line = text; *line; )
+	{
+		const char *end = line + strcspn(line, "\n");
+		const char *next = *end ? end + 1 : end;
+		char name[64];
+
+		if (config_line_section(line, end, name, sizeof(name)) && !strcmp(name, header))
+			count++;
+		line = next;
+	}
+	return count;
+}
+
+static int config_fail(const char *message)
+{
+	fprintf(stderr, "%s\n", message);
+	return 1;
+}
+
+int main(void)
+{
+	char *defaults;
+	char *repaired;
+	toml_result_t parsed;
+	toml_datum_t aim;
+	static const char duplicated[] =
+		"[display]\n"
+		"fov = 0.0\n"
+		"\n"
+		"[input]\n"
+		"touch_controls = \"auto\"\n"
+		"\n"
+		"[game]\n"
+		"custom_edition = true\n"
+		"\n"
+		"[display]\n"
+		"viewmodel_shield = false\n"
+		"\n"
+		"[input]\n"
+		"gyro_aim = true\n"
+		"\n"
+		"[debug]\n"
+		"profiler = false\n"
+		"\n"
+		"[debug]\n"
+		"profile_hz = 500\n";
+	static const char earlier_wins[] =
+		"[input]\n"
+		"gyro_aim = true\n"
+		"\n"
+		"[input]\n"
+		"gyro_aim = false\n";
+	static const char broken[] =
+		"[input]\n"
+		"gyro_aim = \"unterminated\n";
+	static const char still_broken[] =
+		"[input]\n"
+		"gyro_aim = \"unterminated\n"
+		"[display]\n"
+		"fov = 0.0\n"
+		"[input]\n"
+		"touch_controls = \"auto\"\n";
+
+	defaults = config_default_text();
+	if (!defaults)
+		return config_fail("no default text");
+	if (config_header_count(defaults, "display") != 1 ||
+		config_header_count(defaults, "input") != 1 ||
+		config_header_count(defaults, "debug") != 1)
+		return config_fail("default file repeats a section");
+	parsed = toml_parse(defaults, (int)strlen(defaults));
+	if (!parsed.ok)
+		return config_fail(parsed.errmsg);
+	aim = toml_seek(parsed.toptab, "input.gyro_aim");
+	if (aim.type != TOML_BOOLEAN || aim.u.boolean)
+		return config_fail("default gyro_aim is not false");
+	toml_free(parsed);
+	free(defaults);
+
+	repaired = config_repair_repeated_sections(duplicated, &parsed);
+	if (!repaired)
+		return config_fail("duplicated sections were not joined");
+	if (config_header_count(repaired, "display") != 1 ||
+		config_header_count(repaired, "input") != 1 ||
+		config_header_count(repaired, "debug") != 1)
+		return config_fail("joined file repeats a section");
+	aim = toml_seek(parsed.toptab, "input.gyro_aim");
+	if (aim.type != TOML_BOOLEAN || !aim.u.boolean)
+		return config_fail("saved gyro_aim was not kept");
+	if (toml_seek(parsed.toptab, "display.viewmodel_shield").type == TOML_UNKNOWN)
+		return config_fail("a display key stayed in the wrong section");
+	toml_free(parsed);
+	free(repaired);
+
+	repaired = config_repair_repeated_sections(earlier_wins, &parsed);
+	if (!repaired)
+		return config_fail("a repeated key was not joined");
+	aim = toml_seek(parsed.toptab, "input.gyro_aim");
+	if (aim.type != TOML_BOOLEAN || !aim.u.boolean)
+		return config_fail("the earlier gyro_aim was not kept");
+	toml_free(parsed);
+	free(repaired);
+
+	if (config_repair_repeated_sections(broken, &parsed))
+		return config_fail("a file with no repeated section was rewritten");
+	if (config_repair_repeated_sections(still_broken, &parsed))
+		return config_fail("a file that still does not parse was rewritten");
+	printf("PASS\n");
+	return 0;
+}
+#endif

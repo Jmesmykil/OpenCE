@@ -311,6 +311,50 @@ def test_menu_settings_exist():
     assert controls == set(re.findall(r'\{ "(controls\.[a-z_]+)", L"', functions))
 
 
+def _platform_compile_flags(object_path):
+    """the flags ninja uses for one platform-layer object, without the
+    output path or the profile flags a one-file program cannot use"""
+    import shlex
+
+    command = subprocess.run(["ninja", "-t", "commands", object_path],
+                             capture_output=True, text=True, check=True).stdout.strip().splitlines()[-1]
+    words = shlex.split(command)
+    while words and not words[0].startswith("-"):
+        words = words[1:]
+    flags = []
+    skip = False
+    for word in words:
+        if skip:
+            skip = False
+        elif word in ("-MF", "-o", "-c"):
+            skip = True
+        elif word == "-MMD" or word.startswith("-flto") or word.startswith("-fprofile-use"):
+            continue
+        else:
+            flags.append(word)
+    return flags
+
+
+def test_config_sections_join(tmp_path):
+    """a new config.toml opens each section once, and a file that already
+    opened one twice (the gyroscope's [input], and [display] after [game])
+    is joined so the saved value is read. A file that is broken for some
+    other reason is left alone (port/linux/src/port_config.c)"""
+    if not shutil.which("clang") or not shutil.which("ninja") or not Path("build.ninja").is_file():
+        pytest.skip("needs clang, ninja and a configured build")
+    flags = _platform_compile_flags("build/linux/obj/port/linux/src/port_config.o")
+    program = tmp_path / "config_sections_check"
+    built = subprocess.run(["clang", *flags, "-O1", "-no-pie", "-Wl,--unresolved-symbols=ignore-all",
+                            "-DHALO_ANDROID", "-DHALO_SWITCH", "-DHALO_ARM64_GUEST", "-DHALO_CONFIG_SECTIONS_TEST",
+                            "-o", str(program), "port/linux/src/port_config.c",
+                            "port/third_party/tomlc17/tomlc17.c"],
+                           capture_output=True, text=True)
+    assert built.returncode == 0, built.stderr[-4000:]
+    result = subprocess.run([str(program)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "PASS" in result.stdout
+
+
 def test_p2p_signatures_and_listings(tmp_path):
     """internet play's Ed25519 (RFC 8032), the X25519 key of a seed, and the
     server browser's listings from host to browser (tools/p2p_lobby_check.c),
