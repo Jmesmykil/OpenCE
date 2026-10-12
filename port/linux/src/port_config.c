@@ -897,15 +897,15 @@ static void config_append_setting(struct config_text *text, const struct config_
 	config_append(text, buffer);
 }
 
-/* the file with every setting of this build at its default. A section is
-opened once, the first time one of its settings appears, so a later setting
-in a section already opened (display.viewmodel_shield after [game], the
-gyroscope's input.gyro_aim after [debug]) does not open it again */
+/* the file with every setting of this build at its default. Each section
+once, where its first setting is, with all of its settings: TOML refuses a
+section twice, and the whole file would go unread (config_join_sections). A
+later setting in a section already opened (display.viewmodel_shield after
+[game], the gyroscope's input.gyro_aim after [debug]) does not open it again */
 static char *config_default_text(void)
 {
 	struct config_text text = { NULL, 0, 0 };
-	char sections[32][32];
-	size_t section_count = 0;
+	char section[32] = "";
 	size_t index;
 
 #ifdef HALO_ANDROID
@@ -926,53 +926,28 @@ static char *config_default_text(void)
 	{
 		const struct config_setting *setting = &config_settings[index];
 		const char *dot = strchr(setting->name, '.');
-		size_t length;
-		size_t section_index;
-		int seen = 0;
+		size_t length, other;
+		char buffer[64];
 
 		if (!(setting->platforms & CONFIG_PLATFORM) || !dot)
 			continue;
 		length = (size_t)(dot - setting->name);
-		if (!length || length >= sizeof(sections[0]))
-			continue;
-		for (section_index = 0; section_index < section_count; section_index++)
+		for (other = 0; other < index; other++)
 		{
-			if (strlen(sections[section_index]) == length &&
-				!strncmp(sections[section_index], setting->name, length))
-			{
-				seen = 1;
+			if ((config_settings[other].platforms & CONFIG_PLATFORM) &&
+				!strncmp(config_settings[other].name, setting->name, length + 1))
 				break;
-			}
 		}
-		if (seen)
+		if (other < index)
 			continue;
-		if (section_count == sizeof(sections) / sizeof(sections[0]))
-		{
-			platform_log("settings: too many sections to write %s", setting->name);
-			continue;
-		}
-		memcpy(sections[section_count], setting->name, length);
-		sections[section_count][length] = 0;
-		section_count++;
-	}
-	for (index = 0; index < section_count; index++)
-	{
-		char buffer[64];
-		size_t setting_index;
-		size_t length = strlen(sections[index]);
-
-		snprintf(buffer, sizeof(buffer), "\n[%s]\n", sections[index]);
+		snprintf(section, sizeof(section), "%.*s", (int)length, setting->name);
+		snprintf(buffer, sizeof(buffer), "\n[%s]\n", section);
 		config_append(&text, buffer);
-		for (setting_index = 0; setting_index < NUMBER_OF_CONFIG_SETTINGS; setting_index++)
+		for (other = index; other < NUMBER_OF_CONFIG_SETTINGS; other++)
 		{
-			const struct config_setting *setting = &config_settings[setting_index];
-			const char *dot = strchr(setting->name, '.');
-
-			if (!(setting->platforms & CONFIG_PLATFORM) || !dot)
-				continue;
-			if ((size_t)(dot - setting->name) != length || strncmp(setting->name, sections[index], length))
-				continue;
-			config_append_setting(&text, setting);
+			if ((config_settings[other].platforms & CONFIG_PLATFORM) &&
+				!strncmp(config_settings[other].name, setting->name, length + 1))
+				config_append_setting(&text, &config_settings[other]);
 		}
 	}
 	return text.buffer;
@@ -1056,6 +1031,89 @@ static char *config_add_missing(const char *text, toml_datum_t table)
 		}
 	}
 	return result;
+}
+
+static int config_line_section(const char *line, const char *end, char *section, size_t size);
+
+/* text from start to end, appended */
+static void config_append_range(struct config_text *text, const char *start, const char *end)
+{
+	char *copy = config_copy(start, (size_t)(end - start));
+
+	if (copy)
+		config_append(text, copy);
+	free(copy);
+}
+
+/* a file with a section twice, which TOML refuses (the defaults of the
+versions from 2026-10-10 had a second [display] after [game]): each
+section's later parts moved to the end of its first, the rest kept as it
+is. Returns the new text, or NULL if no section is there twice */
+static char *config_join_sections(const char *text)
+{
+	enum { PARTS_MAXIMUM = 64 };
+	struct
+	{
+		char name[64];
+		const char *start, *end;
+	} parts[PARTS_MAXIMUM];
+	struct config_text joined = { NULL, 0, 0 };
+	const char *line;
+	const char *first_part = NULL;
+	int count = 0, repeated = 0, index, other;
+
+	/* the parts, each from its section's line to the next one's */
+	for (line = text; *line; )
+	{
+		size_t length = strcspn(line, "\n");
+		char name[64];
+
+		if (config_line_section(line, line + length, name, sizeof(name)))
+		{
+			if (count == PARTS_MAXIMUM)
+				return NULL;
+			if (count)
+				parts[count - 1].end = line;
+			else
+				first_part = line;
+			for (other = 0; other < count; other++)
+				repeated |= !strcmp(parts[other].name, name);
+			strcpy(parts[count].name, name);
+			parts[count].start = line;
+			count++;
+		}
+		line += length;
+		if (*line)
+			line++;
+	}
+	if (!repeated)
+		return NULL;
+	parts[count - 1].end = line;
+
+	config_append_range(&joined, text, first_part);
+	for (index = 0; index < count; index++)
+	{
+		for (other = 0; other < index && strcmp(parts[other].name, parts[index].name); other++)
+			;
+		if (other < index)
+			continue;
+		config_append_range(&joined, parts[index].start, parts[index].end);
+		for (other = index + 1; other < count; other++)
+		{
+			const char *body;
+
+			if (strcmp(parts[other].name, parts[index].name))
+				continue;
+			/* (its settings, without its section's line) */
+			body = memchr(parts[other].start, '\n', (size_t)(parts[other].end - parts[other].start));
+			if (!body)
+				continue;
+			if (joined.length && joined.buffer[joined.length - 1] != '\n')
+				config_append(&joined, "\n");
+			config_append_range(&joined, body + 1, parts[other].end);
+		}
+	}
+	return joined.buffer;
 }
 
 /* ---------- values */
@@ -1225,10 +1283,23 @@ static void config_load(void)
 	text = config_read_file(path, &size);
 	if (text)
 	{
-		toml_result_t result = toml_parse(text, (int)size);
-		char *parsed = text;
-		int ok = result.ok;
+		char *joined = config_join_sections(text);
+		char *parsed;
+		toml_result_t result;
+		int ok;
 
+		/* a section twice is joined so the file parses. A key that is still
+		there twice keeps its earlier line (config_repair_repeated_sections),
+		which is the one a menu save writes */
+		if (joined)
+		{
+			free(text);
+			text = joined;
+			size = strlen(text);
+		}
+		parsed = text;
+		result = toml_parse(text, (int)size);
+		ok = result.ok;
 		if (!ok)
 		{
 			char reason[200];
@@ -1245,13 +1316,20 @@ static void config_load(void)
 			{
 				parsed = repaired;
 				ok = 1;
-				platform_log("settings: %s had a section twice; a repeated key keeps its earlier value", path);
+				platform_log("settings: joined the sections %s had twice; a repeated key keeps its earlier value", path);
 			}
 		}
 		if (ok)
 		{
 			char *completed;
 
+			if (joined && parsed == text)
+			{
+				if (config_write_file(path, text))
+					platform_log("settings: joined the sections %s had twice", path);
+				else
+					platform_log("settings: cannot write %s", path);
+			}
 			for (index = 0; index < NUMBER_OF_CONFIG_SETTINGS; index++)
 				config_set_from_file(&config_values[index], &config_settings[index], result.toptab);
 			config_report_unknown_keys(result.toptab);
