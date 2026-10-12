@@ -28,7 +28,7 @@ The host changes are these:
 | `host_gl.c` | Mesa is linked in, so there is no `libGLESv3.so` to open |
 | `host_mman.c` | `mmap`/`mprotect` over the console's memory services |
 | `host_futex.c` | futuxes over libnx's mutex and condition variable |
-| `host_net_stub.c` | stands in for `posix_net.c`; see Internet play |
+| `host_net.c` | the game's sockets on libnx; see Internet play |
 
 ## Requirements
 
@@ -109,6 +109,14 @@ The game checks for `sdmc:/switch/halo/maps/ui.map` and, with no image
 either, refuses to start and says so. Saves go in `sdmc:/switch/halo/save/`,
 and the settings file `config.toml` goes in `sdmc:/switch/halo/`.
 
+Custom Edition maps go in `sdmc:/switch/halo/custom_maps/`, with
+`bitmaps.map`, `sounds.map` and `loc.map` in that folder. A map in a
+subfolder is listed under the folder's name: campaign maps under CUSTOM
+SINGLEPLAYER, multiplayer maps under CUSTOM MULTIPLAYER. One level of
+folders is read. A map you do not have is downloaded from the other players
+while you wait in the lobby. Refer to the root
+[README.md](../../README.md#custom-edition-maps).
+
 ## Gyro aiming
 
 The stick aims as it does anywhere else. Open a profile, choose Gamepads, and
@@ -123,7 +131,9 @@ stick's Invert Look. The same five are `input.gyro_aim`,
 the console held in the hands, and a single Joy-Con each use their one sensor;
 when two Joy-Con are attached, the right one is read. It is not used in the
 menus. In a split-screen match on this console alone, the pause menu's LEAVE
-GAME leaves the match for both players and returns to the main menu.
+GAME leaves the match for both players and returns to the main menu. Each
+player's window is cleared only inside itself, so the second player's clear
+does not wipe the first player's view.
 
 ## The memory model
 
@@ -195,15 +205,11 @@ Mali-G31 is not applicable to this GPU.
 
 ## Internet play
 
-`host_net_stub.c` stands in for `posix_net.c`, which cannot be built here:
-there are no sockets. Every network entry point answers failure, which
-leaves the menus saying the feature is unavailable rather than crashing.
-`posix_random_bytes` is the exception and is really implemented, since the
-game uses it for nonces and it needs no network.
-
-Bringing internet play to the Switch means a socket layer - lwIP over libnx
-is what the homebrew scene uses - and then a `posix_net.c` that speaks to
-it. The stub is written so that replacing it is that change and no other.
+`host_net.c` answers the game's socket calls with libnx's BSD sockets
+(`socketInitializeDefault` in `host_main.c`). System link, internet play and
+downloading a Custom Edition map use the same code as the other builds.
+UPnP is not built here. Refer to "Internet play" in
+[port/linux/README.md](../linux/README.md).
 
 ## What the port does not have
 

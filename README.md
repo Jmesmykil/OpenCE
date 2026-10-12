@@ -71,6 +71,66 @@ If you would rather unpack it yourself, `maps/` still works: put it at
 `sdmc:/switch/halo/maps/` and the game uses it as it is. Refer to
 [port/switch/README.md](port/switch/README.md).
 
+## Custom Edition maps
+
+This build is up to date with OpenCE's Custom Edition maps, including
+downloading a map from the other players while you wait to join. With
+`game.custom_edition` on (the default), the level lists add CUSTOM
+SINGLEPLAYER and CUSTOM MULTIPLAYER. Put the maps in `custom_maps`, beside
+`maps`, together with `bitmaps.map`, `sounds.map` and `loc.map`. On the
+Switch that folder is `sdmc:/switch/halo/custom_maps/`.
+
+A map in a subfolder of `custom_maps` is listed under that folder's name,
+so the level list is a list of folders instead of one long list of maps.
+The game already separates campaign maps and multiplayer maps: a folder of
+campaign maps appears under CUSTOM SINGLEPLAYER, and a folder of
+multiplayer maps under CUSTOM MULTIPLAYER. Open a folder to see its maps.
+One level of folders is read; a folder inside a folder is not.
+`bitmaps.map`, `sounds.map` and `loc.map` stay in `custom_maps` itself, not
+in a subfolder. A map left in `custom_maps`, not in a folder, is listed on
+its own.
+
+<img width="640" alt="Custom singleplayer folders: Cursed Halo, Firefight and Lumoria" src="docs/images/custom-singleplayer.jpg" />
+
+<img width="640" alt="The maps inside a custom multiplayer folder" src="docs/images/custom-multiplayer.jpg" />
+
+<img width="280" alt="custom_maps with bitmaps.map, sounds.map, loc.map and one folder per set of maps" src="docs/images/custom-map-folders.png" />
+
+Joining a game on a Custom Edition map you do not have downloads it from
+the players who have it, on a local network and on the internet. A line at
+the top of the screen shows the map, how much of it has arrived, and how
+fast it is coming in. In the lobby the game starts when every player has
+the map. A game already under way is joined when the download finishes.
+The settings for sharing and downloading are in
+[port/linux/README.md](port/linux/README.md), under "Map sharing".
+
+<img width="640" alt="The lobby downloading a Custom Edition map, with progress at the top of the screen" src="docs/images/map-download.jpg" />
+
+## Gyro aiming
+
+On the Switch the stick aims as it does anywhere else, and the controller's
+gyroscope can turn the view as well. Open a profile, choose Gamepads, and
+then Gyro Aim. That screen is the Switch's only. Gyro Aim is off until it
+is set to on. Horizontal and vertical sensitivity are how far the view
+turns each way (`1` is the sensor's own turn; the screen goes from `0.25`
+to `10`). Invert horizontal and invert vertical are separate, and neither
+follows the stick's Invert Look. Each local player reads their own
+controller. Refer to [port/switch/README.md](port/switch/README.md#gyro-aiming).
+
+<img width="640" alt="Controller Setup, with Gyro Aim as its own row" src="docs/images/gyro-aim-row.jpg" />
+
+<img width="640" alt="The Gyro Aim screen: aim, sensitivity and invert" src="docs/images/gyro-aim.jpg" />
+
+## Split screen
+
+On the Switch, split screen draws each player in their own window. Clearing
+the screen for the second player used to wipe the first player's view,
+because a clear covered the whole target and player 1 is drawn first. A
+clear now stays inside that player's window, so both players see their own
+view.
+
+<img width="640" alt="Split screen, each player in their own view" src="docs/images/split-screen.jpg" />
+
 ## Platforms
 
 Each platform has its own instructions:
