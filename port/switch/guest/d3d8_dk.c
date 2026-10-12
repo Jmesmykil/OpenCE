@@ -25,7 +25,6 @@ and presenting go there; a draw and a visibility test do nothing yet.
 #include "dk_commands.h"
 #include "dk_shaders.h"
 #include "dk_textures.h"
-#include "halo_port_capacity.h"
 #include "../../linux/game/cache_file_formats.h"
 
 #include <math.h>
@@ -2246,18 +2245,22 @@ indices, if not NULL, is the guest address of the draw's indices */
 a larger list is read where it is, as before */
 #define INLINE_INDEX_LIMIT (256 * 1024)
 
-void *physical_memory_get_tag_cache_base_address(void);
-
-/* whether a draw's indices are in a map's tag data, which nothing writes
-while the map is loaded: they may be read when the host or the GPU get to
-the draw. Any others are copied as the draw is made (DK_INDEX_INLINE) */
+/* whether a draw's indices stay as they are until the GPU reads them: those
+in the Xbox window - the map's own index buffers, where the game keeps them,
+and Custom Edition's converted geometry (custom_edition_geometry.c) - which
+nothing writes while the map is loaded, or in Custom Edition's tag cache.
+The others are the lists the game remakes as it draws, its dynamic index
+buffer's (D3DDevice_CreateIndexBuffer's, in the C heap: d3d8_resources.c):
+split screen remakes them for the second view where the first's were. Only
+those are copied as the draw is made (DK_INDEX_INLINE); copying every list
+not in the tag cache, as at first, copied the map's own each draw and slowed
+every game */
 static BOOL indices_fixed(const WORD *indices, unsigned long count)
 {
 	unsigned long start = (unsigned long)(uintptr_t)indices, end = start + count * sizeof(WORD);
-	unsigned long tags = (unsigned long)(uintptr_t)physical_memory_get_tag_cache_base_address();
 	unsigned long custom = (unsigned long)(uintptr_t)halo_custom_edition_tag_cache();
 
-	if (tags && start >= tags && end <= tags + HALO_PORT_TAG_CACHE_SIZE)
+	if (platform_is_contiguous(indices) && platform_is_contiguous((const char *)indices + count * sizeof(WORD) - 1))
 		return TRUE;
 	return custom && start >= custom && end <= custom + CUSTOM_EDITION_TAG_CACHE_BYTES;
 }
