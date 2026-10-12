@@ -47,6 +47,24 @@ void d3d8_surface_resize(D3DSurface *surface, D3DFORMAT format, unsigned long wi
 defines it on Android); nothing here is OpenGL, so nothing is supported */
 struct xgpu_capabilities xgpu_capabilities;
 
+/* whether two copies of a state are the same, compared a word at a time:
+musl's memcmp goes a byte at a time, and every draw compares several
+hundred bytes of state against what was last told (d3d8_dk.c's, where it
+was 7% of the Switch's game thread; upstream's d3d8_gl.c compares its keys
+the same way). The structs compared are words throughout. */
+static int words_equal(const void *a, const void *b, size_t size)
+{
+	const uint32_t *x = a, *y = b;
+	size_t index;
+
+	for (index = 0; index < size / 4; index++)
+	{
+		if (x[index] != y[index])
+			return 0;
+	}
+	return size % 4 ? !memcmp((const char *)a + size - size % 4, (const char *)b + size - size % 4, size % 4) : 1;
+}
+
 /* ---------- the screen's width
 
 The Xbox screen is 640x480. The native ports can draw a wider one: 480
@@ -739,8 +757,8 @@ static BOOL targets_bind(BOOL *has_depth)
 		target_scale[0] = depth_scale[0];
 		target_scale[1] = depth_scale[1];
 	}
-	if (!targets_known || memcmp(&targets.color, &targets_told.color, sizeof(targets.color)) ||
-		memcmp(&targets.depth, &targets_told.depth, sizeof(targets.depth)) || targets.samples != targets_told.samples)
+	if (!targets_known || !words_equal(&targets.color, &targets_told.color, sizeof(targets.color)) ||
+		!words_equal(&targets.depth, &targets_told.depth, sizeof(targets.depth)) || targets.samples != targets_told.samples)
 	{
 		struct vk_command_targets *command = stream_command(VK_COMMAND_TARGETS, sizeof(*command));
 
@@ -971,7 +989,7 @@ static void constants_store(unsigned long first, const void *data, unsigned long
 
 	for (index = 0; index < count; index++)
 	{
-		if (memcmp(device.constants[first + index], values[index], sizeof(device.constants[0])))
+		if (!words_equal(device.constants[first + index], values[index], sizeof(device.constants[0])))
 		{
 			memcpy(device.constants[first + index], values[index], sizeof(device.constants[0]));
 			constant_serials[first + index] = ++constants_serial;
@@ -2008,7 +2026,7 @@ static void dump_pixel_shader(const char *folder, const struct nv2a_pixel_shader
 	{
 		if (entry->hash != hash)
 			continue;
-		if (!memcmp(&entry->key, key, sizeof(*key)))
+		if (words_equal(&entry->key, key, sizeof(*key)))
 			return;
 		same++;
 	}
@@ -2496,7 +2514,7 @@ static void uniforms_make(struct vk_command_draw *draw, const float texture_scal
 	parameters.point_and_screen[0] = D3D__RenderState[D3DRS_POINTSIZE] ? dword_to_float(D3D__RenderState[D3DRS_POINTSIZE]) : 1.0f;
 	parameters.point_and_screen[1] = (float)UI_OFFSET;
 	parameters.point_and_screen[2] = parameters.point_and_screen[3] = 0.0f;
-	if (!puts_this_frame.parameters_valid || memcmp(&puts_this_frame.parameters, &parameters, sizeof(parameters)))
+	if (!puts_this_frame.parameters_valid || !words_equal(&puts_this_frame.parameters, &parameters, sizeof(parameters)))
 	{
 		puts_this_frame.parameters = parameters;
 		puts_this_frame.parameters_ref = data_ref(vk_data_put(&parameters, sizeof(parameters)));
@@ -2505,7 +2523,7 @@ static void uniforms_make(struct vk_command_draw *draw, const float texture_scal
 	draw->vertex_parameters = puts_this_frame.parameters_ref;
 
 	pixel_parameters_make(&pixel, texture_scale, lit);
-	if (!puts_this_frame.pixel_valid || memcmp(&puts_this_frame.pixel, &pixel, sizeof(pixel)))
+	if (!puts_this_frame.pixel_valid || !words_equal(&puts_this_frame.pixel, &pixel, sizeof(pixel)))
 	{
 		puts_this_frame.pixel = pixel;
 		puts_this_frame.pixel_ref = data_ref(vk_data_put(&pixel, sizeof(pixel)));
@@ -2756,7 +2774,7 @@ static BOOL vertex_input_make(struct vk_command_draw *draw, unsigned long first,
 			if (declaration->packed_mask & (1UL << index))
 				memset(values[index], 0, sizeof(values[index]));
 		}
-		if (!puts_this_frame.attributes_valid || memcmp(puts_this_frame.attributes, values, sizeof(values)))
+		if (!puts_this_frame.attributes_valid || !words_equal(puts_this_frame.attributes, values, sizeof(values)))
 		{
 			memcpy(puts_this_frame.attributes, values, sizeof(values));
 			puts_this_frame.attributes_ref = data_ref(vk_data_put(values, sizeof(values)));
