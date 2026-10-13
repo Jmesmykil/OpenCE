@@ -28,6 +28,9 @@ REGISTERS = frozenset(
     + [f"{prefix}{index}" for prefix in ("v", "q", "d", "s", "h", "b") for index in range(32)]
 )
 
+# directives whose quoted operands are text, not symbols' names
+STRING_DIRECTIVES = {".ascii", ".asciz", ".string"}
+
 DROP_DIRECTIVES = {
     ".subsections_via_symbols", ".build_version", ".watchos_version_min",
     ".ios_version_min", ".macosx_version_min", ".tvos_version_min", ".loh",
@@ -232,6 +235,13 @@ class Converter:
             return
         if op == ".align":
             self.emit(f"\t.p2align {args}")
+            return
+        # a string's bytes as they are: a quoted operand elsewhere is a
+        # symbol's name, whose Mach-O underscore goes, but "_%s" here is text
+        # (it lost its underscore: the hashed map names, the "_de" language
+        # suffixes)
+        if op in STRING_DIRECTIVES:
+            self.emit(f"\t{op} {args}")
             return
         if op.startswith("."):
             self.emit(f"\t{op} {self.operands(args)}" if args else f"\t{op}")
