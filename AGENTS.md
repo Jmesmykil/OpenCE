@@ -203,6 +203,11 @@ as documentation of file formats, never copied.
   subject ends with `(#N)`.
 - A commit taken from a fork keeps its author and is made with
   `git cherry-pick -x`.
+- A release is the commit tagged `v<number>`. It adds a section to
+  `CHANGELOG.md`: `## Build <number>`, one line per change with its
+  contributors in parentheses, and `Network version <N>`
+  (`HALO_PORT_NETWORK_VERSION`) as the section's last line. Its commit
+  message is the same text, so its last line is the network version too.
 
 ## Documents
 
@@ -222,4 +227,5 @@ as documentation of file formats, never copied.
 | [port/assets/fonts/README.md](port/assets/fonts/README.md) | The fonts and their licences |
 | [tools/harness/README.md](tools/harness/README.md) | Asset-free regression tests |
 | `port/third_party/*/README.md` | Each vendored library |
+| [CHANGELOG.md](CHANGELOG.md) | What each release changed, and its network version |
 | [AUTHORS.md](AUTHORS.md) | Art credits |
