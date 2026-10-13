@@ -191,6 +191,8 @@ static struct
 	uint32_t serial_fenced;
 	uint32_t serial_retired;
 	uint32_t fence_serial[FRAMES];
+	/* the GPU faulted: the queue takes nothing more (queue_faulted) */
+	int faulted;
 	/* commands recorded since the last submission */
 	int recorded;
 
@@ -245,6 +247,44 @@ static void debug_callback(void *user, const char *context, DkResult result, con
 	(void)user;
 	host_logf(HOST_LOG_ERROR, "deko3d: %s: result %d: %s", context ? context : "?", (int)result,
 		message ? message : "");
+}
+
+/* Whether a GPU fault has put the queue in an error state. deko3d ends the
+program at the next call that needs such a queue (dkQueueSubmitCommands,
+dkQueueSignalFence, dkQueueWaitIdle, the swapchain's), with nothing said and
+whatever cbDebug is: release deko3d calls diagAbortWithResult. So once it is,
+nothing more goes to the queue: what is recorded is thrown away, every
+submission counts as finished (nothing waits for a GPU that has stopped),
+and nothing is presented. The game goes on, the picture stops, and the log
+says at which submission and frame. */
+static int queue_faulted(void)
+{
+	if (dk.faulted)
+		return 1;
+	if (!dk.queue || !dkQueueIsInErrorState(dk.queue))
+		return 0;
+	dk.faulted = 1;
+	host_logf(HOST_LOG_ERROR, "deko3d: the GPU faulted (the queue is in an error state) by submission %u, frame %lu; "
+		"nothing more is drawn or presented", (unsigned)dk.serial, dk.frames_presented);
+	return 1;
+}
+
+/* (under dk_lock) every submission finished, and no fence waited for: the
+queue has faulted, and the GPU reaches none of them */
+static void fences_forget(void)
+{
+	int index;
+
+	for (index = 0; index < FRAMES; index++)
+		dk.fence_pending[index] = 0;
+	dk.serial_retired = dk.serial;
+}
+
+/* the queue drained, unless it has faulted (queue_faulted) */
+static void queue_wait_idle(void)
+{
+	if (!queue_faulted())
+		dkQueueWaitIdle(dk.queue);
 }
 
 /* gives the command buffer the next piece of this frame's command memory */
@@ -404,6 +444,8 @@ static void fence_wait_said(int index, const char *what)
 
 	while (dkFenceWait(&dk.fences[index], 2000000000LL) != DkResult_Success)
 	{
+		if (queue_faulted())
+			return;
 		if (!said)
 		{
 			said = 1;
@@ -485,7 +527,7 @@ static int gpu_timing_bracket(void)
 	DkGpuAddr reports;
 	uint32_t pair = dk.timing_count[dk.frame];
 
-	if (!dk.timing_commands || !dk.timing_armed || pair >= TIMING_PAIRS)
+	if (!dk.timing_commands || !dk.timing_armed || pair >= TIMING_PAIRS || queue_faulted())
 		return 0;
 	reports = dkMemBlockGetGpuAddr(dk.timing_memory) + gpu_timing_region(dk.frame) + pair * 2 * 16;
 	dkCmdBufReportCounter(dk.timing_commands, DkCounter_Timestamp, reports);
@@ -500,6 +542,8 @@ static void frame_begin(void)
 	/* (under the lock: the guest's other threads read the fences through
 	host_dk_retired) */
 	pthread_mutex_lock(&dk_lock);
+	if (queue_faulted())
+		fences_forget();
 	if (dk.fence_pending[dk.frame])
 	{
 		fence_wait_said(dk.frame, "the next frame");
@@ -534,6 +578,8 @@ static void command_memory_roll(void)
 	if (dk.recorded)
 		commands_submit_partial();
 	pthread_mutex_lock(&dk_lock);
+	if (queue_faulted())
+		fences_forget();
 	if (dk.fence_pending[dk.frame])
 	{
 		fence_wait_said(dk.frame, "a command memory rollover");
@@ -716,15 +762,28 @@ invalidates the GPU's caches, so the next submission reads what the CPU has
 written (and cleaned) since. */
 static void commands_submit_serial(uint32_t finished)
 {
-	static int fault_said;
-
+	/* (a faulted queue takes nothing: what is recorded goes, and the
+	submission counts as finished) */
+	if (queue_faulted())
+	{
+		command_memory_begin();
+		pthread_mutex_lock(&dk_lock);
+		fences_forget();
+		pthread_mutex_unlock(&dk_lock);
+		dk.cleaned_count = 0;
+		dk.recorded = 0;
+		return;
+	}
 	gpu_timing_bracket();
 	dkQueueSubmitCommands(dk.queue, dkCmdBufFinishList(dk.commands));
-	if (!fault_said && dkQueueIsInErrorState(dk.queue))
+	if (queue_faulted())
 	{
-		fault_said = 1;
-		host_logf(HOST_LOG_ERROR, "deko3d: the queue is in an error state at submission %u (frame %lu)",
-			(unsigned)dk.serial, dk.frames_presented);
+		pthread_mutex_lock(&dk_lock);
+		fences_forget();
+		pthread_mutex_unlock(&dk_lock);
+		dk.cleaned_count = 0;
+		dk.recorded = 0;
+		return;
 	}
 	pthread_mutex_lock(&dk_lock);
 	dkQueueSignalFence(dk.queue, &dk.fences[dk.frame], true);
@@ -760,6 +819,11 @@ static void fences_poll(void)
 {
 	int index;
 
+	if (queue_faulted())
+	{
+		fences_forget();
+		return;
+	}
 	for (index = 0; index < FRAMES; index++)
 	{
 		if (dk.fence_pending[index] && dkFenceWait(&dk.fences[index], 0) == DkResult_Success)
@@ -792,7 +856,7 @@ submission still running reads that memory */
 void host_dk_idle(void)
 {
 	if (dk.ready)
-		dkQueueWaitIdle(dk.queue);
+		queue_wait_idle();
 }
 
 static int initialize(void)
@@ -996,16 +1060,8 @@ static void present(const struct dk_command_present *command)
 	here - with nothing said about the fault. Say it, with the frame, and
 	stop presenting: the game goes on, the picture stops, the log has the
 	frame the GPU faulted in */
-	if (dkQueueIsInErrorState(dk.queue))
+	if (queue_faulted())
 	{
-		static int said;
-
-		if (!said)
-		{
-			said = 1;
-			host_logf(HOST_LOG_ERROR, "deko3d: the GPU faulted (the queue is in an error state) by frame %lu; "
-				"nothing more is presented", dk.frames_presented);
-		}
 		/* what was recorded is thrown away, so the command memory does not
 		fill with frames that are never submitted (frame_begin would wait for
 		a fence the faulted GPU never reaches) */
@@ -1056,6 +1112,10 @@ static void present(const struct dk_command_present *command)
 		dkCmdBufBlitImage(dk.commands, &source, &from, &screen_view, &to, DkBlitFlag_FilterLinear, 0);
 	}
 	commands_submit();
+	/* (the GPU may have faulted since the frame began: the image is not
+	presented, as a faulted queue would end the program) */
+	if (queue_faulted())
+		return;
 	if (screenshot)
 	{
 		/* a screenshot is a debugging aid: the frame waits for the GPU to
@@ -1355,7 +1415,7 @@ static void texture_release(struct texture *texture)
 	if (tex.release_count == RELEASE_LIMIT)
 	{
 		/* too many waiting: the GPU is waited for, which is rare and lets them all go */
-		dkQueueWaitIdle(dk.queue);
+		queue_wait_idle();
 		releases_collect();
 	}
 	if (tex.release_count < RELEASE_LIMIT)
@@ -1387,7 +1447,7 @@ static DkGpuAddr staging_copy(const void *data, uint32_t size)
 	{
 		if (dk.recorded)
 			commands_submit_partial();
-		dkQueueWaitIdle(dk.queue);
+		queue_wait_idle();
 		offset = 0;
 	}
 	memcpy((char *)tex.staging_cpu + (size_t)dk.frame * STAGING_SLICE_SIZE + offset, data, size);
@@ -1595,7 +1655,7 @@ static void texture_verify(struct texture *texture, const struct dk_command_text
 		}
 	}
 	commands_submit_partial();
-	dkQueueWaitIdle(dk.queue);
+	queue_wait_idle();
 	{
 		const uint8_t *game = (const uint8_t *)(uintptr_t)command->source;
 		const uint8_t *image = (const uint8_t *)readback_cpu;
