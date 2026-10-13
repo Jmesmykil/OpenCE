@@ -29,7 +29,7 @@ end.
 | `docs/` | Longer design notes (`custom_edition_caches.md`) |
 | `pgo/` | Profile-guided optimisation profiles |
 | `assets/` | Game data for local runs (gitignored: `maps/`, `custom_maps/`) |
-| `.github/workflows/` | CI: builds every platform on each push, publishes releases from `main` |
+| `.github/workflows/` | CI: builds every platform on each push; a pushed tag `v<number>` on `main` publishes release `build-<number>` (higher than the last), its notes the commit's message |
 
 ## Building
 

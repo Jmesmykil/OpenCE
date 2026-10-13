@@ -144,7 +144,7 @@ def miniupnpc_sources() -> List[Path]:
 
 def updater_defines(release: bool) -> str:
     """the self-updater's build (port/linux/src/updater.c): its number, from
-    HALO_BUILD_NUMBER (tools/ci_build.py gives it for builds of main; none
+    HALO_BUILD_NUMBER (tools/ci_build.py gives it for a release tag's builds; none
     elsewhere, which never look for updates), and its configuration"""
     number = os.environ.get("HALO_BUILD_NUMBER", "0")
     if not number.isdigit():

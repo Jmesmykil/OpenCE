@@ -81,8 +81,8 @@ The current list is in the [issues](https://github.com/thelinkin3000/halo-ce-uni
 
 ## Download
 
-Every build of `main` that passes is a release. These links always point to
-the latest one:
+Each release is a build of `main` we choose to publish, numbered by its tag.
+These links always point to the latest one:
 
 | Platform | Play | Debug (for reports) |
 | --- | --- | --- |

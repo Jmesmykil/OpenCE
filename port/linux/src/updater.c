@@ -4,8 +4,8 @@ UPDATER.C
 The desktop ports' self-updater (Linux and Windows; the Android app updates
 itself in Java, port/android).
 
-A build of the main branch made by GitHub Actions knows its build number
-(HALO_BUILD_NUMBER, the workflow's run number, which names its release:
+A release's build, made by GitHub Actions for a pushed tag v<number>, knows
+its build number (HALO_BUILD_NUMBER, the tag's number, which names its release:
 build-<number>); other builds have none and never look for updates. When
 update.auto in config.toml is true (the default), the game asks GitHub for
 the latest release when it starts, on a thread of its own: the game starts

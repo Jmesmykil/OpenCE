@@ -17,13 +17,26 @@ name: Build
 # - Windows, whose minutes cost twice Linux's, builds only Windows;
 # - artifacts are kept for three days.
 #
-# A successful build of main is also published as a GitHub release, the
-# newest marked latest, so that
+# A release is made by pushing a tag v<number> (git tag v94 && git push
+# origin v94) to a commit of main: the builds of that commit are published as
+# the GitHub release build-<number>, "Build <number>", its notes the commit's
+# message, marked latest, so that
 # https://github.com/<repository>/releases/latest/download/<file> always
-# gives the latest build; the last five are kept. Its web build is then the
-# site on GitHub Pages (https://halocombatevolved.com/, port/web/README.md).
+# gives the latest build; the last five are kept. The release is named
+# build-<number>, not v<number>, because that is what the builds already
+# installed look for (their updaters: port/switch/host/host_update.c,
+# port/linux/src/updater.c, the Android app's Updater.java), and the number
+# has to be higher than the last release's, which they compare it with (and
+# Android's version code is). Pushes to branches build without a release.
+# Its web build is then the site on GitHub Pages
+# (https://halocombatevolved.com/, port/web/README.md).
 on:
   push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+    # (not checked for a tag's push, which always builds)
     paths-ignore:
       - "**.md"
   workflow_dispatch:
@@ -380,12 +393,13 @@ jobs:
 
   release:
     # The four builds (Android's and the Switch's) as a release, tagged
-    # build-<run number> and marked latest
+    # build-<number> for a pushed tag v<number>, and marked latest
     # (every file keeps its name from release to release, for the README's
     # latest/download links); then all but the newest five build-* releases
-    # go, tags and all. Only for main, and only when every platform built.
+    # go, tags and all. Only for a v<number> tag on a commit of main, newer
+    # than the last release, and only when every platform built.
     needs: [android, switch]
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -396,6 +410,38 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the tag
+        id: tag
+        run: |
+          version="$GITHUB_REF_NAME"
+          case "$version" in
+            v[0-9]*) number="${version#v}" ;;
+            *) number= ;;
+          esac
+          if ! printf '%s' "$number" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::the tag $version is not v<number> (v94, say): no release"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::the tag $version is not on a commit of main: no release"
+            exit 1
+          fi
+          if gh release view "build-$number" > /dev/null 2>&1; then
+            echo "::error::build-$number is released already: tag a higher number"
+            exit 1
+          fi
+          last="$(gh release list --limit 100 --json tagName \
+            --jq '[.[] | .tagName | select(startswith("build-")) | ltrimstr("build-") | tonumber] | max // 0')"
+          if [ "$number" -le "$last" ]; then
+            echo "::error::the tag $version is not higher than the last release, build-$last: the installed builds would not update to it"
+            exit 1
+          fi
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           pattern: halo-*
@@ -419,16 +465,17 @@ jobs:
       - name: Publish
         id: publish
         env:
-          MESSAGE: ${{ github.event.head_commit.message }}
+          NUMBER: ${{ steps.tag.outputs.number }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          tag="build-$GITHUB_RUN_NUMBER"
-          subject="$(printf '%s' "${MESSAGE:-manual run}" | head -n 1)"
-          printf '%s\n\nCommit: %s\nBuild: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
-            "$subject" "$COMMIT_URL" "$RUN_URL" > notes.md
+          tag="build-$NUMBER"
+          # the notes: the tagged commit's whole message, then where it came from
+          git log -1 --format=%B "$GITHUB_SHA" > notes.md
+          printf '\nCommit: %s\nBuild: %s\n\nThe release builds are for playing; the debug builds stop at the first failed assertion and log it.\n' \
+            "$COMMIT_URL" "$RUN_URL" >> notes.md
           gh release create "$tag" release/*.zip --target "$GITHUB_SHA" --latest \
-            --title "Build $GITHUB_RUN_NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
+            --title "Build $NUMBER (${GITHUB_SHA:0:7})" --notes-file notes.md
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       # The Windows builds' executables and PDBs to Sentry, which turns the
@@ -556,7 +603,7 @@ jobs:
               release="$release, on [the site]($SITE_URL)"
             fi
           else
-            release="None (only a successful build of main makes one)"
+            release="None (only a pushed v<number> tag makes one)"
           fi
           subject="$(printf '%s' "${MESSAGE:-manual run}" | head -n 1 | cut -c1-200)"
           jq -n \

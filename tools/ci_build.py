@@ -13,9 +13,10 @@ which only make the build slower; release builds use both, as a local
 release build does (profile-guided optimisation needs clang 22 or later,
 and is skipped with an older one). A profile build is a debug build with
 configure.py --profile, so that the profiling build is built too. CI_COMPILER_LAUNCHER (ccache, say) is
-passed on as --compiler-launcher. A build of the main branch gets the run's
-number (HALO_BUILD_NUMBER), which its release is named after and the
-self-updater compares (and the web site's version.json names).
+passed on as --compiler-launcher. A build of a release tag, v<number>, gets
+that number (HALO_BUILD_NUMBER), which its release is named after
+(build-<number>) and the self-updater compares (and the web site's
+version.json names).
 
 The web build (port/web/README.md) needs Emscripten (emcc on the PATH, as
 emsdk_env.sh puts it); dist/halo-web-<config>/ is the whole site, which a
@@ -73,11 +74,13 @@ def main() -> int:
     launcher = os.environ.get("CI_COMPILER_LAUNCHER")
     if launcher:
         configure += ["--compiler-launcher", launcher]
-    # a build of main knows its number, which names its release (build-<n>),
-    # for the self-updater (port/linux/src/updater.c, and the Android app);
-    # other builds have none, and never look for updates
-    if os.environ.get("GITHUB_REF") == "refs/heads/main" and os.environ.get("GITHUB_RUN_NUMBER", "").isdigit():
-        os.environ["HALO_BUILD_NUMBER"] = os.environ["GITHUB_RUN_NUMBER"]
+    # a build of a release tag (v<n>) knows its number, which names its
+    # release (build-<n>), for the self-updaters (port/linux/src/updater.c,
+    # port/switch/host/host_update.c, the Android app); other builds have
+    # none, and never look for updates
+    ref = os.environ.get("GITHUB_REF", "")
+    if ref.startswith("refs/tags/v") and ref[len("refs/tags/v"):].isdigit():
+        os.environ["HALO_BUILD_NUMBER"] = str(int(ref[len("refs/tags/v"):]))
         print(f"build number {os.environ['HALO_BUILD_NUMBER']}", flush=True)
     run(configure)
 
