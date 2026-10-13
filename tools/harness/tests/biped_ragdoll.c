@@ -180,7 +180,9 @@ static void stand(void)
 		ragdoll.primary[index] = counts[index] > 0 ? children[index][0] : NONE;
 		ragdoll.secondary[index] = counts[index] > 1 ? children[index][1] : NONE;
 		ragdoll.velocities[index] = zero_vector3d;
+		ragdoll.inverse_masses[index] = 1.f;
 	}
+	ragdoll.friction = RAGDOLL_FRICTION;
 	/* (the knees bend back, the hips swing within their cones) */
 	{
 		real_vector3d back = { -1.f, 0.f, 0.f };
@@ -375,6 +377,78 @@ int main(int argc, char **argv)
 			CHECK(dot_product3d(&thigh, &middle) > RAGDOLL_HIP_COSINE - 0.15f, "the hip swung to %f (tick %d)",
 				dot_product3d(&thigh, &middle), tick_index);
 		}
+		return 0;
+	}
+	/* halo2's body (a heavy torso, dragging joints, less friction on the
+	ground) falls in one piece and comes to rest too */
+	CASE("halo2_falls")
+	{
+		short index;
+
+		stand();
+		ragdoll.inverse_masses[PELVIS] = ragdoll.inverse_masses[SPINE] = RAGDOLL_HALO2_TORSO_INVERSE_MASS;
+		ragdoll.inverse_masses[HEAD] = RAGDOLL_HALO2_HEAD_INVERSE_MASS;
+		ragdoll.inverse_masses[L_HAND] = ragdoll.inverse_masses[R_HAND] = RAGDOLL_HALO2_END_INVERSE_MASS;
+		ragdoll.inverse_masses[L_FOOT] = ragdoll.inverse_masses[R_FOOT] = RAGDOLL_HALO2_END_INVERSE_MASS;
+		ragdoll.joint_friction = RAGDOLL_HALO2_JOINT_FRICTION;
+		ragdoll.friction = RAGDOLL_HALO2_FRICTION;
+		for (index = 0; index < PARTICLES; index++)
+			ragdoll.velocities[index].i = 0.002f * standing[index][2] / 0.6f;
+		for (tick_index = 0; tick_index < 6 * TICKS_PER_SECOND; tick_index++)
+		{
+			tick();
+			check_body(tick_index);
+		}
+		CHECK(ragdoll.positions[HEAD].z < 0.2f, "the head still up at %f", ragdoll.positions[HEAD].z);
+		CHECK(fastest() < RAGDOLL_SLEEP_SPEED, "still moving at %f", fastest());
+		return 0;
+	}
+	/* halo2: a bone stretched between a heavy torso and a light limb pulls
+	the limb most of the way */
+	CASE("torso_heavier")
+	{
+		real_point3d torso = { 0.f, 0.f, 1.f }, limb = { 0.3f, 0.f, 1.f };
+
+		memset(&ragdoll, 0, sizeof(ragdoll));
+		ragdoll.particle_count = 2;
+		ragdoll.positions[0] = torso;
+		ragdoll.positions[1] = limb;
+		ragdoll.inverse_masses[0] = RAGDOLL_HALO2_TORSO_INVERSE_MASS;
+		ragdoll.inverse_masses[1] = RAGDOLL_HALO2_END_INVERSE_MASS;
+		ragdoll_add_constraint(&ragdoll, 0, 1, _ragdoll_constraint_length, 0.2f);
+		ragdoll_solve(&ragdoll);
+		CHECK(fabs(distance3d(&ragdoll.positions[0], &ragdoll.positions[1]) - 0.2f) < 0.001f, "not 0.2 apart");
+		CHECK(distance3d(&torso, &ragdoll.positions[0]) < 0.5f * distance3d(&limb, &ragdoll.positions[1]),
+			"the torso moved %f, the limb %f", distance3d(&torso, &ragdoll.positions[0]),
+			distance3d(&limb, &ragdoll.positions[1]));
+		return 0;
+	}
+	/* halo2: a hand in the chest is put back out of it, and a dragging
+	joint slows a limb's swing about it */
+	CASE("limbs_keep_out")
+	{
+		real swing;
+
+		memset(&ragdoll, 0, sizeof(ragdoll));
+		ragdoll.particle_count = 2;
+		set_real_vector3d((real_vector3d *)&ragdoll.positions[0], 0.f, 0.f, 1.f);
+		set_real_vector3d((real_vector3d *)&ragdoll.positions[1], 0.f, 0.01f, 1.f);
+		ragdoll.inverse_masses[0] = RAGDOLL_HALO2_TORSO_INVERSE_MASS;
+		ragdoll.inverse_masses[1] = RAGDOLL_HALO2_END_INVERSE_MASS;
+		ragdoll_add_constraint(&ragdoll, 1, 0, _ragdoll_constraint_minimum, RAGDOLL_HALO2_TORSO_CLEARANCE);
+		ragdoll_solve(&ragdoll);
+		CHECK(distance3d(&ragdoll.positions[0], &ragdoll.positions[1]) > RAGDOLL_HALO2_TORSO_CLEARANCE * 0.9f,
+			"the hand in the chest (%f)", distance3d(&ragdoll.positions[0], &ragdoll.positions[1]));
+		stand();
+		ragdoll.joint_friction = RAGDOLL_HALO2_JOINT_FRICTION;
+		set_real_vector3d(&ragdoll.velocities[L_HAND], 0.f, 0.f, 0.1f);
+		ragdoll_substep(&ragdoll);
+		swing = ragdoll.velocities[L_HAND].k;
+		stand();
+		set_real_vector3d(&ragdoll.velocities[L_HAND], 0.f, 0.f, 0.1f);
+		ragdoll_substep(&ragdoll);
+		CHECK(swing < ragdoll.velocities[L_HAND].k - 0.0002f, "the hand kept %f of its swing, freely %f", swing,
+			ragdoll.velocities[L_HAND].k);
 		return 0;
 	}
 	fprintf(stderr, "no such case: %s\n", case_name);

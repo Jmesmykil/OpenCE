@@ -316,10 +316,11 @@ static const struct config_setting config_settings[] =
 		"to throw and reload, and a player turns with the aim while throwing;\n"
 		"false: the original animations, which freeze the legs and stand a\n"
 		"rider up." },
-	{ "game.ragdoll", _config_boolean, "true", "HALO_RAGDOLL", _environment_value, _platform_all,
-		"In a multiplayer game, a body falls as a ragdoll from the moment it\n"
-		"dies, pushed as it was hit, and a blast moves it again; false: the\n"
-		"original death animations. Each machine draws its own." },
+	{ "game.ragdoll", _config_string, "\"woody\"", "HALO_RAGDOLL", _environment_value, _platform_all,
+		"How a body falls in a multiplayer game: \"woody\" (a ragdoll of light,\n"
+		"freely swinging limbs), \"halo2\" (a ragdoll as Halo 2's: a heavy torso,\n"
+		"limbs that keep out of it, joints that drag, thrown further by blasts)\n"
+		"or \"none\" (the original death animations). Each machine draws its own." },
 	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
 		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
 		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"

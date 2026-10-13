@@ -3,7 +3,11 @@ BIPED_RAGDOLL.C
 
 A body in a multiplayer game falls as a ragdoll (game.ragdoll), from the tick
 its unit dies, in place of its dying animation and the limp body it lies as
-afterwards (bipeds.c, biped_limp_noodle.c).
+afterwards (bipeds.c, biped_limp_noodle.c). "woody" is the ragdoll below;
+"halo2" one after Halo 2's (Havok's, as its physics models describe them:
+rigid bodies of some size with friction in their joints), a heavy torso,
+limbs with a particle midway along each that keep out of the torso and each
+other, joints that drag and twist less, and blasts that throw it further.
 
 Each of the model's nodes is a particle, and the head has one more at its
 top. Bones keep their lengths, the joints where a bone branches (the hips,
@@ -52,7 +56,7 @@ The weapons it drops are the host's, as before.
 #include "biped_ragdoll.h"
 
 /* port/linux/src/port_config.c */
-int config_boolean(const char *name);
+const char *config_string(const char *name);
 unsigned long config_changes(void);
 /* port/linux/game/object_bounds_cache.c */
 void object_bounds_cache_update(long object_index, real_point3d const *center, real radius);
@@ -63,8 +67,9 @@ enum
 {
 	MAXIMUM_RAGDOLLS = 32,
 	MAXIMUM_RAGDOLL_TIPS = 4,
-	MAXIMUM_RAGDOLL_PARTICLES = MAXIMUM_NODES_PER_MODEL + MAXIMUM_RAGDOLL_TIPS,
-	MAXIMUM_RAGDOLL_CONSTRAINTS = 4 * MAXIMUM_RAGDOLL_PARTICLES,
+	MAXIMUM_RAGDOLL_MIDDLES = 16,
+	MAXIMUM_RAGDOLL_PARTICLES = MAXIMUM_NODES_PER_MODEL + MAXIMUM_RAGDOLL_TIPS + MAXIMUM_RAGDOLL_MIDDLES,
+	MAXIMUM_RAGDOLL_CONSTRAINTS = 6 * MAXIMUM_RAGDOLL_PARTICLES,
 	MAXIMUM_RAGDOLL_BLOWS = 16,
 	MAXIMUM_RAGDOLL_JOINTS = 16,
 
@@ -75,6 +80,18 @@ enum
 	RAGDOLL_MAXIMUM_TICKS = 10 * TICKS_PER_SECOND,
 	/* a blow this many ticks before it starts pushes it */
 	RAGDOLL_BLOW_TICKS = 2,
+};
+
+/* game.ragdoll: how a body falls */
+enum
+{
+	_ragdoll_style_none = 0,
+	/* light, even limbs, swinging freely within their joints */
+	_ragdoll_style_woody,
+	/* as Halo 2's bodies fall (Havok's ragdolls): a heavy torso, limbs of
+	some thickness that keep out of it and of each other, joints that drag
+	and twist little, thrown further by blasts */
+	_ragdoll_style_halo2,
 };
 
 enum
@@ -126,6 +143,24 @@ cone's cosine), and how much of the way back a joint is put each time */
 #define RAGDOLL_HIP_TILT 0.6f /* 35 degrees (forward to 120, back to 50) */
 #define RAGDOLL_SHOULDER_COSINE -0.5f /* 120 degrees */
 #define RAGDOLL_JOINT_STIFFNESS 0.35f
+/* halo2: the knees' and elbows' twist, the shoulders' cone tilted forward,
+what a limb's speed keeps of its swing about its joint each half tick and
+along what it lies on, how much harder blows push, how heavy each part is
+(as an inverse: the torso's least), and how far limbs keep out of the torso
+and each other */
+#define RAGDOLL_HALO2_KNEE_TWIST 0.1f
+#define RAGDOLL_HALO2_ELBOW_TWIST 0.3f
+#define RAGDOLL_HALO2_SHOULDER_TILT 0.4f
+#define RAGDOLL_HALO2_SHOULDER_COSINE -0.17f /* 100 degrees */
+#define RAGDOLL_HALO2_JOINT_FRICTION 0.06f
+#define RAGDOLL_HALO2_FRICTION 0.75f
+#define RAGDOLL_HALO2_BLAST_SCALE 1.5f
+#define RAGDOLL_HALO2_TORSO_INVERSE_MASS 0.35f
+#define RAGDOLL_HALO2_HEAD_INVERSE_MASS 0.6f
+#define RAGDOLL_HALO2_UPPER_INVERSE_MASS 0.8f
+#define RAGDOLL_HALO2_END_INVERSE_MASS 1.3f
+#define RAGDOLL_HALO2_TORSO_CLEARANCE 0.055f
+#define RAGDOLL_HALO2_LIMB_CLEARANCE 0.03f
 
 /* ---------- structures */
 
@@ -170,6 +205,11 @@ struct ragdoll
 	moves and poses it (and as the host sends it); else the ragdoll moves
 	the body itself */
 	boolean drawn_only;
+	/* game.ragdoll's, as it was when the body died */
+	short style;
+	real friction;
+	real joint_friction;
+	real blast_scale;
 	/* the nodes, parents first */
 	short order[MAXIMUM_NODES_PER_MODEL];
 	short parents[MAXIMUM_RAGDOLL_PARTICLES];
@@ -179,6 +219,8 @@ struct ragdoll
 	short secondary[MAXIMUM_NODES_PER_MODEL];
 	real_point3d positions[MAXIMUM_RAGDOLL_PARTICLES];
 	real_vector3d velocities[MAXIMUM_RAGDOLL_PARTICLES];
+	/* how readily each moves when the bones pull it (1: as any other) */
+	real inverse_masses[MAXIMUM_RAGDOLL_PARTICLES];
 	struct ragdoll_constraint constraints[MAXIMUM_RAGDOLL_CONSTRAINTS];
 	short joint_count;
 	struct ragdoll_joint joints[MAXIMUM_RAGDOLL_JOINTS];
@@ -205,18 +247,28 @@ static boolean ragdolls_initialized = FALSE;
 
 /* ---------- private code */
 
-static boolean ragdoll_enabled(
+/* game.ragdoll's style, in a multiplayer game; none elsewhere */
+static short ragdoll_style(
 	void)
 {
 	static unsigned long changes = (unsigned long)-1;
-	static boolean enabled = FALSE;
+	static short style = _ragdoll_style_none;
 
 	if (changes != config_changes())
 	{
+		char const *name = config_string("game.ragdoll");
+
 		changes = config_changes();
-		enabled = config_boolean("game.ragdoll") != 0;
+		style = !strcmp(name, "halo2") ? _ragdoll_style_halo2 :
+			!strcmp(name, "woody") ? _ragdoll_style_woody : _ragdoll_style_none;
 	}
-	return enabled && game_engine_running();
+	return game_engine_running() ? style : _ragdoll_style_none;
+}
+
+static boolean ragdoll_enabled(
+	void)
+{
+	return ragdoll_style() != _ragdoll_style_none;
 }
 
 static void ragdolls_initialize(
@@ -765,6 +817,154 @@ static boolean ragdoll_order_nodes(
 	return count == node_count;
 }
 
+/* the parts of the body, by their nodes' names (as Halo's bipeds name them) */
+enum
+{
+	_ragdoll_part_other = 0,
+	_ragdoll_part_torso,
+	_ragdoll_part_head,
+	_ragdoll_part_upper_limb,
+	_ragdoll_part_lower_limb,
+	_ragdoll_part_end,
+};
+
+static short ragdoll_node_part(
+	struct model_node const *node)
+{
+	if (name_contains(node->name, "pelvis") || name_contains(node->name, "spine") ||
+		name_contains(node->name, "neck"))
+	{
+		return _ragdoll_part_torso;
+	}
+	if (name_contains(node->name, "head"))
+		return _ragdoll_part_head;
+	if (name_contains(node->name, "thigh") || name_contains(node->name, "upperarm") ||
+		name_contains(node->name, "clavicle"))
+	{
+		return _ragdoll_part_upper_limb;
+	}
+	if (name_contains(node->name, "calf") || name_contains(node->name, "forearm"))
+		return _ragdoll_part_lower_limb;
+	if (name_contains(node->name, "hand") || name_contains(node->name, "foot") ||
+		name_contains(node->name, "finger") || name_contains(node->name, "toe"))
+	{
+		return _ragdoll_part_end;
+	}
+	return _ragdoll_part_other;
+}
+
+/* how many particles apart two are along the skeleton, up to limit */
+static short ragdoll_separation(
+	struct ragdoll const *ragdoll,
+	short a,
+	short b,
+	short limit)
+{
+	short up_a;
+	short steps_a;
+
+	for (up_a = a, steps_a = 0; up_a != NONE && steps_a <= limit; up_a = ragdoll->parents[up_a], steps_a++)
+	{
+		short up_b;
+		short steps_b;
+
+		for (up_b = b, steps_b = 0; up_b != NONE && steps_a + steps_b <= limit;
+			up_b = ragdoll->parents[up_b], steps_b++)
+		{
+			if (up_a == up_b)
+				return (short)(steps_a + steps_b);
+		}
+	}
+	return (short)(limit + 1);
+}
+
+/* halo2's body: the parts' weights; a particle midway along each long bone
+(a limb's and the spine's), which gives them thickness against the world;
+and the limbs kept out of the torso and of each other */
+static void ragdoll_build_halo2(
+	struct ragdoll *ragdoll,
+	struct model *model)
+{
+	short parts[MAXIMUM_RAGDOLL_PARTICLES];
+	short node_count = ragdoll->node_count;
+	short particle_count = ragdoll->particle_count;
+	short middles = 0;
+	short index;
+
+	for (index = 0; index < particle_count; index++)
+	{
+		short part = index < node_count ?
+			ragdoll_node_part(TAG_BLOCK_GET_ELEMENT(&model->nodes, index, struct model_node)) :
+			_ragdoll_part_head; /* (the head's top) */
+
+		parts[index] = part;
+		ragdoll->inverse_masses[index] =
+			part == _ragdoll_part_torso ? RAGDOLL_HALO2_TORSO_INVERSE_MASS :
+			part == _ragdoll_part_head ? RAGDOLL_HALO2_HEAD_INVERSE_MASS :
+			part == _ragdoll_part_upper_limb ? RAGDOLL_HALO2_UPPER_INVERSE_MASS :
+			part == _ragdoll_part_end ? RAGDOLL_HALO2_END_INVERSE_MASS : 1.f;
+	}
+
+	/* (midway along a bone from a limb's or the spine's node to its one
+	child, held there by the bone's two halves) */
+	for (index = 1; index < node_count && middles < MAXIMUM_RAGDOLL_MIDDLES; index++)
+	{
+		short parent = ragdoll->parents[index];
+		short middle = ragdoll->particle_count;
+		real length;
+
+		if (parent == NONE || ragdoll->primary[parent] != index || ragdoll->secondary[parent] != NONE ||
+			(parts[parent] != _ragdoll_part_upper_limb && parts[parent] != _ragdoll_part_lower_limb &&
+				parts[parent] != _ragdoll_part_torso))
+		{
+			continue;
+		}
+		length = distance3d(&ragdoll->positions[parent], &ragdoll->positions[index]);
+		if (length < 4.f * RAGDOLL_RADIUS)
+			continue;
+		ragdoll->positions[middle].x = 0.5f * (ragdoll->positions[parent].x + ragdoll->positions[index].x);
+		ragdoll->positions[middle].y = 0.5f * (ragdoll->positions[parent].y + ragdoll->positions[index].y);
+		ragdoll->positions[middle].z = 0.5f * (ragdoll->positions[parent].z + ragdoll->positions[index].z);
+		ragdoll->parents[middle] = parent;
+		ragdoll->velocities[middle] = *global_zero_vector3d;
+		ragdoll->inverse_masses[middle] = ragdoll->inverse_masses[parent];
+		parts[middle] = parts[parent];
+		ragdoll_add_constraint(ragdoll, parent, middle, _ragdoll_constraint_length, 0.5f * length);
+		ragdoll_add_constraint(ragdoll, middle, index, _ragdoll_constraint_length, 0.5f * length);
+		ragdoll->particle_count++;
+		middles++;
+	}
+
+	/* (no closer than they are now, if that is already closer) */
+	for (index = 0; index < ragdoll->particle_count; index++)
+	{
+		short other;
+		boolean limb = parts[index] == _ragdoll_part_lower_limb || parts[index] == _ragdoll_part_end;
+
+		if (!limb)
+			continue;
+		for (other = 0; other < ragdoll->particle_count; other++)
+		{
+			real clearance;
+			real now;
+
+			if (other == index)
+				continue;
+			if (parts[other] == _ragdoll_part_torso || parts[other] == _ragdoll_part_head)
+				clearance = RAGDOLL_HALO2_TORSO_CLEARANCE;
+			else if ((parts[other] == _ragdoll_part_lower_limb || parts[other] == _ragdoll_part_end) && other > index)
+				clearance = RAGDOLL_HALO2_LIMB_CLEARANCE;
+			else
+				continue;
+			if (ragdoll_separation(ragdoll, index, other, 3) <= 3)
+				continue;
+			now = distance3d(&ragdoll->positions[index], &ragdoll->positions[other]);
+			ragdoll_add_constraint(ragdoll, index, other, _ragdoll_constraint_minimum,
+				now < clearance ? now : clearance);
+		}
+	}
+}
+
 static boolean ragdoll_build(
 	struct ragdoll *ragdoll,
 	long biped_index)
@@ -778,6 +978,7 @@ static boolean ragdoll_build(
 	short index;
 	short children[MAXIMUM_RAGDOLL_PARTICLES][3];
 	short child_counts[MAXIMUM_RAGDOLL_PARTICLES];
+	boolean halo2;
 
 	if (definition->object.model.index == NONE)
 		return FALSE;
@@ -791,6 +992,10 @@ static boolean ragdoll_build(
 	if (!ragdoll_order_nodes(model, node_count, ragdoll->order))
 		return FALSE;
 
+	halo2 = ragdoll->style == _ragdoll_style_halo2;
+	ragdoll->friction = halo2 ? RAGDOLL_HALO2_FRICTION : RAGDOLL_FRICTION;
+	ragdoll->joint_friction = halo2 ? RAGDOLL_HALO2_JOINT_FRICTION : 0.f;
+	ragdoll->blast_scale = halo2 ? RAGDOLL_HALO2_BLAST_SCALE : 1.f;
 	node_matrices = object_get_node_matrices(biped_index);
 	csmemcpy(ragdoll->pose, node_matrices, node_count * sizeof(real_matrix4x3));
 	ragdoll->node_count = node_count;
@@ -919,13 +1124,15 @@ static boolean ragdoll_build(
 		if (name_contains(parent_node->name, "thigh"))
 			ragdoll_add_cone(ragdoll, parent, index, &biped->object.forward, RAGDOLL_HIP_TILT, RAGDOLL_HIP_COSINE);
 		else if (name_contains(parent_node->name, "upperarm"))
-			ragdoll_add_cone(ragdoll, parent, index, &biped->object.forward, 0.f, RAGDOLL_SHOULDER_COSINE);
+			ragdoll_add_cone(ragdoll, parent, index, &biped->object.forward,
+				halo2 ? RAGDOLL_HALO2_SHOULDER_TILT : 0.f, halo2 ? RAGDOLL_HALO2_SHOULDER_COSINE : RAGDOLL_SHOULDER_COSINE);
 		if (grandparent == NONE || child_counts[parent] != 1)
 			continue;
 		if (name_contains(parent_node->name, "calf"))
 		{
 			scale_vector3d(&biped->object.forward, -1.f, &bend);
-			ragdoll_add_hinge(ragdoll, grandparent, parent, index, &bend, RAGDOLL_KNEE_TWIST);
+			ragdoll_add_hinge(ragdoll, grandparent, parent, index, &bend,
+				halo2 ? RAGDOLL_HALO2_KNEE_TWIST : RAGDOLL_KNEE_TWIST);
 		}
 		else if (name_contains(parent_node->name, "forearm"))
 		{
@@ -940,9 +1147,15 @@ static boolean ragdoll_build(
 				bend = lower;
 			else
 				bend = biped->object.forward;
-			ragdoll_add_hinge(ragdoll, grandparent, parent, index, &bend, RAGDOLL_ELBOW_TWIST);
+			ragdoll_add_hinge(ragdoll, grandparent, parent, index, &bend,
+				halo2 ? RAGDOLL_HALO2_ELBOW_TWIST : RAGDOLL_ELBOW_TWIST);
 		}
 	}
+
+	for (index = 0; index < ragdoll->particle_count; index++)
+		ragdoll->inverse_masses[index] = 1.f;
+	if (halo2)
+		ragdoll_build_halo2(ragdoll, model);
 
 	/* where the world lets each particle be, reached from its parent's (an
 	animated pose can reach into a wall or the ground) */
@@ -1139,7 +1352,8 @@ static void ragdoll_start(
 			direction.k += 0.45f;
 			if (normalize3d(&direction) > 0.f)
 			{
-				scale_vector3d(&direction, 0.5f * blow->speed * definition->object.acceleration_scale, &speed);
+				scale_vector3d(&direction, 0.5f * blow->speed * definition->object.acceleration_scale *
+					ragdoll->blast_scale, &speed);
 				ragdoll_push(ragdoll, &blow->epicenter, &speed, RAGDOLL_BLOW_RADIUS, TRUE);
 			}
 		}
@@ -1186,6 +1400,8 @@ static void ragdoll_solve(
 			real_vector3d offset;
 			real distance;
 			real correction;
+			real weight_a;
+			real weight_b;
 
 			vector_from_points3d(a, b, &offset);
 			distance = magnitude3d(&offset);
@@ -1193,13 +1409,18 @@ static void ragdoll_solve(
 				continue;
 			if (constraint->type == _ragdoll_constraint_minimum && distance >= constraint->length)
 				continue;
-			correction = 0.5f * (distance - constraint->length) / distance;
-			a->x += offset.i * correction;
-			a->y += offset.j * correction;
-			a->z += offset.k * correction;
-			b->x -= offset.i * correction;
-			b->y -= offset.j * correction;
-			b->z -= offset.k * correction;
+			/* (each end moved as readily as it moves: the lighter further) */
+			weight_a = ragdoll->inverse_masses[constraint->a];
+			weight_b = ragdoll->inverse_masses[constraint->b];
+			if (weight_a + weight_b <= 0.f)
+				continue;
+			correction = (distance - constraint->length) / (distance * (weight_a + weight_b));
+			a->x += offset.i * correction * weight_a;
+			a->y += offset.j * correction * weight_a;
+			a->z += offset.k * correction * weight_a;
+			b->x -= offset.i * correction * weight_b;
+			b->y -= offset.j * correction * weight_b;
+			b->z -= offset.k * correction * weight_b;
 		}
 	}
 }
@@ -1261,9 +1482,25 @@ static void ragdoll_substep(
 				velocity->k -= normal->k * into;
 			}
 			away = dot_product3d(velocity, normal);
-			velocity->i = normal->i * away + (velocity->i - normal->i * away) * RAGDOLL_FRICTION;
-			velocity->j = normal->j * away + (velocity->j - normal->j * away) * RAGDOLL_FRICTION;
-			velocity->k = normal->k * away + (velocity->k - normal->k * away) * RAGDOLL_FRICTION;
+			velocity->i = normal->i * away + (velocity->i - normal->i * away) * ragdoll->friction;
+			velocity->j = normal->j * away + (velocity->j - normal->j * away) * ragdoll->friction;
+			velocity->k = normal->k * away + (velocity->k - normal->k * away) * ragdoll->friction;
+		}
+	}
+
+	/* (joints that drag: a part's swing about its parent slowed) */
+	if (ragdoll->joint_friction > 0.f)
+	{
+		for (index = 0; index < ragdoll->particle_count; index++)
+		{
+			short parent = ragdoll->parents[index];
+			real_vector3d *velocity = &ragdoll->velocities[index];
+
+			if (parent == NONE)
+				continue;
+			velocity->i -= (velocity->i - ragdoll->velocities[parent].i) * ragdoll->joint_friction;
+			velocity->j -= (velocity->j - ragdoll->velocities[parent].j) * ragdoll->joint_friction;
+			velocity->k -= (velocity->k - ragdoll->velocities[parent].k) * ragdoll->joint_friction;
 		}
 	}
 }
@@ -1422,6 +1659,7 @@ boolean biped_ragdoll_update(
 		if (!ragdoll_should_start(biped_index))
 			return FALSE;
 		ragdoll = ragdoll_new(biped_index);
+		ragdoll->style = ragdoll_style();
 		if (!ragdoll_build(ragdoll, biped_index))
 		{
 			ragdoll->object_index = NONE;
@@ -1453,12 +1691,14 @@ boolean biped_ragdoll_accelerate(
 {
 	struct ragdoll *ragdoll = ragdoll_find(biped_index);
 	struct biped_datum *biped;
+	real_vector3d push;
 
 	if (!ragdoll || (biped = ragdoll_body(ragdoll)) == NULL)
 		return FALSE;
 	if (ragdoll->asleep)
 		ragdoll_wake(ragdoll, biped);
-	ragdoll_push(ragdoll, epicenter, acceleration, RAGDOLL_BLOW_RADIUS, TRUE);
+	scale_vector3d(acceleration, ragdoll->blast_scale, &push);
+	ragdoll_push(ragdoll, epicenter, &push, RAGDOLL_BLOW_RADIUS, TRUE);
 	return !ragdoll->drawn_only;
 }
 

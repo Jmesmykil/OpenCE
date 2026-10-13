@@ -9,7 +9,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from harness import CHECK_FAILED, build, enum_with, function, mutated, read, run, structure
 
-CASES = ['falls_and_rests', 'nodes_follow_bones', 'push_turns', 'thrown', 'knees_bend_one_way', 'hips_swing_so_far']
+CASES = ['falls_and_rests', 'nodes_follow_bones', 'push_turns', 'thrown', 'knees_bend_one_way', 'hips_swing_so_far',
+         'torso_heavier', 'limbs_keep_out', 'halo2_falls']
 CONTROLS = [
     ('\tragdoll_solve(ragdoll);\n', '\n', 'falls_and_rests'),
     ('rotation_between(&before, &after, turn);', 'rotation_identity(turn);', 'nodes_follow_bones'),
@@ -18,6 +19,10 @@ CONTROLS = [
     ('if (across < 0.f)\n\t\t\tacross = 0.f;', '', 'knees_bend_one_way'),
     ('twist = ragdoll_clamp(twist, -limit, limit);', '', 'knees_bend_one_way'),
     ('if (cosine >= joint->limit)\n\t\t\treturn;', 'return;', 'hips_swing_so_far'),
+    ('weight_a = ragdoll->inverse_masses[constraint->a];', 'weight_a = 1.f;', 'torso_heavier'),
+    ('if (constraint->type == _ragdoll_constraint_minimum && distance >= constraint->length)\n\t\t\t\tcontinue;',
+     'if (constraint->type == _ragdoll_constraint_minimum)\n\t\t\t\tcontinue;', 'limbs_keep_out'),
+    ('velocity->k -= (velocity->k - ragdoll->velocities[parent].k) * ragdoll->joint_friction;', '', 'limbs_keep_out'),
 ]
 FUNCTIONS = ['ragdoll_clamp', 'ragdoll_clamp_speed', 'ragdoll_move', 'rotation_identity', 'rotation_transform',
              'rotation_between', 'basis_from_directions', 'rotation_between_bases', 'ragdoll_add_constraint',
@@ -30,7 +35,7 @@ def generated(fault=None):
     source = read('port/linux/game/biped_ragdoll.c')
     code = '\n'.join(
         [enum_with(source, 'MAXIMUM_RAGDOLLS'), enum_with(source, '_ragdoll_constraint_minimum'),
-         enum_with(source, '_ragdoll_joint_cone')] +
+         enum_with(source, '_ragdoll_joint_cone'), enum_with(source, '_ragdoll_style_halo2')] +
         re.findall(r'^#define RAGDOLL_\w+ [^\n]*', source, re.M) +
         [structure(source, name) for name in ('ragdoll_constraint', 'ragdoll_rotation', 'ragdoll_joint', 'ragdoll')] +
         [function(source, name) for name in FUNCTIONS])
@@ -54,7 +59,9 @@ def test_negative_control(before, after, case):
 def test_multiplayer_only():
     # A ragdoll starts only in a multiplayer game (game_engine_running), and only as the setting has it.
     enabled = function(read('port/linux/game/biped_ragdoll.c'), 'ragdoll_enabled')
-    assert 'config_boolean("game.ragdoll")' in enabled and 'game_engine_running()' in enabled
+    style = function(read('port/linux/game/biped_ragdoll.c'), 'ragdoll_style')
+    assert 'config_string("game.ragdoll")' in style and 'game_engine_running()' in style
+    assert 'ragdoll_style() != _ragdoll_style_none' in enabled
 
 
 def test_host_word_skips_ragdolls():
