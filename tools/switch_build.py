@@ -91,10 +91,38 @@ def fetch_uam() -> bool:
     return True
 
 
+def _bison_for_uam() -> Optional[Path]:
+    """A bison that accepts UAM's grammar. macOS ships 2.3, which rejects it;
+    Homebrew's bison is keg-only, so it is not the bison on PATH."""
+    candidates = []
+    found = shutil.which("bison")
+    if found:
+        candidates.append(Path(found))
+    candidates.extend([Path("/opt/homebrew/opt/bison/bin/bison"), Path("/usr/local/opt/bison/bin/bison")])
+    seen = set()
+    for path in candidates:
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        result = subprocess.run([str(path), "--version"], capture_output=True, text=True)
+        if result.returncode != 0:
+            continue
+        for word in result.stdout.split():
+            if word[:1].isdigit():
+                if int(word.split(".", 1)[0]) >= 3:
+                    return path
+                break
+    return None
+
+
 def _uam_build(n: Writer, devkitpro: Path, host_cc: Path, host_arch: str) -> Optional[Path]:
     """Ninja rules for build/switch/uam/libuam.a, or None (and a comment) if UAM cannot be built here."""
-    if not shutil.which("meson") or not shutil.which("bison") or not shutil.which("flex"):
-        n.comment("Switch build: no UAM (it needs meson, bison and flex)")
+    if not shutil.which("meson") or not shutil.which("flex"):
+        n.comment("Switch build: no UAM (it needs meson and flex)")
+        return None
+    bison = _bison_for_uam()
+    if bison is None:
+        n.comment("Switch build: no UAM (it needs bison 3 or newer; macOS ships 2.3, so: brew install bison)")
         return None
     if subprocess.run([sys.executable, "-c", "import mako"], capture_output=True).returncode != 0:
         n.comment("Switch build: no UAM (it needs Python's mako: pip install --user mako)")
@@ -107,6 +135,7 @@ def _uam_build(n: Writer, devkitpro: Path, host_cc: Path, host_arch: str) -> Opt
 
     build_dir = BUILD / "uam"
     cross_file = build_dir / "cross.ini"
+    native_file = build_dir / "native.ini"
     flags = ", ".join(f"'{flag}'" for flag in [*host_arch.split(), "-D__SWITCH__", "-isystem",
                                                 str(devkitpro / "libnx" / "include")])
     link_flags = ", ".join(f"'{flag}'" for flag in [f"-specs={devkitpro / 'libnx' / 'switch.specs'}",
@@ -124,6 +153,9 @@ def _uam_build(n: Writer, devkitpro: Path, host_cc: Path, host_arch: str) -> Opt
         "\n[properties]\nneeds_exe_wrapper = true\n"
         "\n[host_machine]\nsystem = 'horizon'\ncpu_family = 'aarch64'\ncpu = 'cortex-a57'\nendian = 'little'\n",
         encoding="utf-8")
+    # bison is a native tool (find_program native: true), so the cross file
+    # does not choose it. Point meson at one new enough to parse the grammar.
+    native_file.write_text(f"[binaries]\nbison = '{bison}'\n", encoding="utf-8")
 
     # meson's build of the library is a thin archive (members by path), so it
     # is repacked into an ordinary one that can be linked from anywhere.
@@ -142,11 +174,12 @@ def _uam_build(n: Writer, devkitpro: Path, host_cc: Path, host_arch: str) -> Opt
     n.rule(
         name="switch_uam",
         command=(f"rm -rf {meson_dir} && meson setup -Db_staticpic=false --cross-file {cross_file.resolve()} "
+                 f"--native-file {native_file.resolve()} "
                  f"{meson_dir.resolve()} {UAM_DIR.resolve()} > /dev/null && ninja -C {meson_dir} libuam.a > /dev/null && "
                  f"rm -f $out && cd {meson_dir} && {ar} rcs {library.resolve()} $$({ar} t libuam.a)"),
         description="SWITCH UAM $out",
     )
-    n.build(outputs=library, rule="switch_uam", implicit=[UAM_PATCH, UAM_DIR / ".patched", cross_file])
+    n.build(outputs=library, rule="switch_uam", implicit=[UAM_PATCH, UAM_DIR / ".patched", cross_file, native_file])
     n.build(outputs="switch-uam", rule="phony", inputs=[library])
     return library
 
@@ -219,7 +252,24 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
     import json
     config: Dict[str, Any] = json.loads(config_path.read_text(encoding="utf-8"))
 
-    toolchain = ndk / "toolchains" / "llvm" / "prebuilt" / "linux-x86_64"
+    # llvm-ar and ld.lld live in the NDK prebuilt for this machine. On macOS
+    # that directory is darwin-x86_64, and the same NDK on Linux is linux-x86_64.
+    prebuilt = ndk / "toolchains" / "llvm" / "prebuilt"
+    host_tag = os.environ.get("ANDROID_NDK_HOST_TAG", "")
+    if not host_tag:
+        if sys.platform == "darwin":
+            host_tag = "darwin-x86_64"
+        elif os.name == "nt":
+            host_tag = "windows-x86_64"
+        else:
+            host_tag = "linux-x86_64"
+    if not (prebuilt / host_tag).is_dir():
+        tags = sorted(entry.name for entry in prebuilt.iterdir() if entry.is_dir()) if prebuilt.is_dir() else []
+        if not tags:
+            n.comment("Switch build: the NDK has no LLVM toolchain")
+            return
+        host_tag = tags[0]
+    toolchain = prebuilt / host_tag
     sysroot_include = toolchain / "sysroot" / "usr" / "include"
     ndk_bin = toolchain / "bin"
     guest_cc = getattr(sln, "android_guest_cc", None) or "clang"

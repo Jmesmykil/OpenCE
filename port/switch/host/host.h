@@ -43,6 +43,9 @@ int host_errno(void);
  * this lock may log. */
 void host_sd_lock(void);
 void host_sd_unlock(void);
+/* write the SD card's journal, so a file closed by the guest is still there
+after _exit (host_main.c) */
+void host_storage_commit(void);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);
@@ -177,6 +180,8 @@ extern int host_dk_verify_compressed;
 /* host_dk.c: runs a frame's commands from the deko3d renderer's guest half
 (port/switch/guest/dk_commands.h); commands is a guest address */
 void host_dk_submit(uint32_t commands, uint32_t size);
+/* the queue drained (a map is going, or the process is exiting) */
+void host_dk_idle(void);
 /* set once deko3d has presented a frame, after which its swapchain paces
 the frames, not the stand-in window's swap */
 extern int host_dk_presenting;

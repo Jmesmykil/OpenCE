@@ -43,6 +43,9 @@ drive the controller.
 #include "touch_input.h"
 #include "halo_keyboard.h"
 #include "halo_ui_pointer.h"
+#ifdef HALO_SWITCH
+#include "guest_host.h"
+#endif
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -195,23 +198,64 @@ int halo_linux_touch_move(short controller_index, float *forward, float *strafe)
 /* the touch controls' swipe and gyroscope since the last call, in radians at
 the mouse's rate per pixel (the view applies its own sensitivity), each
 apart: player_control.c inverts the swipe as the profile inverts the stick,
-not the gyroscope, which turns as the phone does, and makes them the
-stick's rate before the magnetism. Nothing but on Android and the web. */
+not the phone's gyroscope, which turns as the phone does, and makes them the
+stick's rate before the magnetism. On the Switch the controller's gyroscope
+takes that place (input.gyro_aim), for every local pad. Horizontal and vertical
+sensitivity and invert are their own (input.gyro_sensitivity_horizontal,
+input.gyro_sensitivity_vertical, input.gyro_invert_horizontal,
+input.gyro_invert_vertical). Nothing but on Android, the web and the Switch. */
 int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch)
 {
 	*yaw = 0.0f;
 	*pitch = 0.0f;
 	*gyro_yaw = 0.0f;
 	*gyro_pitch = 0.0f;
+#ifdef HALO_SWITCH
+	{
+		static int enabled;
+		static int invert_horizontal;
+		static int invert_vertical;
+		static float sensitivity_horizontal;
+		static float sensitivity_vertical;
+		static unsigned long read_at = (unsigned long)-1;
+		SDL_Gamepad *gamepads[PORT_COUNT];
+		SDL_Gamepad *gamepad;
+		int count;
+		float turn_yaw;
+		float turn_pitch;
+
+		if (read_at != config_changes())
+		{
+			read_at = config_changes();
+			enabled = config_boolean("input.gyro_aim");
+			invert_horizontal = config_boolean("input.gyro_invert_horizontal");
+			invert_vertical = config_boolean("input.gyro_invert_vertical");
+			sensitivity_horizontal = (float)config_real("input.gyro_sensitivity_horizontal");
+			sensitivity_vertical = (float)config_real("input.gyro_sensitivity_vertical");
+		}
+		if (!enabled || gamepad_index < 0)
+			return FALSE;
+		count = sdl_gamepads(gamepads);
+		gamepad = port_gamepad(gamepads, count, gamepad_index);
+		if (!gamepad)
+			return FALSE;
+		host_sdl_gamepad_gyro((unsigned int)gamepad, &turn_yaw, &turn_pitch);
+		*gyro_yaw = (invert_horizontal ? -turn_yaw : turn_yaw) * sensitivity_horizontal;
+		*gyro_pitch = (invert_vertical ? -turn_pitch : turn_pitch) * sensitivity_vertical;
+		if (*gyro_yaw == 0.0f && *gyro_pitch == 0.0f)
+			return FALSE;
+		return TRUE;
+	}
+#elif defined(HALO_ANDROID) || defined(HALO_WEB)
 	if (gamepad_index != 0)
 		return FALSE;
-#if defined(HALO_ANDROID) || defined(HALO_WEB)
 	touch_input_look(0.0022f, yaw, pitch, gyro_yaw, gyro_pitch);
 	if (*yaw == 0.0f && *pitch == 0.0f && *gyro_yaw == 0.0f && *gyro_pitch == 0.0f)
 		return FALSE;
 	touch_used();
 	return TRUE;
 #else
+	(void)gamepad_index;
 	return FALSE;
 #endif
 }

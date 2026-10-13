@@ -413,6 +413,10 @@ void rasterizer_window_begin(
 void rasterizer_window_end(
 	void);
 void rasterizer_windows_end(void);
+/* port: the split-screen pause menu is drawn over every pane
+(rasterizer_xbox.c). bounds are the same pixels as a window's viewport. */
+void rasterizer_port_set_viewport(
+	rectangle2d const *bounds);
 void rasterizer_frame_end(void);
 
 void rasterizer_present(struct bitmap_data *screenshot_bitmap, const point2d *screenshot_index);

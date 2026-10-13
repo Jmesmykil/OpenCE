@@ -109,6 +109,32 @@ The game checks for `sdmc:/switch/halo/maps/ui.map` and, with no image
 either, refuses to start and says so. Saves go in `sdmc:/switch/halo/save/`,
 and the settings file `config.toml` goes in `sdmc:/switch/halo/`.
 
+Custom Edition maps go in `sdmc:/switch/halo/custom_maps/`, with
+`bitmaps.map`, `sounds.map` and `loc.map` in that folder. A map in a
+subfolder is listed under the folder's name: campaign maps under CUSTOM
+SINGLEPLAYER, multiplayer maps under CUSTOM MULTIPLAYER. One level of
+folders is read. A map you do not have is downloaded from the other players
+while you wait in the lobby. Refer to the root
+[README.md](../../README.md#custom-edition-maps).
+
+## Gyro aiming
+
+The stick aims as it does anywhere else. Open a profile, choose Gamepads, and
+then Gyro Aim. That screen is the Switch's only. Gyro Aim is off until it is
+set to on. Horizontal and vertical sensitivity are how far the view turns
+each way (`1` is the sensor's own turn; the screen goes from `0.25` to `10`).
+Invert horizontal and invert vertical are separate, and neither follows the
+stick's Invert Look. The same five are `input.gyro_aim`,
+`input.gyro_sensitivity_horizontal`, `input.gyro_sensitivity_vertical`,
+`input.gyro_invert_horizontal` and `input.gyro_invert_vertical` in
+`config.toml`. Each local player reads their own controller. A Pro Controller,
+the console held in the hands, and a single Joy-Con each use their one sensor;
+when two Joy-Con are attached, the right one is read. It is not used in the
+menus. In a split-screen match on this console alone, the pause menu's LEAVE
+GAME leaves the match for both players and returns to the main menu. Each
+player's window is cleared only inside itself, so the second player's clear
+does not wipe the first player's view.
+
 ## The memory model
 
 This is the part of the port that is not like the others, and it is worth

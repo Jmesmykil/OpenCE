@@ -1841,6 +1841,26 @@ void _rasterizer_window_begin(
 	return;
 }
 
+/* port: a full-frame menu drawn after the split-screen panes (ui_widget.c).
+The pane's viewport would clip it, and the widget shader sizes itself from
+global_window_parameters.camera.viewport_bounds. */
+void rasterizer_port_set_viewport(
+	rectangle2d const *bounds)
+{
+	D3DVIEWPORT8 viewport;
+
+	global_window_parameters.camera.viewport_bounds = *bounds;
+	viewport.X = bounds->x0;
+	viewport.Y = bounds->y0;
+	viewport.Width = bounds->x1 > bounds->x0 ? (DWORD)(bounds->x1 - bounds->x0) : 0;
+	viewport.Height = bounds->y1 > bounds->y0 ? (DWORD)(bounds->y1 - bounds->y0) : 0;
+	viewport.MinZ = 0.0f;
+	viewport.MaxZ = 1.0f;
+	if (viewport.Width && viewport.Height)
+		D3DDevice_SetViewport(&viewport);
+	return;
+}
+
 void _rasterizer_window_end(
 	void)
 {

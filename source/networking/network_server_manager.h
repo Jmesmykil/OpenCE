@@ -44,6 +44,9 @@ boolean network_game_server_reset_to_pregame(
 void network_game_server_pause_countdown(
 	struct network_game_server *server,
 	boolean pause_countdown);
+/* the lobby's START NOW: unpause and start this machine's countdown at once */
+void network_game_server_countdown_hurry(
+	struct network_game_server *server);
 void network_game_generate_join_game_token(
 	byte *join_token);
 void network_game_server_kick_machine(

@@ -787,6 +787,14 @@ uint32_t host_dk_retired(void)
 	return retired;
 }
 
+/* the queue drained, before a map's memory goes or the process exits: a
+submission still running reads that memory */
+void host_dk_idle(void)
+{
+	if (dk.ready)
+		dkQueueWaitIdle(dk.queue);
+}
+
 static int initialize(void)
 {
 	DkDeviceMaker device_maker;
@@ -912,13 +920,22 @@ static void clear(const struct dk_command_clear *command)
 		mask = 0;
 	if (!mask && !depth && !stencil)
 		return;
-	/* (a clear sets the scissor to each rectangle) */
+	/* A clear is drawn into the current viewport. Binding the target left
+	that as the whole target, so a later split-screen window's clear would
+	erase the earlier one (player 1 is drawn first). The rectangle is the
+	window, and the viewport is set to it as the scissor is; the next draw
+	puts both back (state_dirty). */
 	dk.state_dirty = 1;
 	for (index = 0; index < command->rectangle_count; index++)
 	{
 		const uint32_t *rectangle = command->rectangles[index];
+		DkViewport viewport = { (float)rectangle[0], (float)rectangle[1], (float)rectangle[2],
+			(float)rectangle[3], 0.0f, 1.0f };
 		DkScissor scissor = { rectangle[0], rectangle[1], rectangle[2], rectangle[3] };
 
+		if (!rectangle[2] || !rectangle[3])
+			continue;
+		dkCmdBufSetViewports(dk.commands, 0, &viewport, 1);
 		dkCmdBufSetScissors(dk.commands, 0, &scissor, 1);
 		if (mask)
 			dkCmdBufClearColorFloat(dk.commands, 0, mask, command->color[0], command->color[1], command->color[2],
@@ -2497,11 +2514,11 @@ static int state_apply(void)
 	DkBlendState blend;
 	DkDepthStencilState depth_stencil;
 	int32_t left, top, right, bottom;
+	int apply_rest;
 
-	if (!dk.state_dirty)
-		return 1;
 	if (state->viewport[2] <= 0 || state->viewport[3] <= 0 || !size_from)
-		return 0;
+		return dk.state_dirty ? 0 : 1;
+	apply_rest = dk.state_dirty;
 	dk.state_dirty = 0;
 
 	viewport.x = (float)state->viewport[0];
@@ -2510,7 +2527,6 @@ static int state_apply(void)
 	viewport.height = (float)state->viewport[3];
 	viewport.near = state->depth_range[0];
 	viewport.far = state->depth_range[1];
-	dkCmdBufSetViewports(dk.commands, 0, &viewport, 1);
 	left = state->scissor[0] < 0 ? 0 : state->scissor[0];
 	top = state->scissor[1] < 0 ? 0 : state->scissor[1];
 	right = state->scissor[0] + state->scissor[2];
@@ -2523,54 +2539,61 @@ static int state_apply(void)
 	scissor.y = (uint32_t)top;
 	scissor.width = right > left ? (uint32_t)(right - left) : 0;
 	scissor.height = bottom > top ? (uint32_t)(bottom - top) : 0;
+
+	if (apply_rest)
+	{
+		dkRasterizerStateDefaults(&rasterizer);
+		rasterizer.cullMode = state->cull == DK_CULL_FRONT ? DkFace_Front : state->cull == DK_CULL_BACK ? DkFace_Back :
+			DkFace_None;
+		rasterizer.frontFace = state->front_face_ccw ? DkFrontFace_CCW : DkFrontFace_CW;
+		rasterizer.polygonModeFront = rasterizer.polygonModeBack = state->fill_mode == DK_FILL_LINE ? DkPolygonMode_Line :
+			state->fill_mode == DK_FILL_POINT ? DkPolygonMode_Point : DkPolygonMode_Fill;
+		rasterizer.depthBiasEnableMask = state->offset_enable ? (DkPolygonFlag_Fill | DkPolygonFlag_Line) : 0;
+		dkCmdBufBindRasterizerState(dk.commands, &rasterizer);
+		if (state->offset_enable)
+			dkCmdBufSetDepthBias(dk.commands, state->offset_units, 0.0f, state->offset_slope);
+
+		dkColorStateDefaults(&color);
+		dkColorStateSetBlendEnable(&color, 0, state->blend != 0);
+		dkCmdBufBindColorState(dk.commands, &color);
+		dkBlendStateDefaults(&blend);
+		if (state->blend)
+		{
+			DkBlendFactor source = blend_factor(state->blend_source), destination = blend_factor(state->blend_destination);
+
+			dkBlendStateSetOps(&blend, blend_op(state->blend_equation), blend_op(state->blend_equation));
+			/* (glBlendFunc: the alpha channel's factors are the color's) */
+			dkBlendStateSetFactors(&blend, source, destination, source, destination);
+			dkCmdBufSetBlendConst(dk.commands, state->blend_color[0], state->blend_color[1], state->blend_color[2],
+				state->blend_color[3]);
+		}
+		dkCmdBufBindBlendStates(dk.commands, 0, &blend, 1);
+		dkColorWriteStateDefaults(&color_write);
+		dkColorWriteStateSetMask(&color_write, 0, state->color_mask);
+		dkCmdBufBindColorWriteState(dk.commands, &color_write);
+
+		dkDepthStencilStateDefaults(&depth_stencil);
+		depth_stencil.depthTestEnable = state->depth_test != 0;
+		depth_stencil.depthWriteEnable = state->depth_write != 0;
+		depth_stencil.depthCompareOp = compare_op(state->depth_function);
+		depth_stencil.stencilTestEnable = state->stencil_test != 0;
+		if (state->stencil_test)
+		{
+			/* one set of operations for both faces, as glStencilOp's */
+			depth_stencil.stencilFrontFailOp = depth_stencil.stencilBackFailOp = stencil_op(state->stencil_fail);
+			depth_stencil.stencilFrontDepthFailOp = depth_stencil.stencilBackDepthFailOp = stencil_op(state->stencil_depth_fail);
+			depth_stencil.stencilFrontPassOp = depth_stencil.stencilBackPassOp = stencil_op(state->stencil_pass);
+			depth_stencil.stencilFrontCompareOp = depth_stencil.stencilBackCompareOp = compare_op(state->stencil_function);
+			dkCmdBufSetStencil(dk.commands, DkFace_FrontAndBack, (uint8_t)state->stencil_write_mask,
+				(uint8_t)state->stencil_reference, (uint8_t)state->stencil_mask);
+		}
+		dkCmdBufBindDepthStencilState(dk.commands, &depth_stencil);
+	}
+	/* After the rasterizer state, and on every draw: binding a target left
+	the scissor as the whole target. The window is put back so a triangle the
+	clipper does not take cannot paint the other split-screen pane. */
+	dkCmdBufSetViewports(dk.commands, 0, &viewport, 1);
 	dkCmdBufSetScissors(dk.commands, 0, &scissor, 1);
-
-	dkRasterizerStateDefaults(&rasterizer);
-	rasterizer.cullMode = state->cull == DK_CULL_FRONT ? DkFace_Front : state->cull == DK_CULL_BACK ? DkFace_Back :
-		DkFace_None;
-	rasterizer.frontFace = state->front_face_ccw ? DkFrontFace_CCW : DkFrontFace_CW;
-	rasterizer.polygonModeFront = rasterizer.polygonModeBack = state->fill_mode == DK_FILL_LINE ? DkPolygonMode_Line :
-		state->fill_mode == DK_FILL_POINT ? DkPolygonMode_Point : DkPolygonMode_Fill;
-	rasterizer.depthBiasEnableMask = state->offset_enable ? (DkPolygonFlag_Fill | DkPolygonFlag_Line) : 0;
-	dkCmdBufBindRasterizerState(dk.commands, &rasterizer);
-	if (state->offset_enable)
-		dkCmdBufSetDepthBias(dk.commands, state->offset_units, 0.0f, state->offset_slope);
-
-	dkColorStateDefaults(&color);
-	dkColorStateSetBlendEnable(&color, 0, state->blend != 0);
-	dkCmdBufBindColorState(dk.commands, &color);
-	dkBlendStateDefaults(&blend);
-	if (state->blend)
-	{
-		DkBlendFactor source = blend_factor(state->blend_source), destination = blend_factor(state->blend_destination);
-
-		dkBlendStateSetOps(&blend, blend_op(state->blend_equation), blend_op(state->blend_equation));
-		/* (glBlendFunc: the alpha channel's factors are the color's) */
-		dkBlendStateSetFactors(&blend, source, destination, source, destination);
-		dkCmdBufSetBlendConst(dk.commands, state->blend_color[0], state->blend_color[1], state->blend_color[2],
-			state->blend_color[3]);
-	}
-	dkCmdBufBindBlendStates(dk.commands, 0, &blend, 1);
-	dkColorWriteStateDefaults(&color_write);
-	dkColorWriteStateSetMask(&color_write, 0, state->color_mask);
-	dkCmdBufBindColorWriteState(dk.commands, &color_write);
-
-	dkDepthStencilStateDefaults(&depth_stencil);
-	depth_stencil.depthTestEnable = state->depth_test != 0;
-	depth_stencil.depthWriteEnable = state->depth_write != 0;
-	depth_stencil.depthCompareOp = compare_op(state->depth_function);
-	depth_stencil.stencilTestEnable = state->stencil_test != 0;
-	if (state->stencil_test)
-	{
-		/* one set of operations for both faces, as glStencilOp's */
-		depth_stencil.stencilFrontFailOp = depth_stencil.stencilBackFailOp = stencil_op(state->stencil_fail);
-		depth_stencil.stencilFrontDepthFailOp = depth_stencil.stencilBackDepthFailOp = stencil_op(state->stencil_depth_fail);
-		depth_stencil.stencilFrontPassOp = depth_stencil.stencilBackPassOp = stencil_op(state->stencil_pass);
-		depth_stencil.stencilFrontCompareOp = depth_stencil.stencilBackCompareOp = compare_op(state->stencil_function);
-		dkCmdBufSetStencil(dk.commands, DkFace_FrontAndBack, (uint8_t)state->stencil_write_mask,
-			(uint8_t)state->stencil_reference, (uint8_t)state->stencil_mask);
-	}
-	dkCmdBufBindDepthStencilState(dk.commands, &depth_stencil);
 	return 1;
 }
 

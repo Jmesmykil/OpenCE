@@ -745,6 +745,20 @@ makes the calls to HID (one that is slow is logged). */
 #define RUMBLE_LOW_HZ 160.0f
 #define RUMBLE_HIGH_HZ 320.0f
 
+/* SDL pad i is npad No1+i. Pad 0 also reads the handheld, which is how the
+console's own Joy-Cons are seen when they are attached. 1 if it has a style. */
+static int pad_npad(int pad, HidNpadIdType *id, u32 *style)
+{
+	*id = (HidNpadIdType)(HidNpadIdType_No1 + pad);
+	*style = hidGetNpadStyleSet(*id);
+	if (pad == 0 && !*style && hidGetNpadStyleSet(HidNpadIdType_Handheld))
+	{
+		*id = HidNpadIdType_Handheld;
+		*style = hidGetNpadStyleSet(*id);
+	}
+	return *style != 0;
+}
+
 static struct
 {
 	HidNpadIdType id;
@@ -764,17 +778,13 @@ static int rumble_thread_started;
 /* the pad's devices for the style its controller has now (count 0: none) */
 static void rumble_ready(int pad)
 {
-	HidNpadIdType id = (HidNpadIdType)(HidNpadIdType_No1 + pad);
-	u32 style = hidGetNpadStyleSet(id);
+	HidNpadIdType id;
+	u32 style;
 	HidNpadStyleTag tag;
 	int count = 2;
 	Result result;
 
-	if (pad == 0 && !style && hidGetNpadStyleSet(HidNpadIdType_Handheld))
-	{
-		id = HidNpadIdType_Handheld;
-		style = hidGetNpadStyleSet(id);
-	}
+	pad_npad(pad, &id, &style);
 	if (rumble_pads[pad].id == id && rumble_pads[pad].style == style && (rumble_pads[pad].count || !style))
 		return;
 	rumble_pads[pad].id = id;
@@ -909,6 +919,189 @@ int host_sdl_rumble_gamepad(uint32_t gamepad, uint32_t low, uint32_t high, uint3
 	}
 	pthread_mutex_unlock(&rumble_lock);
 	return 1;
+}
+
+/* ---------- gyroscope aiming
+
+The same pad map as rumble. The guest asks for the turn since its last ask,
+in radians, and applies input.gyro_aim itself. A reading quieter than the
+sensor's noise at rest is dropped, and so is a gap long enough that one
+sample would spin the view (the sensor was not being read). Joy-Con Dual is
+the only style that has two sensors; that pair's right one is read. A Pro
+Controller, the handheld and a single Joy-Con have one.
+
+The sensor's axes, buttons toward the player: +x to its right, +y up, +z
+toward the player. Turning right is a negative rotation about +y, and tipping
+the top away (looking up) is a negative rotation about +x. A single Joy-Con
+is held on its side with SL and SR up, so those axes are turned to match. */
+
+#define GYRO_NOISE 0.01f
+/* a sample further than this from the one before it is not a turn */
+#define GYRO_LONGEST_GAP_NS 100000000ULL
+#define GYRO_SAMPLE_COUNT 16
+
+static struct
+{
+	HidNpadIdType id;
+	u32 style;
+	int started;
+	int sensor;
+	HidSixAxisSensorHandle handles[2];
+	u64 last_sample;
+	int had_sample;
+} gyro_pads[RUMBLE_PADS];
+
+/* the style rumble would pick, and how many sensors it has (2 only for a pair) */
+static HidNpadStyleTag gyro_style_tag(u32 style, int *sensors)
+{
+	*sensors = 1;
+	if (style & HidNpadStyleTag_NpadHandheld)
+		return HidNpadStyleTag_NpadHandheld;
+	if (style & HidNpadStyleTag_NpadFullKey)
+		return HidNpadStyleTag_NpadFullKey;
+	if (style & HidNpadStyleTag_NpadJoyDual)
+	{
+		*sensors = 2;
+		return HidNpadStyleTag_NpadJoyDual;
+	}
+	if (style & HidNpadStyleTag_NpadJoyLeft)
+		return HidNpadStyleTag_NpadJoyLeft;
+	if (style & HidNpadStyleTag_NpadJoyRight)
+		return HidNpadStyleTag_NpadJoyRight;
+	return 0;
+}
+
+/* adds this sample's turn. Positive yaw is to the player's right, positive
+pitch looks up. */
+static void gyro_add_sample(u32 style, const HidSixAxisSensorState *state, float *yaw, float *pitch)
+{
+	float x = state->angular_velocity.x;
+	float y = state->angular_velocity.y;
+	float seconds;
+	HidNpadStyleTag tag;
+	int sensors;
+
+	if (!(state->attributes & HidSixAxisSensorAttribute_IsConnected))
+		return;
+	if (state->delta_time == 0 || state->delta_time > GYRO_LONGEST_GAP_NS)
+		return;
+	if (x < GYRO_NOISE && x > -GYRO_NOISE)
+		x = 0.0f;
+	if (y < GYRO_NOISE && y > -GYRO_NOISE)
+		y = 0.0f;
+	/* delta_time is nanoseconds */
+	seconds = (float)state->delta_time * 1.0e-9f;
+	tag = gyro_style_tag(style, &sensors);
+	(void)sensors;
+	if (tag == HidNpadStyleTag_NpadJoyRight)
+	{
+		*yaw += -x * seconds;
+		*pitch += y * seconds;
+	}
+	else if (tag == HidNpadStyleTag_NpadJoyLeft)
+	{
+		*yaw += x * seconds;
+		*pitch += -y * seconds;
+	}
+	else
+	{
+		*yaw += -y * seconds;
+		*pitch += -x * seconds;
+	}
+}
+
+static void gyro_ready(int pad)
+{
+	HidNpadIdType id;
+	u32 style;
+	HidNpadStyleTag tag;
+	int sensors = 1, sensor;
+	Result result;
+
+	pad_npad(pad, &id, &style);
+	if (gyro_pads[pad].id == id && gyro_pads[pad].style == style && (gyro_pads[pad].started || !style))
+		return;
+	if (gyro_pads[pad].started)
+		hidStopSixAxisSensor(gyro_pads[pad].handles[gyro_pads[pad].sensor]);
+	gyro_pads[pad].id = id;
+	gyro_pads[pad].style = style;
+	gyro_pads[pad].started = 0;
+	gyro_pads[pad].had_sample = 0;
+	tag = gyro_style_tag(style, &sensors);
+	if (!tag)
+		return;
+	result = hidGetSixAxisSensorHandles(gyro_pads[pad].handles, sensors, id, tag);
+	if (R_FAILED(result))
+	{
+		host_logf(HOST_LOG_WARN, "gyro: pad %d's sensors (style %#x): 0x%x", pad, (unsigned)style,
+			(unsigned)result);
+		return;
+	}
+	/* a pair's right Joy-Con; the only sensor otherwise */
+	sensor = sensors == 2 ? 1 : 0;
+	result = hidStartSixAxisSensor(gyro_pads[pad].handles[sensor]);
+	if (R_FAILED(result))
+	{
+		host_logf(HOST_LOG_WARN, "gyro: pad %d's sensor did not start: 0x%x", pad, (unsigned)result);
+		return;
+	}
+	gyro_pads[pad].sensor = sensor;
+	gyro_pads[pad].started = 1;
+	host_logf(HOST_LOG_INFO, "gyro: pad %d is npad %d, style %#x, sensor %d", pad, (int)id, (unsigned)style, sensor);
+}
+
+/* the turn since the last call, in radians. The first call only notes where
+the sensor is, so enabling aiming does not apply the samples already queued. */
+static void gyro_read(int pad, float *yaw, float *pitch)
+{
+	HidSixAxisSensorState states[GYRO_SAMPLE_COUNT];
+	size_t count, index;
+	u64 previous;
+
+	*yaw = 0.0f;
+	*pitch = 0.0f;
+	gyro_ready(pad);
+	if (!gyro_pads[pad].started)
+		return;
+	count = hidGetSixAxisSensorStates(gyro_pads[pad].handles[gyro_pads[pad].sensor], states, GYRO_SAMPLE_COUNT);
+	if (!count)
+		return;
+	/* states[0] is the latest. The first read keeps it and turns nothing. */
+	if (!gyro_pads[pad].had_sample)
+	{
+		gyro_pads[pad].last_sample = states[0].sampling_number;
+		gyro_pads[pad].had_sample = 1;
+		return;
+	}
+	previous = gyro_pads[pad].last_sample;
+	for (index = count; index > 0; index--)
+	{
+		const HidSixAxisSensorState *state = &states[index - 1];
+
+		if (state->sampling_number <= previous)
+			continue;
+		gyro_add_sample(gyro_pads[pad].style, state, yaw, pitch);
+		previous = state->sampling_number;
+	}
+	gyro_pads[pad].last_sample = previous;
+}
+
+void host_sdl_gamepad_gyro(uint32_t gamepad, float *yaw, float *pitch)
+{
+	SDL_GameController *object;
+	SDL_JoystickID pad;
+
+	if (!yaw || !pitch)
+		return;
+	*yaw = 0.0f;
+	*pitch = 0.0f;
+	object = handle_get(gamepad, _handle_gamepad);
+	if (!object)
+		return;
+	pad = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(object));
+	if (pad < 0 || pad >= RUMBLE_PADS)
+		return;
+	gyro_read((int)pad, yaw, pitch);
 }
 
 /* ---------- audio

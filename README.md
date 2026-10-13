@@ -167,6 +167,27 @@ There is nothing to set.
 - **Split screen** for up to four players on one device.
 - **Custom maps** are sent by the host to players who don't have them.
 
+### Custom Edition maps
+
+Put Halo PC / Custom Edition maps in `custom_maps`, beside `maps` (on the
+Switch, `sdmc:/switch/halo/custom_maps/`), with Custom Edition's
+`bitmaps.map`, `sounds.map` and `loc.map`. The level lists then have CUSTOM
+SINGLEPLAYER and CUSTOM MULTIPLAYER. A subfolder of `custom_maps` is listed
+under its own name and opens to its maps, so a set of maps (Cursed Halo,
+say) can keep its own folder; the campaign maps in it show under CUSTOM
+SINGLEPLAYER and the multiplayer maps under CUSTOM MULTIPLAYER. One level
+of folders is read, and `bitmaps.map`, `sounds.map` and `loc.map` stay in
+`custom_maps` itself. Joining a game on a map you don't have downloads it,
+with its progress at the top of the screen.
+
+<img width="640" alt="CUSTOM SINGLEPLAYER, listing folders of maps" src="docs/images/custom-singleplayer.jpg" />
+
+<img width="640" alt="A folder of CUSTOM MULTIPLAYER opened to its maps" src="docs/images/custom-multiplayer.jpg" />
+
+<img width="280" alt="custom_maps with bitmaps.map, sounds.map, loc.map and a folder for each set of maps" src="docs/images/custom-map-folders.png" />
+
+<img width="640" alt="The lobby downloading a Custom Edition map" src="docs/images/map-download.jpg" />
+
 The netcode is new: each machine moves its own player at once, and the host
 makes the decisions for the game. See [port/linux/NETCODE.md](port/linux/NETCODE.md).
 Keep the game in the front during a network game on Android: in the
@@ -198,6 +219,15 @@ move, resize, hide or copy from **Options** at the top of the screen.
 Gyro aiming is there too. In menus, tap an item to pick it and drag to
 scroll. All of it is in "Controls" in
 [port/android/README.md](port/android/README.md).
+
+On the Switch, the controller's gyroscope can aim as well: open a profile,
+**GAMEPADS**, then **GYRO AIM**, to turn it on and set its sensitivity and
+inversion each way. Each player's own controller is read. See
+[port/switch/README.md](port/switch/README.md#gyro-aiming).
+
+<img width="640" alt="Controller setup, with Gyro Aim as its own row" src="docs/images/gyro-aim-row.jpg" />
+
+<img width="640" alt="The Gyro Aim screen: aim, sensitivity and invert" src="docs/images/gyro-aim.jpg" />
 
 The settings, which are the same on every platform, are described in
 [port/linux/README.md](port/linux/README.md#settings).

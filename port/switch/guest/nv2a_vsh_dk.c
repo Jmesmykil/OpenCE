@@ -358,11 +358,27 @@ char *nv2a_dk_vertex_shader_to_glsl(const uint32_t *instructions, unsigned long 
 		rcc clamps and 1/w rounds differently on each GPU (Mali put vertices
 		of the first-person weapon at the vanishing point). Where the clip
 		position was kept, the same result is computed without dividing. */
+		"\tvec4 position;\n"
 		"\tif (clip_captured)\n"
-		"\t\tgl_Position = vec4((clip_position.xyz * c[%d].xyz + (c[%d].xyz + vec3(0.5 + point_and_screen.y, 0.5, 0.0)\n"
+		"\t\tposition = vec4((clip_position.xyz * c[%d].xyz + (c[%d].xyz + vec3(0.5 + point_and_screen.y, 0.5, 0.0)\n"
 		"\t\t\t- viewport_offset.xyz) * clip_position.w) / scale, clip_position.w);\n"
 		"\telse\n"
-		"\t\tgl_Position = vec4((vec3(oPos.xy + vec2(0.5 + point_and_screen.y, 0.5), oPos.z) - viewport_offset.xyz) / scale * oPos.w, oPos.w);\n"
+		"\t\tposition = vec4((vec3(oPos.xy + vec2(0.5 + point_and_screen.y, 0.5), oPos.z) - viewport_offset.xyz) / scale * oPos.w, oPos.w);\n"
+		/* A position whose w is zero, or is not a number, is the clip-space
+		origin: the screen conversion's reciprocal is clamped rather than
+		infinite, so a large position times a w of zero is exactly zero, and
+		the origin is inside the frustum. Nothing then clips the triangle
+		away and the rasterizer divides zero by zero there: the vertex lands
+		on the middle of the screen and the triangle is drawn out to it from
+		the first-person weapon, whose pose follows the camera and so reaches
+		the camera plane. In split screen that triangle crosses into the other
+		window. The divide on the Xbox sends such a vertex to infinity and the
+		clipper takes the triangle; put it behind the camera instead, which
+		the clipper also takes. The OpenGL renderer does the same
+		(port/linux/src/nv2a_vsh.c). */
+		"\tif (!(abs(position.w) > 0.0))\n"
+		"\t\tposition = vec4(0.0, 0.0, 0.0, -1.0);\n"
+		"\tgl_Position = position;\n"
 		"\tgl_PointSize = oPts.x;\n"
 		"\txD0 = clamp(oD0, 0.0, 1.0);\n"
 		"\txD1 = clamp(oD1, 0.0, 1.0);\n"

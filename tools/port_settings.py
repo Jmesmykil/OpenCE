@@ -214,6 +214,38 @@ SCREENS = {
     },
 }
 
+# Gyro Aim is its own screen, opened from Gamepads. The row is the Switch's
+# only: the other platforms do not show it, and it takes the place after
+# the last row, so they have no gap.
+_gamepads = SCREENS["gamepad_setup"]
+_gamepads["categories"] = [
+    ("GYRO AIM:", "gamepad_setup/gyro",
+     "Turn the view with the controller's gyroscope,\nas well as the stick.", "switch"),
+]
+SCREENS["gamepad_setup/gyro"] = {
+    "screen": "gyro_aim_screen", "header": _gamepads["header"], "spacing": 30,
+    "rows": [
+        ("GYRO AIM:", "input.gyro_aim", ON_OFF,
+         "Turn the view with the controller's gyroscope,\nas well as the stick.", None),
+        ("HORIZONTAL SENSITIVITY:", "input.gyro_sensitivity_horizontal",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns left and right.\n1 is the sensor's own turn.", None),
+        ("VERTICAL SENSITIVITY:", "input.gyro_sensitivity_vertical",
+         [(f"{value:g}", f"{value:g}") for value in
+          (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
+         "How far the view turns up and down.\n1 is the sensor's own turn.", None),
+        ("INVERT HORIZONTAL:", "input.gyro_invert_horizontal", YES_NO,
+         "Turning the controller right looks left.", None),
+        ("INVERT VERTICAL:", "input.gyro_invert_vertical", YES_NO,
+         "Tilting the controller up looks down.", None),
+    ],
+    # The other controller rows are profile fields, written when the profile
+    # is saved. These are config.toml, and B (and Cancel) only went back, so
+    # a change was kept for this run and gone after quitting.
+    "save_on_leave": True,
+}
+
 # Video Setup's categories open ordinary settings screens. Each has the same
 # pending edits, Defaults, OK and Cancel as the other settings screens.
 _video = SCREENS["video_settings"]
@@ -351,10 +383,14 @@ def _screen(folder: str, spec: dict, rows: list, list_inputs: list, list_handler
     base = folder if folder.startswith("main_menu/") else f"{PE}/{folder}"
     header, header_bitmap = spec["header"]
     lines = []
+    # (save_on_leave: B and Cancel write the screen, as OK does, then go back)
+    leave = ['<on event="b" run="port settings save" back="true"/>',
+             '<on event="back" run="port settings save" back="true"/>'] if spec.get("save_on_leave") else \
+        ['<on event="b" back="true"/>', '<on event="back" back="true"/>']
     lines += _widget(f"{base}/{spec['screen']}",
                      [("width", 640), ("height", 480), ("flags", "pass_unhandled_to_focused_child pause_game"),
                       ("bitmap", "bitmaps/gradient")],
-                     ['<on event="b" back="true"/>', '<on event="back" back="true"/>',
+                     [*leave,
                       f'<child{attributes([("widget", f"{base}/{header}")])}/>',
                       f'<child{attributes([("widget", f"{base}/options_menu")])}/>',
                       *[f'<child{attributes([("widget", f"{base}/note_{index}"), ("x", 54), ("y", 73 + place * spec["spacing"]), ("platform", platform)])}/>'
@@ -446,7 +482,8 @@ def _setting_screen(folder: str, spec: dict) -> list:
                           ("header_bitmap", "bitmaps/arrow_sm_left"), ("footer_bitmap", "bitmaps/arrow_sm_right"),
                           ("header_bounds", "7 -13 19 -7" if wide else "7 -6 19 0"),
                           ("footer_bounds", "7 208 19 214" if wide else "7 150 19 156")],
-                         ['<on event="created" run="port setting load"/>'])
+                         ['<on event="created" run="port setting load"/>'] +
+                         (['<on event="deleted" run="port setting save"/>'] if spec.get("save_on_leave") else []))
     # (each category's row: its label, the screen it opens, its help, and the
     # platforms it is for, as a row's: every one's when it names none)
     for index, (label, category_folder, _, *category_platform) in enumerate(spec.get("categories", ())):
@@ -1272,6 +1309,7 @@ def _lobby() -> list:
                                                        ("flags", "pass_unhandled_to_focused_child"),
                                                        ("bitmap", "bitmaps/gradient")],
                      ['<on event="created" run="net server defer start"/>',
+                      '<on event="deleted" run="net server allow start"/>',
                       '<child widget="main_menu/new_select/sel_list_desc_bkd"/>',
                       f'<child widget="{base}/player_profile_list"/>',
                       f'<child widget="{base}/header_add_player"/>',

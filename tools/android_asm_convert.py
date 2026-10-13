@@ -17,6 +17,17 @@ import sys
 
 IDENT = re.compile(r'"[^"]*"|[A-Za-z_.$][\w.$]*')
 
+# Names the ELF assembler parses as registers. A Mach-O symbol is written with
+# a leading underscore (_x16 is Monocypher's static x16); stripping it leaves
+# the register, and bl x16 is not a call. The underscore is put back on the
+# other side so the label and its uses still match, and a real register
+# operand (which never had the Mach-O underscore) is left alone.
+REGISTERS = frozenset(
+    ["sp", "wsp", "lr", "fp", "xzr", "wzr"]
+    + [f"{prefix}{index}" for prefix in ("x", "w") for index in range(31)]
+    + [f"{prefix}{index}" for prefix in ("v", "q", "d", "s", "h", "b") for index in range(32)]
+)
+
 DROP_DIRECTIVES = {
     ".subsections_via_symbols", ".build_version", ".watchos_version_min",
     ".ios_version_min", ".macosx_version_min", ".tvos_version_min", ".loh",
@@ -79,12 +90,17 @@ class Converter:
         if name.startswith('"'):
             inner = name[1:-1]
             if inner.startswith("_"):
-                inner = inner[1:]
+                inner = self._not_register(inner[1:])
             return '"' + inner + '"'
         if name.startswith("_"):
-            return name[1:]
+            return self._not_register(name[1:])
         if name in self.local_labels:
             return ".L" + name
+        return name
+
+    def _not_register(self, name: str) -> str:
+        if name in REGISTERS:
+            return name + "_"
         return name
 
     def operands(self, text: str) -> str:

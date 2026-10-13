@@ -204,6 +204,10 @@ void render_ui_widgets_postgame(
 void render_ui_widgets(
 	short local_player_index,
 	rectangle2d const *window_bounds);
+/* port: a 640x480 pause screen drawn once over every split-screen pane
+(ui_widget.c) */
+void render_ui_widgets_over_split_screen(
+	void);
 struct widget_instance *ui_widget_load_by_name_or_tag(
 	char const *name,
 	long tag_index,
