@@ -1408,3 +1408,9 @@ void host_touch_bindings(const int32_t *controls)
 {
 	(void)controls;
 }
+
+/* (no overlay: the controller's gyroscope is read by xinput_sdl.c) */
+void host_touch_gyro_mode(int mode)
+{
+	(void)mode;
+}

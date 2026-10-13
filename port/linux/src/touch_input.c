@@ -26,6 +26,9 @@ void host_touch_look_read(float *delta);
 void host_touch_rumble(unsigned int low, unsigned int high);
 void host_touch_scene(int scene);
 void host_touch_bindings(const int *controls);
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+void host_touch_gyro_mode(int mode);
+#endif
 #endif
 
 /* the game's (port/linux/game/touch_game.c) */
@@ -320,6 +323,17 @@ int touch_input_move(float *forward, float *strafe)
 	*forward = -y;
 	*strafe = -x;
 	return TRUE;
+}
+
+/* the Gyro Aim mode, for the overlay, which runs the phone's gyroscope only
+while it is wanted (Android's; the web's overlay has its own switch) */
+void touch_input_gyro_mode(int mode)
+{
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+	host_touch_gyro_mode(mode);
+#else
+	(void)mode;
+#endif
 }
 
 void touch_input_look(float scale, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch)

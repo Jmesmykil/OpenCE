@@ -216,13 +216,14 @@ follow the Xbox controller's:
 On Android without a controller, touch controls show in game: a move stick,
 swipe to look (with the controller's aim assist), and buttons that you can
 move, resize, hide or copy from **Options** at the top of the screen.
-Gyro aiming is there too. In menus, tap an item to pick it and drag to
+In menus, tap an item to pick it and drag to
 scroll. All of it is in "Controls" in
 [port/android/README.md](port/android/README.md).
 
-On the Switch, the controller's gyroscope can aim as well: open a profile,
-**GAMEPADS**, then **GYRO AIM**, to turn it on and set its sensitivity and
-inversion each way. Each player's own controller is read. See
+The gyroscope can aim as well, the phone's on Android and the controller's
+on the Switch (each player's own): open a profile, **GAMEPADS**, then
+**GYRO AIM**, to turn it on (ON, or ONLY ON ZOOM for fine aiming through a
+scope) and set its sensitivity and inversion each way. See
 [port/switch/README.md](port/switch/README.md#gyro-aiming).
 
 <img width="640" alt="Controller setup, with Gyro Aim as its own row" src="docs/images/gyro-aim-row.jpg" />

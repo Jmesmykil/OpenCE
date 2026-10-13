@@ -80,6 +80,11 @@ final class TouchLayout {
     private float minimumRadius;
 
     boolean rumbleEnabled = true;
+    /**
+     * the overlay's gyroscope aiming as it was before the game's Gyro Aim
+     * (Gamepads, input.gyro_aim) took its place: kept only so that layout
+     * files of either kind still read and write
+     */
     boolean gyroscopeEnabled = false;
     /** how solid the controls are drawn, MIN_OPACITY..MAX_OPACITY */
     float opacity = 1f;

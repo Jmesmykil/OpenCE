@@ -31,7 +31,7 @@
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/labels" string_index="0" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="input.gyro_aim" values="true|false" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/gyro_aim_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF|ONLY ON ZOOM" setting="input.gyro_aim" values="true|false|zoom" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
 		<on event="created" run="port setting load"/>
 		<on event="deleted" run="port setting save"/>
 	</widget>
@@ -94,10 +94,10 @@
 	</strings>
 	<strings name="main_menu/settings_select/player_setup/player_profile_edit/gamepad_setup/gyro/help_strings">
 		<string text=""/>
-		<string text="Turn the view with the controller's gyroscope,\nas well as the stick."/>
+		<string text="Turn the view with the gyroscope,\nalways, or only while zoomed in."/>
 		<string text="How far the view turns left and right.\n1 is the sensor's own turn."/>
 		<string text="How far the view turns up and down.\n1 is the sensor's own turn."/>
-		<string text="Turning the controller right looks left."/>
-		<string text="Tilting the controller up looks down."/>
+		<string text="Turning it right looks left."/>
+		<string text="Tilting it up looks down."/>
 	</strings>
 </menus>

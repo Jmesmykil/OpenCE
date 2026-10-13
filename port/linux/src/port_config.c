@@ -651,28 +651,32 @@ static const struct config_setting config_settings[] =
 		"Megabytes a recording keeps in memory, 4 to 1024: two halves, each\n"
 		"written out as a part when it fills." },
 #endif
-#ifdef HALO_SWITCH
-	{ "input.gyro_aim", _config_boolean, "false", "HALO_GYRO_AIM", _environment_value, _platform_android,
-		"Aim with the controller's gyroscope. false is the stick only. true adds\n"
-		"the controller's turn to the view, each local player from their own\n"
-		"controller: a Pro Controller, the console held in the hands, or one\n"
-		"Joy-Con. When two Joy-Con are attached, the right one is read." },
+#ifdef HALO_ANDROID
+	/* (the phone's gyroscope on Android, the controller's on the Switch) */
+	{ "input.gyro_aim", _config_string, "\"false\"", "HALO_GYRO_AIM", _environment_value, _platform_android,
+		"Aim with the gyroscope: the phone's on Android; on the Switch the\n"
+		"controller's, each local player from their own (a Pro Controller, the\n"
+		"console held in the hands, or one Joy-Con; of two, the right one).\n"
+		"\"false\" is the stick only, \"true\" adds the turn to the view, \"zoom\" adds\n"
+		"it only while the player is zoomed in, for fine aiming." },
 	{ "input.gyro_sensitivity_horizontal", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_HORIZONTAL",
 		_environment_value, _platform_android,
-		"How far the view turns left and right for the controller's gyroscope, when\n"
+		"How far the view turns left and right for the gyroscope, when\n"
 		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
 	{ "input.gyro_sensitivity_vertical", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_VERTICAL",
 		_environment_value, _platform_android,
-		"How far the view turns up and down for the controller's gyroscope, when\n"
+		"How far the view turns up and down for the gyroscope, when\n"
 		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
 	{ "input.gyro_invert_horizontal", _config_boolean, "false", "HALO_GYRO_INVERT_HORIZONTAL",
 		_environment_value, _platform_android,
-		"Invert the gyroscope's yaw. false: turning the controller right looks right.\n"
-		"true: turning it right looks left. The stick's invert is its own." },
+		"Invert the gyroscope's yaw. false: turning the phone or controller right\n"
+		"looks right. true: turning it right looks left. The stick's invert is its own." },
 	{ "input.gyro_invert_vertical", _config_boolean, "false", "HALO_GYRO_INVERT_VERTICAL",
 		_environment_value, _platform_android,
-		"Invert the gyroscope's pitch. false: tilting the controller up looks up.\n"
-		"true: tilting it up looks down. The stick's invert is its own." },
+		"Invert the gyroscope's pitch. false: tilting the phone or controller up\n"
+		"looks up. true: tilting it up looks down. The stick's invert is its own." },
+#endif
+#ifdef HALO_SWITCH
 	{ "debug.profiler", _config_boolean, "false", "HALO_PROFILER", _environment_set_is_true, _platform_android,
 		"Profile the game: sample where its threads are (debug.profile_hz times a\n"
 		"second) and write the counts to the profile folder every 20 s, for\n"
@@ -1198,6 +1202,13 @@ static void config_set_from_file(struct config_value *value, const struct config
 		{
 			free(value->string);
 			value->string = strdup(datum.u.s);
+		}
+		/* (a setting that was true or false before it had more values, as
+		input.gyro_aim was, reads its old value as that word) */
+		else if (datum.type == TOML_BOOLEAN)
+		{
+			free(value->string);
+			value->string = strdup(datum.u.boolean ? "true" : "false");
 		}
 		else
 		{
@@ -1918,8 +1929,8 @@ int main(void)
 	if (!parsed.ok)
 		return config_fail(parsed.errmsg);
 	aim = toml_seek(parsed.toptab, "input.gyro_aim");
-	if (aim.type != TOML_BOOLEAN || aim.u.boolean)
-		return config_fail("default gyro_aim is not false");
+	if (aim.type != TOML_STRING || strcmp(aim.u.s, "false"))
+		return config_fail("default gyro_aim is not \"false\"");
 	toml_free(parsed);
 	free(defaults);
 

@@ -188,10 +188,17 @@ The buttons at the top of the screen:
 
 - "Hide" removes the controls (and stops the gyroscope aiming and the
   vibration) until you push "Touch"; the app remembers it.
+
+Aiming with the phone's gyroscope is in the game's settings, as on the
+Switch: open a profile, **GAMEPADS**, then **GYRO AIM**. ON aims with it all
+the time, ONLY ON ZOOM only while you are zoomed in (a scope), for fine
+aiming; OFF (the default) is the swipe and the stick only. The same screen
+sets its sensitivity and invert each way (`1` is the phone's own turn).
+These are `input.gyro_aim` and the four after it in `config.toml`. The
+gyroscope aims while the touch controls show.
 - "Options" opens these items:
   - "General": the phone's vibration (on by default; it follows the
-    vibration setting of the game's profile), aiming with the gyroscope
-    (off by default), a floating move stick (off by default: the stick goes
+    vibration setting of the game's profile), a floating move stick (off by default: the stick goes
     where your thumb lands in the lower left of the screen), the opacity of
     the controls, "Hide or add buttons" (hide a button, add a copy of a
     button) and "Edit buttons size".

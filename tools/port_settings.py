@@ -214,19 +214,19 @@ SCREENS = {
     },
 }
 
-# Gyro Aim is its own screen, opened from Gamepads. The row is the Switch's
-# only: the other platforms do not show it, and it takes the place after
-# the last row, so they have no gap.
+# Gyro Aim is its own screen, opened from Gamepads: the controller's gyroscope
+# on the Switch, the phone's on Android. The other platforms do not show the
+# row, and it takes the place after the last row, so they have no gap.
 _gamepads = SCREENS["gamepad_setup"]
 _gamepads["categories"] = [
     ("GYRO AIM:", "gamepad_setup/gyro",
-     "Turn the view with the controller's gyroscope,\nas well as the stick.", "switch"),
+     "Turn the view with the gyroscope,\nas well as the stick.", "android switch"),
 ]
 SCREENS["gamepad_setup/gyro"] = {
     "screen": "gyro_aim_screen", "header": _gamepads["header"], "spacing": 30,
     "rows": [
-        ("GYRO AIM:", "input.gyro_aim", ON_OFF,
-         "Turn the view with the controller's gyroscope,\nas well as the stick.", None),
+        ("GYRO AIM:", "input.gyro_aim", ON_OFF + [("ONLY ON ZOOM", "zoom")],
+         "Turn the view with the gyroscope,\nalways, or only while zoomed in.", None),
         ("HORIZONTAL SENSITIVITY:", "input.gyro_sensitivity_horizontal",
          [(f"{value:g}", f"{value:g}") for value in
           (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
@@ -236,9 +236,9 @@ SCREENS["gamepad_setup/gyro"] = {
           (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
          "How far the view turns up and down.\n1 is the sensor's own turn.", None),
         ("INVERT HORIZONTAL:", "input.gyro_invert_horizontal", YES_NO,
-         "Turning the controller right looks left.", None),
+         "Turning it right looks left.", None),
         ("INVERT VERTICAL:", "input.gyro_invert_vertical", YES_NO,
-         "Tilting the controller up looks down.", None),
+         "Tilting it up looks down.", None),
     ],
     # The other controller rows are profile fields, written when the profile
     # is saved. These are config.toml, and B (and Cancel) only went back, so

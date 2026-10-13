@@ -200,10 +200,61 @@ the mouse's rate per pixel (the view applies its own sensitivity), each
 apart: player_control.c inverts the swipe as the profile inverts the stick,
 not the phone's gyroscope, which turns as the phone does, and makes them the
 stick's rate before the magnetism. On the Switch the controller's gyroscope
-takes that place (input.gyro_aim), for every local pad. Horizontal and vertical
-sensitivity and invert are their own (input.gyro_sensitivity_horizontal,
+takes that place, for every local pad. Whether the gyroscope aims (on Android
+the phone's, on the Switch the controller's) is a profile's Gyro Aim
+(input.gyro_aim: always, or only while zoomed), and its horizontal and
+vertical sensitivity and invert are their own (input.gyro_sensitivity_horizontal,
 input.gyro_sensitivity_vertical, input.gyro_invert_horizontal,
-input.gyro_invert_vertical). Nothing but on Android, the web and the Switch. */
+input.gyro_invert_vertical); the web's overlay has its own. Nothing but on
+Android, the web and the Switch. */
+#ifdef HALO_ANDROID
+/* input.gyro_aim and the rest, read again when the settings change: "true"
+aims with the gyroscope, "zoom" only while zoomed (halo_linux_gyro_zoom_only) */
+static struct
+{
+	int enabled;
+	int zoom_only;
+	int invert_horizontal;
+	int invert_vertical;
+	float sensitivity_horizontal;
+	float sensitivity_vertical;
+	unsigned long read_at;
+} gyro = { 0, 0, 0, 0, 1.0f, 1.0f, (unsigned long)-1 };
+
+static void gyro_settings_read(void)
+{
+	const char *aim;
+
+	if (gyro.read_at == config_changes())
+		return;
+	gyro.read_at = config_changes();
+	aim = config_string("input.gyro_aim");
+	gyro.zoom_only = !strcmp(aim, "zoom");
+	gyro.enabled = gyro.zoom_only || !strcmp(aim, "true");
+	gyro.invert_horizontal = config_boolean("input.gyro_invert_horizontal");
+	gyro.invert_vertical = config_boolean("input.gyro_invert_vertical");
+	gyro.sensitivity_horizontal = (float)config_real("input.gyro_sensitivity_horizontal");
+	gyro.sensitivity_vertical = (float)config_real("input.gyro_sensitivity_vertical");
+#ifndef HALO_SWITCH
+	/* (the overlay runs the phone's gyroscope only while it is wanted) */
+	touch_input_gyro_mode(!gyro.enabled ? 0 : gyro.zoom_only ? 2 : 1);
+#endif
+}
+#endif
+
+/* whether the gyroscope (the controller's on the Switch, the phone's on
+Android) aims only while the player is zoomed in (input.gyro_aim = "zoom"):
+player_control.c drops its turn otherwise */
+int halo_linux_gyro_zoom_only(void)
+{
+#ifdef HALO_ANDROID
+	gyro_settings_read();
+	return gyro.zoom_only;
+#else
+	return FALSE;
+#endif
+}
+
 int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *gyro_yaw, float *gyro_pitch)
 {
 	*yaw = 0.0f;
@@ -212,36 +263,22 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 	*gyro_pitch = 0.0f;
 #ifdef HALO_SWITCH
 	{
-		static int enabled;
-		static int invert_horizontal;
-		static int invert_vertical;
-		static float sensitivity_horizontal;
-		static float sensitivity_vertical;
-		static unsigned long read_at = (unsigned long)-1;
 		SDL_Gamepad *gamepads[PORT_COUNT];
 		SDL_Gamepad *gamepad;
 		int count;
 		float turn_yaw;
 		float turn_pitch;
 
-		if (read_at != config_changes())
-		{
-			read_at = config_changes();
-			enabled = config_boolean("input.gyro_aim");
-			invert_horizontal = config_boolean("input.gyro_invert_horizontal");
-			invert_vertical = config_boolean("input.gyro_invert_vertical");
-			sensitivity_horizontal = (float)config_real("input.gyro_sensitivity_horizontal");
-			sensitivity_vertical = (float)config_real("input.gyro_sensitivity_vertical");
-		}
-		if (!enabled || gamepad_index < 0)
+		gyro_settings_read();
+		if (!gyro.enabled || gamepad_index < 0)
 			return FALSE;
 		count = sdl_gamepads(gamepads);
 		gamepad = port_gamepad(gamepads, count, gamepad_index);
 		if (!gamepad)
 			return FALSE;
 		host_sdl_gamepad_gyro((unsigned int)gamepad, &turn_yaw, &turn_pitch);
-		*gyro_yaw = (invert_horizontal ? -turn_yaw : turn_yaw) * sensitivity_horizontal;
-		*gyro_pitch = (invert_vertical ? -turn_pitch : turn_pitch) * sensitivity_vertical;
+		*gyro_yaw = (gyro.invert_horizontal ? -turn_yaw : turn_yaw) * gyro.sensitivity_horizontal;
+		*gyro_pitch = (gyro.invert_vertical ? -turn_pitch : turn_pitch) * gyro.sensitivity_vertical;
 		if (*gyro_yaw == 0.0f && *gyro_pitch == 0.0f)
 			return FALSE;
 		return TRUE;
@@ -250,6 +287,17 @@ int halo_linux_touch_look(short gamepad_index, float *yaw, float *pitch, float *
 	if (gamepad_index != 0)
 		return FALSE;
 	touch_input_look(0.0022f, yaw, pitch, gyro_yaw, gyro_pitch);
+#ifdef HALO_ANDROID
+	/* the phone's gyroscope, its own turn: Gyro Aim's on, sensitivity and invert */
+	gyro_settings_read();
+	if (!gyro.enabled)
+	{
+		*gyro_yaw = 0.0f;
+		*gyro_pitch = 0.0f;
+	}
+	*gyro_yaw = (gyro.invert_horizontal ? -*gyro_yaw : *gyro_yaw) * gyro.sensitivity_horizontal;
+	*gyro_pitch = (gyro.invert_vertical ? -*gyro_pitch : *gyro_pitch) * gyro.sensitivity_vertical;
+#endif
 	if (*yaw == 0.0f && *pitch == 0.0f && *gyro_yaw == 0.0f && *gyro_pitch == 0.0f)
 		return FALSE;
 	touch_used();

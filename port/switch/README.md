@@ -121,7 +121,9 @@ while you wait in the lobby. Refer to the root
 
 The stick aims as it does anywhere else. Open a profile, choose Gamepads, and
 then Gyro Aim. That screen is the Switch's only. Gyro Aim is off until it is
-set to on. Horizontal and vertical sensitivity are how far the view turns
+set to ON, which aims with the gyroscope all the time, or ONLY ON ZOOM, which
+aims with it only while you are zoomed in (a scope), for fine aiming; the
+stick aims the rest of the time. Horizontal and vertical sensitivity are how far the view turns
 each way (`1` is the sensor's own turn; the screen goes from `0.25` to `10`).
 Invert horizontal and invert vertical are separate, and neither follows the
 stick's Invert Look. The same five are `input.gyro_aim`,

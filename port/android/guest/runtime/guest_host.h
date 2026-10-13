@@ -138,5 +138,8 @@ void host_touch_scene(int scene);
 /* the game control on each of the 16 controller buttons (touch_game.c),
 for the overlay's labels */
 void host_touch_bindings(const int *controls);
+/* the game's Gyro Aim for the overlay, which runs the phone's gyroscope: 0
+off, 1 on, 2 only while zoomed in */
+void host_touch_gyro_mode(int mode);
 
 #endif

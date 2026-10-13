@@ -150,6 +150,7 @@ public final class TouchControls extends View implements SensorEventListener, In
     private static native void nativeLook(float dx, float dy);
     private static native void nativeGyro(float dx, float dy);
     private static native void nativeLookReset();
+    private static native int nativeGyroMode();
     private static native int nativeRumble();
     private static native int nativeScene();
     private static native int nativeBindings(int[] controls);
@@ -210,6 +211,8 @@ public final class TouchControls extends View implements SensorEventListener, In
     private boolean showing;
     private long shownSince = -1;
     private boolean gyroRegistered;
+    /** the game's Gyro Aim, polled: 0 off, 1 on, 2 only on zoom */
+    private int gyroMode;
     private int lastAmplitude;
     private long lastVibration;
     private final int[] bindings = DEFAULT_BINDINGS.clone();
@@ -223,6 +226,11 @@ public final class TouchControls extends View implements SensorEventListener, In
             if (!deviceInputActive)
                 return;
             scene = nativeScene();
+            int mode = nativeGyroMode();
+            if (mode != gyroMode) {
+                gyroMode = mode;
+                updateSensors();
+            }
             updateShowing();
             readBindings();
             updateRumble();
@@ -859,16 +867,10 @@ public final class TouchControls extends View implements SensorEventListener, In
         });
         panel.addView(rumble);
 
-        Switch gyro = new Switch(getContext());
-        gyro.setText(gyroscope != null ? "Gyroscope aiming (experimental)" : "Gyroscope aiming (not on this phone)");
-        gyro.setChecked(layout.gyroscopeEnabled);
-        gyro.setEnabled(gyroscope != null);
-        gyro.setOnCheckedChangeListener((view, enabled) -> {
-            layout.gyroscopeEnabled = enabled;
-            gyroAim.reset();
-            saveLayout();
-        });
-        panel.addView(gyro);
+        // (gyroscope aiming is the game's: a profile's Gamepads, Gyro Aim)
+        panel.addView(text(gyroscope != null ?
+            "Gyroscope aiming: in the game's settings, a profile's Gamepads, Gyro Aim" :
+            "Gyroscope aiming: not on this phone"));
 
         Switch floating = new Switch(getContext());
         floating.setText("Floating move stick: it goes where your thumb lands in the lower left");
@@ -1107,8 +1109,13 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     // ---------- the gyroscope and the vibration
 
+    /** the game's Gyro Aim (input.gyro_aim): on, or only on zoom, which the game itself applies */
+    private boolean gyroscopeWanted() {
+        return gyroMode != 0;
+    }
+
     private void updateSensors() {
-        boolean needed = deviceInputActive && showing && !hidden && layout.gyroscopeEnabled && gyroscope != null;
+        boolean needed = deviceInputActive && showing && !hidden && gyroscopeWanted() && gyroscope != null;
         if (needed && !gyroRegistered) {
             gyroAim.reset();
             gyroRegistered = sensors.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME);
@@ -1121,16 +1128,16 @@ public final class TouchControls extends View implements SensorEventListener, In
 
     @Override
     public void onSensorChanged(SensorEvent event) {
-        if (!deviceInputActive || !showing || hidden || !layout.gyroscopeEnabled || editing || openDialogs > 0) {
+        if (!deviceInputActive || !showing || hidden || !gyroscopeWanted() || editing || openDialogs > 0) {
             gyroAim.reset();
             return;
         }
         int rotation = ((WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE))
             .getDefaultDisplay().getRotation();
         if (gyroAim.sample(event.timestamp, event.values[0], event.values[1], rotation, gyroDelta)) {
-            // as a swipe of this many logical units (which the profile's invert leaves alone)
-            nativeGyro(-gyroDelta[0] / LOOK_RADIANS_PER_UNIT * sensitivity,
-                -gyroDelta[1] / LOOK_RADIANS_PER_UNIT * sensitivity);
+            // as a swipe of this many logical units, the phone's own turn (the game applies
+            // Gyro Aim's sensitivity and invert; the profile's invert leaves it alone)
+            nativeGyro(-gyroDelta[0] / LOOK_RADIANS_PER_UNIT, -gyroDelta[1] / LOOK_RADIANS_PER_UNIT);
         }
     }
 
