@@ -1270,6 +1270,10 @@ static void config_report_unknown_keys(toml_datum_t table)
 /* defined with the line readers below: a file whose section headers repeat,
 joined so it parses, or NULL if it should be left alone */
 static char *config_repair_repeated_sections(const char *text, toml_result_t *parsed);
+/* (below too) a file with a line the parser cannot read, that line set aside
+so the rest parses, or NULL */
+static char *config_repair_unreadable_lines(const char *text, const char *message, toml_result_t *parsed,
+	int *first_line);
 
 static void config_load(void)
 {
@@ -1324,15 +1328,28 @@ static void config_load(void)
 			snprintf(reason, sizeof(reason), "%s", result.errmsg);
 			toml_free(result);
 			repaired = config_repair_repeated_sections(text, &result);
-			if (!repaired)
-			{
-				platform_log("config.toml: %s; using the defaults", reason);
-			}
-			else
+			if (repaired)
 			{
 				parsed = repaired;
 				ok = 1;
 				platform_log("settings: joined the sections %s had twice; a repeated key keeps its earlier value", path);
+			}
+			else
+			{
+				int line;
+
+				repaired = config_repair_unreadable_lines(text, reason, &result, &line);
+				if (repaired)
+				{
+					parsed = repaired;
+					ok = 1;
+					platform_log("settings: line %d of %s could not be read (%s); it is set aside as a comment, "
+						"and the rest is read", line, path, reason);
+				}
+				else
+				{
+					platform_log("config.toml: %s; using the defaults", reason);
+				}
 			}
 		}
 		if (ok)
@@ -1617,6 +1634,90 @@ static char *config_repair_repeated_sections(const char *text, toml_result_t *pa
 		return NULL;
 	}
 	return collapsed;
+}
+
+/* the line a parse error names ("(line 179) invalid value"), or 0 */
+static int config_error_line(const char *message)
+{
+	const char *at = strstr(message, "line ");
+
+	return at ? atoi(at + 5) : 0;
+}
+
+/* the text with its line'th line (from 1) set aside as a comment, which keeps
+what it said; NULL if the text has no such line */
+static char *config_set_aside_line(const char *text, int line)
+{
+	struct config_text out = { 0 };
+	const char *at = text;
+	int number;
+
+	for (number = 1; number < line && at; number++)
+	{
+		at = strchr(at, '\n');
+		if (at)
+			at++;
+	}
+	if (!at || !*at)
+		return NULL;
+	{
+		char *before = config_copy(text, (size_t)(at - text));
+
+		if (!before)
+			return NULL;
+		config_append(&out, before);
+		free(before);
+	}
+	config_append(&out, "# (unreadable, set aside) ");
+	config_append(&out, at);
+	return out.buffer;
+}
+
+/* A file that does not parse for a line the parser cannot read (a value
+cut short by the game ending as the file was written, a hand edit): each
+such line set aside as a comment, a few at most, with the repeated sections
+joined too, if the rest then parses; NULL otherwise, and the file is left
+alone. One bad line otherwise sent every setting back to its default at
+each start, and a menu's save kept the line. parsed receives the parse,
+and line the first line set aside */
+static char *config_repair_unreadable_lines(const char *text, const char *message, toml_result_t *parsed,
+	int *first_line)
+{
+	char *current = NULL;
+	char reason[200];
+	int attempt;
+
+	*first_line = 0;
+	snprintf(reason, sizeof(reason), "%s", message);
+	for (attempt = 0; attempt < 8; attempt++)
+	{
+		int line = config_error_line(reason);
+		char *next;
+		char *joined;
+
+		if (line <= 0)
+			break;
+		next = config_set_aside_line(current ? current : text, line);
+		if (!next)
+			break;
+		free(current);
+		current = next;
+		if (!*first_line)
+			*first_line = line;
+		*parsed = toml_parse(current, (int)strlen(current));
+		if (parsed->ok)
+			return current;
+		snprintf(reason, sizeof(reason), "%s", parsed->errmsg);
+		toml_free(*parsed);
+		joined = config_repair_repeated_sections(current, parsed);
+		if (joined)
+		{
+			free(current);
+			return joined;
+		}
+	}
+	free(current);
+	return NULL;
 }
 
 /* sets a setting, for now and in config.toml, from its value as text
@@ -1962,6 +2063,40 @@ int main(void)
 		return config_fail("a file with no repeated section was rewritten");
 	if (config_repair_repeated_sections(still_broken, &parsed))
 		return config_fail("a file that still does not parse was rewritten");
+
+	/* a value cut short: that line set aside, the rest read */
+	{
+		static const char cut_short[] =
+			"[display]\n"
+			"fov = 90.0\n"
+			"[input]\n"
+			"gyro_sensitivity_horizontal =\n"
+			"gyro_aim = \"zoom\"\n";
+		int line;
+
+		parsed = toml_parse(cut_short, (int)strlen(cut_short));
+		if (parsed.ok)
+			return config_fail("a value cut short parsed");
+		{
+			char message[200];
+
+			snprintf(message, sizeof(message), "%s", parsed.errmsg);
+			toml_free(parsed);
+			repaired = config_repair_unreadable_lines(cut_short, message, &parsed, &line);
+		}
+		if (!repaired)
+			return config_fail("a file with a value cut short was not read");
+		if (line != 4 || !strstr(repaired, "# (unreadable, set aside) gyro_sensitivity_horizontal ="))
+			return config_fail("the line cut short was not the one set aside");
+		aim = toml_seek(parsed.toptab, "input.gyro_aim");
+		if (aim.type != TOML_STRING || strcmp(aim.u.s, "zoom"))
+			return config_fail("a setting after the line cut short was lost");
+		aim = toml_seek(parsed.toptab, "display.fov");
+		if (aim.type != TOML_FP64 || aim.u.fp64 != 90.0)
+			return config_fail("a setting before the line cut short was lost");
+		toml_free(parsed);
+		free(repaired);
+	}
 	printf("PASS\n");
 	return 0;
 }
