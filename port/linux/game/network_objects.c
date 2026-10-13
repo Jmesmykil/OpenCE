@@ -66,6 +66,7 @@ same datum index (identifier and all), so that any message can name one:
 #include "network_coop.h"
 #include "network_distributed.h"
 #include "profile_sections.h"
+#include "biped_ragdoll.h"
 
 #include <math.h>
 
@@ -2346,7 +2347,8 @@ static void distributed_client_create(
 			if (!TEST_FLAG(change->flags, _distributed_object_carried_bit) &&
 				existing->object.parent_object_index == NONE &&
 				TEST_FLAG(existing->object.flags, _object_connected_to_map_bit) &&
-				!distributed_client_own_object(existing_index))
+				!distributed_client_own_object(existing_index) &&
+				!biped_ragdoll_active(existing_index))
 			{
 				distributed_object_move(existing_index, &change->position, &forward, &up,
 					&change->translational_velocity, &change->angular_velocity);
@@ -2599,8 +2601,11 @@ void network_objects_handle_states(
 			object_reconnect_to_map(state->object_index, NULL);
 			object_set_visibility(state->object_index, TRUE);
 		}
+		/* (nor a body this machine's ragdoll moves: where it lies is drawn,
+		not played, biped_ragdoll.c) */
 		if (object->object.parent_object_index != NONE ||
-			!TEST_FLAG(object->object.flags, _object_connected_to_map_bit))
+			!TEST_FLAG(object->object.flags, _object_connected_to_map_bit) ||
+			biped_ragdoll_active(state->object_index))
 		{
 			continue;
 		}

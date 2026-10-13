@@ -695,6 +695,7 @@ symbols in this file:
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
 #include "coop_scripts.h" /* port: port/linux/game/coop_scripts.c */
 #include "coop_enemies.h" /* port: port/linux/game/coop_enemies.c */
+#include "biped_ragdoll.h" /* port: port/linux/game/biped_ragdoll.c */
 
 /* port: the control and animation impulses the host's actors give their
 units go to the clients' copies (port/linux/game/network_actors.c) */
@@ -7063,6 +7064,17 @@ void unit_damage_aftermath(
 	instantaneous =
 		lethal &&
 		damage_definition->instantaneous_acceleration >= 2.f;
+
+	/* port: the killing blow pushes the ragdoll the body falls as in a
+	multiplayer game (port/linux/game/biped_ragdoll.c) */
+	if (lethal)
+	{
+		biped_ragdoll_note_killing_blow(
+			unit_index,
+			&damage_data->epicenter,
+			&damage_data->direction,
+			damage_definition->instantaneous_acceleration);
+	}
 
 	if (!lethal &&
 		TEST_FLAG(unit->unit.flags, _unit_feign_death_allowed_bit) &&

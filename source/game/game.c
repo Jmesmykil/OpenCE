@@ -182,6 +182,7 @@ struct game_options;
 #include "units/units.h"
 #include "units/vehicles.h"
 #include "network_coop.h" /* port: port/linux/game/network_coop.c */
+#include "biped_ragdoll.h" /* port: port/linux/game/biped_ragdoll.c */
 #ifdef HALO_PROFILE
 #include "profile_console.h" /* port: port/linux/game/profile_console.c */
 #endif
@@ -671,6 +672,8 @@ void game_initialize_for_new_map(
 	the host's indices, not its own objects' of the last game's */
 	network_distributed_new_game();
 	render_interpolation_reset();
+	/* port: nor of the last map's ragdolls (port/linux/game/biped_ragdoll.c) */
+	biped_ragdoll_reset();
 	render_initialize_for_new_map();
 	structures_initialize_for_new_map();
 	breakable_surfaces_initialize_for_new_map();
