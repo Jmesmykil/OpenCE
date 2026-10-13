@@ -2,6 +2,65 @@
 
 [![Join our Discord](https://invidget.switchblade.xyz/9gqcHyr5km)](https://discord.gg/9gqcHyr5km)
 
+This fork aims to make the Switch experience smoother for personal use. You
+might enjoy some of it too.
+
+This build is up to date with OpenCE's 201 build. Put the files in a
+subfolder of your Switch folder, and put the `.iso` there as well.
+
+## This build
+
+### Custom map downloading
+
+Entering a lobby that uses a custom map downloads that map into your
+`custom_maps` folder.
+
+<img width="720" alt="A lobby downloading a custom map" src="https://github.com/user-attachments/assets/de3653d5-c167-4fbe-b37b-274b51c355c9" />
+
+### Custom map folders
+
+Subfolders of `custom_maps` keep maps organized. The game tells singleplayer
+maps from multiplayer maps, so both can live in the same folder (for example
+Cursed Halo). The multiplayer list shows only the multiplayer maps, and the
+singleplayer list shows only the singleplayer maps.
+
+<img width="306" alt="custom_maps with a subfolder of maps" src="https://github.com/user-attachments/assets/7de9e434-f248-48df-aea8-9dc93186eaf9" />
+
+<img width="720" alt="Custom multiplayer, listing folders" src="https://github.com/user-attachments/assets/43e8cbf9-a473-46cc-9e07-a0bc0d6cc9e3" />
+
+<img width="720" alt="A custom multiplayer folder opened" src="https://github.com/user-attachments/assets/f78fa346-e11d-43e6-b26c-89e847ecb4f3" />
+
+<img width="720" alt="Custom singleplayer, listing folders" src="https://github.com/user-attachments/assets/6541f567-c7f1-48ac-989c-4f9802868a38" />
+
+<img width="720" alt="A custom singleplayer folder opened" src="https://github.com/user-attachments/assets/0e29d308-bbe5-4059-9c4d-b32759f8ec7b" />
+
+### Gyro aim
+
+Gyro aim is set per profile from the controller menu. It has been tried with
+Joy-Cons in the Switch, Joy-Cons on their own, a third-party Pro controller,
+and a PS5 controller connected through Mission Control.
+
+<img width="720" alt="Gyro Aim in the controller menu" src="https://github.com/user-attachments/assets/6ad94fb9-9148-4a67-b1f0-350bc8c1a3e4" />
+
+<img width="720" alt="Gyro aim settings" src="https://github.com/user-attachments/assets/5c331d84-60da-4c56-b074-3f539e55bc83" />
+
+### Split screen
+
+Split screen used to draw player 1's map geometry wrong unless player 2 was
+looking the same way. Whether that came from this fork or from how OpenCE
+runs on the Switch is unclear. It is fixed here, for multiplayer and for
+singleplayer. It has been tried with two players.
+
+Before:
+
+<img width="720" alt="Split screen with player 1's map geometry broken" src="https://github.com/user-attachments/assets/d8edd7e4-2a27-4306-94cb-cc660a0f4307" />
+
+After:
+
+<img width="720" alt="Split screen with both players' views drawn correctly" src="https://github.com/user-attachments/assets/516ed486-0319-4917-bc6e-aca0d26f189b" />
+
+---
+
 This project is a port of the Halo: Combat Evolved decompilation to Linux,
 Windows, Android and the Nintendo Switch. The decompilation is of the Xbox build 2342
 (`cachebeta.exe`, SHA-256
