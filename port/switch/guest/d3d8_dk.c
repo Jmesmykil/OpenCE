@@ -2118,20 +2118,6 @@ static void sampler_make(int stage, BOOL mipmapped, BOOL hires, struct dk_sample
 /* The pixel shader's key as prepare_draw builds it, and with it what the
 stages sample: every stage's texture is found here (finding one may send its
 texels to the host), as bind_textures does. */
-/* debug.gpu_normalization_computed (true unless set false): the pixel
-shaders compute the game's normalization map instead of reading it */
-static BOOL normalization_computed(void)
-{
-	static int looked, computed;
-
-	if (!looked)
-	{
-		looked = 1;
-		computed = config_boolean("debug.gpu_normalization_computed");
-	}
-	return computed;
-}
-
 static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scale[4][4],
 	struct dk_command_textures *textures)
 {
@@ -2203,10 +2189,6 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 				key->coverage_alpha = description.hires_coverage != FALSE;
 			key->sampler_type[stage] = kind == DK_TEXTURE_CUBE ? _xgpu_sampler_cube : kind == DK_TEXTURE_3D ?
 				_xgpu_sampler_3d : _xgpu_sampler_2d;
-			/* (the normalization map, computed by the shader instead:
-			NV2A_PIXEL_KEY_NORMALIZE, xbox_textures_dk.c) */
-			if (kind == DK_TEXTURE_CUBE && description.normalization_cube && normalization_computed())
-				key->texture_modes |= NV2A_PIXEL_KEY_NORMALIZE << stage;
 			sampler_make(stage, description.levels > 1, description.hires, &textures->stages[stage].sampler);
 		}
 	}

@@ -3580,6 +3580,29 @@ static DkGpuAddr range_read(const void *data, uint32_t size)
 	return gpu ? gpu : upload_copy(data, size);
 }
 
+/* whether [gpu, gpu + size) is memory the GPU reads draws' data from: one
+mapped chunk of the window, or the upload buffer. A GPU fault in a crowded
+game named a vertex stream's end as nonsense (the kernel's error info:
+SET_VERTEX_STREAM_LIMIT_A), so a draw's every stream and its indices are
+checked before the GPU is given them. */
+static int gpu_range_known(DkGpuAddr gpu, uint64_t size)
+{
+	int index;
+
+	if (!gpu || size > WINDOW_CHUNK_SIZE)
+		return 0;
+	if (dk.upload_memory && gpu >= dk.upload_gpu && gpu + size <= dk.upload_gpu + (DkGpuAddr)FRAMES * UPLOAD_SLICE_SIZE)
+		return 1;
+	for (index = 0; index < dk.window_chunk_count; index++)
+	{
+		const struct window_chunk *chunk = &dk.window_chunks[index];
+
+		if (chunk->block && gpu >= chunk->gpu && gpu + size <= chunk->gpu + WINDOW_CHUNK_SIZE)
+			return 1;
+	}
+	return 0;
+}
+
 static void draw_problem(const char *what)
 {
 	if (dk.said_draw_problem < 8)
@@ -3706,6 +3729,34 @@ static void draw(const struct dk_command_draw *command)
 	}
 	event->g[2] = index_gpu;
 	event->a[5] = binding;
+	/* (each stream, and the indices, where the GPU can read them: a draw
+	that would hand it anything else is said and skipped) */
+	{
+		uint32_t checked;
+
+		for (checked = 0; checked < binding; checked++)
+		{
+			if (!gpu_range_known(extents[checked].addr, extents[checked].size))
+			{
+				trace_check("a draw's stream %u of %u is at gpu %010llx, %u bytes (guest %08x, inline %u), which "
+					"is not memory the GPU reads draws from: skipped", (unsigned)checked, (unsigned)binding,
+					(unsigned long long)extents[checked].addr, (unsigned)extents[checked].size,
+					checked < command->stream_count ? (unsigned)command->streams[checked][0] : 0u,
+					(unsigned)command->inline_bytes);
+				event->a[0] |= 9u << 24;
+				profile.frame.skipped++;
+				return;
+			}
+		}
+		if (index_gpu && !gpu_range_known(index_gpu, (uint64_t)command->count * sizeof(uint16_t)))
+		{
+			trace_check("a draw's %u indices are at gpu %010llx, which is not memory the GPU reads draws from: "
+				"skipped", (unsigned)command->count, (unsigned long long)index_gpu);
+			event->a[0] |= 10u << 24;
+			profile.frame.skipped++;
+			return;
+		}
+	}
 	if (!command->count)
 		trace_check("a draw of no vertices (primitive %u)", (unsigned)command->primitive);
 	if (dk.format_dirty)

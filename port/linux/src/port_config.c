@@ -726,11 +726,6 @@ static const struct config_setting config_settings[] =
 		"Leave out of the pixel shaders the clamps their values cannot need\n"
 		"(port/switch/guest/nv2a_psh_dk.c); false writes them all, as before, to\n"
 		"compare the two. Takes effect the next start." },
-	{ "debug.gpu_normalization_computed", _config_boolean, "true", "HALO_GPU_NORMALIZATION_COMPUTED",
-		_environment_value, _platform_android,
-		"The pixel shaders compute the game's normalization cube map instead of\n"
-		"reading it (port/switch/guest/xbox_textures_dk.c); false reads it, as\n"
-		"before. Takes effect the next start." },
 	{ "debug.gpu_glsl_folder", _config_string, "\"\"", "HALO_GPU_GLSL_FOLDER", _environment_value, _platform_android,
 		"A folder to write each shader the game draws with to, as GLSL named by its\n"
 		"hash (the names gpu_capture logs); the folder must exist. Empty for none." },

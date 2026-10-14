@@ -27,12 +27,6 @@ names. A change to what the host compiles (UAM's commit) is the cache
 folder's name, not this. */
 #define DK_SHADER_GENERATOR_VERSION 3
 
-/* The pixel key's texture_modes: four 5-bit modes, and above them this
-bit for each stage (shifted by the stage) whose cube map is the game's
-normalization map, which the shader computes instead of reading
-(xbox_textures_dk.c, nv2a_psh_dk.c). The Xbox leaves those bits 0. */
-#define NV2A_PIXEL_KEY_NORMALIZE 0x01000000u
-
 /* the stages, as the host's imports take them */
 #define DK_SHADER_STAGE_VERTEX 0
 #define DK_SHADER_STAGE_PIXEL 1
