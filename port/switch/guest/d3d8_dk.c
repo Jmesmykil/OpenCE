@@ -177,9 +177,11 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 
 static void *stream_command(uint32_t type, unsigned long size);
 
-/* texture coordinate 0's clip, for the draws that follow (the vertex
-parameters' texture_clip) */
-static float texture_clip[4];
+/* texture coordinate 0's clip, for the draws that follow: the lowest and
+highest u and v as the texture is sampled (0 to 1 across it), and whether
+to clip; the vertex parameters' texture_clip has them in the coordinates'
+own units */
+static float texture_clip[3];
 
 /* The draws that follow drawn only where texture coordinate 0's u and v are
 in [low, high] (the vertex shaders' clip distances, nv2a_vsh_dk.c), or
@@ -191,7 +193,6 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	texture_clip[0] = clip ? low : 0.0f;
 	texture_clip[1] = clip ? high : 0.0f;
 	texture_clip[2] = clip ? 1.0f : 0.0f;
-	texture_clip[3] = 0.0f;
 }
 
 /* the part of a frame the game is about to draw, for the host's record of
@@ -2026,7 +2027,20 @@ static void draw_parameters_send(float texture_scale[4][4])
 		vertex.point_and_screen[0] = D3D__RenderState[D3DRS_POINTSIZE] ?
 			dword_to_float(D3D__RenderState[D3DRS_POINTSIZE]) : 1.0f;
 		vertex.point_and_screen[1] = (float)UI_OFFSET;
-		memcpy(vertex.texture_clip, texture_clip, sizeof(vertex.texture_clip));
+		/* (a linear texture - a render target, as a shadow's map - is
+		addressed in texels: texture_scale is how the pixel shader makes them
+		0 to 1, and its inverse makes the clip's limits texels) */
+		vertex.point_and_screen[2] = texture_clip[2];
+		if (texture_clip[2] != 0.0f)
+		{
+			float u_scale = texture_scale[0][0] > 0.0f ? texture_scale[0][0] : 1.0f;
+			float v_scale = texture_scale[0][1] > 0.0f ? texture_scale[0][1] : 1.0f;
+
+			vertex.texture_clip[0] = texture_clip[0] / u_scale;
+			vertex.texture_clip[1] = texture_clip[1] / u_scale;
+			vertex.texture_clip[2] = texture_clip[0] / v_scale;
+			vertex.texture_clip[3] = texture_clip[1] / v_scale;
+		}
 
 		for (stage = 0; stage < 8; stage++)
 		{
