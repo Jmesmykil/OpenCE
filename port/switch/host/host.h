@@ -46,6 +46,9 @@ void host_sd_unlock(void);
 /* write the SD card's journal, so a file closed by the guest is still there
 after _exit (host_main.c) */
 void host_storage_commit(void);
+/* performance.cpu_clock: the CPU's rate in MHz, 0 for the console's own
+(host_sdl2.c) */
+void host_clock_cpu(unsigned int mhz);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);

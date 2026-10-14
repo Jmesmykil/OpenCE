@@ -137,6 +137,16 @@ GAME leaves the match for both players and returns to the main menu. Each
 player's window is cleared only inside itself, so the second player's clear
 does not wipe the first player's view.
 
+## Performance
+
+Video Setup has a PERFORMANCE screen, the Switch's only, with the CPU's
+clock: 1.7 GHZ (the default, the fastest Nintendo's own games use), 1 GHZ
+(the console's handheld rate: cooler, and the battery lasts longer) or
+STOCK (left at the rate the console started the game with). It changes at
+once. It is `performance.cpu_clock` in `config.toml` (`"1785"`, `"1020"`
+or `"stock"`). The memory and the GPU stay at the rates the game sets for
+itself, and every clock goes back to the console's when the game exits.
+
 ## The memory model
 
 This is the part of the port that is not like the others, and it is worth

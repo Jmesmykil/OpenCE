@@ -677,6 +677,10 @@ static const struct config_setting config_settings[] =
 		"looks up. true: tilting it up looks down. The stick's invert is its own." },
 #endif
 #ifdef HALO_SWITCH
+	{ "performance.cpu_clock", _config_string, "\"1785\"", "HALO_CPU_CLOCK", _environment_value, _platform_android,
+		"The CPU's clock: \"1785\" (1.7 GHz, the most Nintendo's own games use),\n"
+		"\"1020\" (1 GHz, the console's handheld rate: cooler, and the battery\n"
+		"lasts longer) or \"stock\" (left as the console has it). Changes at once." },
 	{ "debug.profiler", _config_boolean, "false", "HALO_PROFILER", _environment_set_is_true, _platform_android,
 		"Profile the game: sample where its threads are (debug.profile_hz times a\n"
 		"second) and write the counts to the profile folder every 20 s, for\n"

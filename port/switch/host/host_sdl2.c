@@ -309,6 +309,10 @@ handheld defaults, 1020 MHz. 1785 MHz is the CPU's highest rate Nintendo's
 own titles are allowed, and 1600 MHz the memory's docked rate, which titles
 may also use in handheld. The rates found are put back when the game exits.
 
+performance.cpu_clock chooses the CPU's rate (host_clock_cpu): 1785 MHz,
+the default, 1020 MHz (cooler, and the battery lasts longer), or the rate
+found ("stock").
+
 The GPU was left where a homebrew title starts, 307 MHz, on the strength of
 that 2-4%. It was measured in light scenes: in an internet game of 24
 players the game fell to 27-35 fps with the swap still taking 0.2 ms, which
@@ -321,6 +325,10 @@ chosen by the mode the console is in when the game starts. */
 #define GAME_GPU_HANDHELD_HZ 460800000u
 
 static u32 original_cpu_hz, original_memory_hz, original_gpu_hz;
+/* performance.cpu_clock, as the game last said it (host_clock_cpu): the CPU's
+rate, or 0 for the console's own; and whether the clocks are set yet */
+static u32 wanted_cpu_hz = GAME_CPU_HZ;
+static int clocks_set;
 
 static void set_clock(PcvModuleId module, u32 hz)
 {
@@ -343,6 +351,23 @@ static u32 get_clock(PcvModuleId module)
 		clkrstCloseSession(&session);
 	}
 	return hz;
+}
+
+/* the guest's, when performance.cpu_clock is read and when it changes: the
+CPU's rate in MHz (1785, 1020), or 0 for the rate the console had. Set at
+once once the clocks are (log_clocks), else when they are */
+void host_clock_cpu(unsigned int mhz)
+{
+	u32 hz = mhz * 1000000u;
+
+	if (hz == wanted_cpu_hz)
+		return;
+	wanted_cpu_hz = hz;
+	if (!clocks_set || R_FAILED(clkrstInitialize()))
+		return;
+	set_clock(PcvModuleId_CpuBus, hz ? hz : original_cpu_hz);
+	host_logf(HOST_LOG_INFO, "clocks: cpu %u MHz (performance.cpu_clock)", get_clock(PcvModuleId_CpuBus) / 1000000);
+	clkrstExit();
 }
 
 void host_restore_clocks(void)
@@ -378,8 +403,9 @@ static void log_clocks(void)
 	original_gpu_hz = get_clock(PcvModuleId_GPU);
 	host_logf(HOST_LOG_INFO, "clocks: found cpu %u MHz, memory %u MHz, gpu %u MHz",
 		original_cpu_hz / 1000000, original_memory_hz / 1000000, original_gpu_hz / 1000000);
-	if (original_cpu_hz && original_cpu_hz < GAME_CPU_HZ)
-		set_clock(PcvModuleId_CpuBus, GAME_CPU_HZ);
+	if (original_cpu_hz && wanted_cpu_hz)
+		set_clock(PcvModuleId_CpuBus, wanted_cpu_hz);
+	clocks_set = 1;
 	if (original_memory_hz && original_memory_hz < GAME_MEMORY_HZ)
 		set_clock(PcvModuleId_EMC, GAME_MEMORY_HZ);
 	{

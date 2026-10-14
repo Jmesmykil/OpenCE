@@ -21,3 +21,4 @@ host_dk_shader_loose_loads
 host_sdl_gamepad_gyro
 # commit the SD card after the guest writes config.toml (port/linux/src/port_config.c)
 host_storage_commit
+host_clock_cpu

@@ -798,10 +798,29 @@ int halo_scoreboard_pointer_update(int offered, struct halo_ui_pointer *pointer)
 /* takes up the display's shape and resolution, or the window's, if they
 have changed; between frames, since the game's layout and the targets must
 agree for a whole frame. Returns the width the game draws. */
+/* the host's (host_sdl2.c): the CPU's rate in MHz, 0 for the console's own */
+void host_clock_cpu(unsigned int mhz);
+
+/* performance.cpu_clock for the host, when it is first read and when it
+changes: "1785", "1020" or "stock" */
+static void cpu_clock_update(void)
+{
+	static unsigned long changes = (unsigned long)-1;
+	const char *clock;
+
+	if (changes == config_changes())
+		return;
+	changes = config_changes();
+	clock = config_string("performance.cpu_clock");
+	host_clock_cpu(!strcmp(clock, "stock") ? 0 : !strcmp(clock, "1020") ? 1020 : 1785);
+}
+
 long halo_screen_commit(void)
 {
 	long width;
 	float scale[2];
+
+	cpu_clock_update();
 
 	if (!screen_width)
 		return halo_screen_width();

@@ -262,7 +262,17 @@ _video["categories"] = [
     ("GRAPHICS:", "video_settings/graphics", "The HUD, text, anti-aliasing, shadows and\nlighting."),
     ("FOV AND VIEWMODELS:", "video_settings/fov_viewmodels",
      "The field of view and the first-person\nweapon. Their defaults keep the stock view."),
+    ("PERFORMANCE:", "video_settings/performance",
+     "How fast the console runs the game: a steadier\nframe rate, or a cooler console.", "switch"),
 ]
+# the Switch's clocks (port/switch/host/host_sdl2.c)
+SCREENS["video_settings/performance"] = {
+    "screen": "performance_settings_screen", "header": _video["header"], "spacing": 30,
+    "rows": [
+        ("CPU CLOCK:", "performance.cpu_clock", [("STOCK", "stock"), ("1 GHZ", "1020"), ("1.7 GHZ", "1785")],
+         "1.7 GHz is the fastest Nintendo's games use.\n1 GHz and stock run cooler, and the battery lasts.", None),
+    ],
+}
 SCREENS["video_settings/fov_viewmodels"] = {
     "screen": "fov_viewmodel_settings_screen", "header": _video["header"], "spacing": 30,
     "rows": [
