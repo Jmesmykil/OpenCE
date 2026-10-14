@@ -198,6 +198,29 @@ typedef char dk_pixel_key_alpha_test_samples_where_hashed[
 	offsetof(struct nv2a_pixel_shader_key, alpha_test_samples) == 254 ? 1 : -1];
 typedef char dk_pixel_key_size_as_hashed[sizeof(struct nv2a_pixel_shader_key) == 256 ? 1 : -1];
 
+/* the debug options that change the pixel shaders' GLSL (nv2a_psh_dk.c):
+mixed into their hash when any is set, so a debug run compiles its own
+shaders rather than drawing with the cached ones of a normal run, and a
+normal run's names stay as they were */
+static uint64_t debug_hash_mix(uint64_t hash)
+{
+	static int looked;
+	static char options[256];
+	static unsigned long length;
+
+	if (!looked)
+	{
+		looked = 1;
+		snprintf(options, sizeof(options), "%s|%d|%d", config_string("debug.gpu_debug_expression"),
+			config_boolean("debug.gpu_debug_texture0") ? 1 : 0, config_boolean("debug.gpu_debug_flat") ? 1 : 0);
+		length = strcmp(options, "|0|0") ? (unsigned long)strlen(options) : 0;
+		if (length)
+			platform_log("shader cache: pixel shaders made for the debug options \"%s\" (expression|texture0|flat)",
+				options);
+	}
+	return length ? dk_shader_hash_mix(hash, options, length) : hash;
+}
+
 static uint64_t key_hash(uint32_t stage, const void *data)
 {
 	uint32_t version = DK_SHADER_GENERATOR_VERSION;
@@ -221,6 +244,7 @@ static uint64_t key_hash(uint32_t stage, const void *data)
 			hash = dk_shader_hash_mix(hash, &key->per_pixel_lighting, sizeof(key->per_pixel_lighting));
 			hash = dk_shader_hash_mix(hash, &key->alpha_test_samples, sizeof(key->alpha_test_samples));
 		}
+		hash = debug_hash_mix(hash);
 	}
 	return hash;
 }
