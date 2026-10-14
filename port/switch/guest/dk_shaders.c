@@ -138,8 +138,6 @@ struct dk_key
 	uint32_t handle;
 	/* the pass found it on the card (or loaded): nothing to compile */
 	int ready;
-	/* its GLSL written to debug.gpu_glsl_folder (glsl_write) */
-	int glsl_written;
 };
 
 static struct dk_key *keys;
@@ -577,42 +575,6 @@ static void hash_log_once(uint64_t hash)
 	}
 }
 
-/* debug.gpu_glsl_folder: a shader the game draws with, written once as
-<folder>/<v or f><hash>.glsl, the name the GPU profile's capture logs it by
-(port/switch/host/host_dk.c) */
-static void glsl_write(struct dk_key *key)
-{
-	static const char *folder;
-	static int looked;
-	char path[512];
-	char *glsl;
-	FILE *file;
-
-	if (key->glsl_written)
-		return;
-	key->glsl_written = 1;
-	if (!looked)
-	{
-		looked = 1;
-		/* (the folder must be there already) */
-		folder = config_string("debug.gpu_glsl_folder");
-	}
-	if (!folder || !folder[0])
-		return;
-	glsl = key_glsl(key);
-	if (!glsl)
-		return;
-	snprintf(path, sizeof(path), "%s/%c%016llx.glsl", folder, key->stage == DK_SHADER_STAGE_PIXEL ? 'f' : 'v',
-		(unsigned long long)key->hash);
-	file = fopen(path, "w");
-	if (file)
-	{
-		fputs(glsl, file);
-		fclose(file);
-	}
-	free(glsl);
-}
-
 /* asks for one key: a handle if the shader is ready, and the key queued
 with the host if it was unknown to it. The priority is the caller's */
 static uint32_t key_ask(struct dk_key *key, uint32_t priority)
@@ -623,10 +585,7 @@ static uint32_t key_ask(struct dk_key *key, uint32_t priority)
 	hash_log_once(key->hash);
 	handle = host_dk_shader_find(key->stage, key->hash, (uint32_t)(uintptr_t)&state);
 	if (handle)
-	{
-		glsl_write(key);
 		return handle;
-	}
 	if (state == 1)
 	{
 		/* queued or compiling: raise it in the queue, if the caller is
@@ -949,6 +908,51 @@ static struct handle_entry *handle_slot(uint64_t hash)
 	return &handle_table[slot];
 }
 
+/* debug.gpu_glsl_folder: a shader the game draws with, written once - the
+first time its handle is kept for draws - as <folder>/<v or f><hash>.glsl,
+the name the GPU profile's capture logs it by (port/switch/host/host_dk.c).
+The folder must be there already. */
+static void glsl_write(uint32_t stage, uint64_t hash, const void *key_data)
+{
+	static const char *folder;
+	static int looked;
+	char path[512];
+	char *glsl = NULL;
+	FILE *file;
+
+	if (!looked)
+	{
+		looked = 1;
+		folder = config_string("debug.gpu_glsl_folder");
+	}
+	if (!folder || !folder[0])
+		return;
+	if (stage == DK_SHADER_STAGE_VERTEX)
+	{
+		const struct dk_vertex_key *vertex = key_data;
+		const uint32_t *instructions;
+		unsigned long instruction_count;
+
+		if (vertex_program(vertex->program_hash, &instructions, &instruction_count))
+			glsl = nv2a_dk_vertex_shader_to_glsl(instructions, instruction_count, vertex->packed_mask);
+	}
+	else
+		glsl = nv2a_dk_pixel_shader_to_glsl((const struct nv2a_pixel_shader_key *)key_data);
+	if (!glsl)
+		return;
+	snprintf(path, sizeof(path), "%s/%c%016llx.glsl", folder, stage == DK_SHADER_STAGE_PIXEL ? 'f' : 'v',
+		(unsigned long long)hash);
+	file = fopen(path, "w");
+	if (file)
+	{
+		fputs(glsl, file);
+		fclose(file);
+	}
+	else
+		platform_log("shader cache: cannot write %s", path);
+	free(glsl);
+}
+
 uint32_t dk_shader_for_draw(uint32_t stage, const void *key_data)
 {
 	union
@@ -1001,6 +1005,7 @@ uint32_t dk_shader_for_draw(uint32_t stage, const void *key_data)
 			entry->hash = hash;
 			entry->handle = handle;
 			handle_count++;
+			glsl_write(stage, hash, &data);
 		}
 		return handle;
 	}
