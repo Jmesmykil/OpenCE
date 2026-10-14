@@ -86,6 +86,9 @@ SCREENS = {
              "Draw a frame for every display refresh, blending\nbetween the game's 30 ticks a second.", None),
             ("INSTANT AIM:", "display.direct_camera", ON_OFF,
              "In first person, turn the view the moment the\nmouse moves, not up to two ticks later.", "desktop web"),
+            # (the deko3d renderer's screen scale: port/switch/guest/d3d8_dk.c)
+            ("RESOLUTION LIMIT:", "display.resolution_limit", [("480P", "480"), ("720P", "720"), ("1080P", "1080")],
+             "What the game draws at. Shown at 720p in handheld\nand 1080p docked; handheld draws 720p at most.", "switch"),
             ("HIGH-RES HUD:", "display.high_res_hud", ON_OFF,
              "Draw the HUD from the high-res redraws; off\ndraws the game's own pictures.", None),
             ("HIGH-RES TEXT:", "display.high_res_text", ON_OFF,

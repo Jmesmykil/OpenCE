@@ -61,8 +61,15 @@ so that the host knows how much of it a frame has used (command_memory_added) */
 #define IMAGE_BLOCK_SIZE (32 * 1024 * 1024)
 #define IMAGE_BLOCK_LIMIT 16
 #define TARGET_LIMIT 256
+/* the output: 1280x720 in handheld, 1920x1080 docked (host_dk_output_height) */
 #define SCREEN_WIDTH 1280
 #define SCREEN_HEIGHT 720
+#define SCREEN_FULL_WIDTH 1920
+#define SCREEN_FULL_HEIGHT 1080
+/* a target's size in its own pixels (the screen's targets can be drawn
+bigger than the game's: dk_commands.h) */
+#define SURFACE_PIXEL_WIDTH(surface) ((surface)->pixel_width ? (surface)->pixel_width : (surface)->width)
+#define SURFACE_PIXEL_HEIGHT(surface) ((surface)->pixel_height ? (surface)->pixel_height : (surface)->height)
 
 /* the window is made real a chunk at a time (host_memory.c); the largest
 it can be, HALO_GUEST_WINDOW_MAXIMUM (512 MB), is 32 of them */
@@ -153,6 +160,8 @@ static struct
 
 	DkMemBlock screen_memory;
 	DkImage screen_images[SCREEN_IMAGES];
+	/* the swapchain's size (swapchain_make) */
+	uint32_t screen_width, screen_height;
 	DkSwapchain swapchain;
 
 	struct image_block image_blocks[IMAGE_BLOCK_LIMIT];
@@ -411,19 +420,20 @@ static struct target *target_get(const struct dk_surface *surface)
 		return NULL;
 	}
 	layout_make(&layout, surface->kind == DK_SURFACE_DEPTH ? DkImageFormat_Z24S8 : DkImageFormat_RGBA8_Unorm,
-		DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression, surface->width,
-		surface->height);
+		DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression,
+		SURFACE_PIXEL_WIDTH(surface), SURFACE_PIXEL_HEIGHT(surface));
 	if (!image_memory(&layout, &block, &offset))
 	{
-		host_logf(HOST_LOG_ERROR, "deko3d: no image memory for the %ux%u target at %08x", (unsigned)surface->width,
-			(unsigned)surface->height, (unsigned)surface->data);
+		host_logf(HOST_LOG_ERROR, "deko3d: no image memory for the %ux%u target at %08x",
+			(unsigned)SURFACE_PIXEL_WIDTH(surface), (unsigned)SURFACE_PIXEL_HEIGHT(surface), (unsigned)surface->data);
 		return NULL;
 	}
 	target = &dk.targets[dk.target_count++];
 	target->surface = *surface;
 	dkImageInitialize(&target->image, &layout, block, offset);
-	host_logf(HOST_LOG_INFO, "deko3d: %s target %08x, %ux%u", surface->kind == DK_SURFACE_DEPTH ? "depth" : "color",
-		(unsigned)surface->data, (unsigned)surface->width, (unsigned)surface->height);
+	host_logf(HOST_LOG_INFO, "deko3d: %s target %08x, %ux%u (%ux%u pixels)",
+		surface->kind == DK_SURFACE_DEPTH ? "depth" : "color", (unsigned)surface->data, (unsigned)surface->width,
+		(unsigned)surface->height, (unsigned)SURFACE_PIXEL_WIDTH(surface), (unsigned)SURFACE_PIXEL_HEIGHT(surface));
 	return target;
 }
 
@@ -859,16 +869,62 @@ void host_dk_idle(void)
 		queue_wait_idle();
 }
 
-static int initialize(void)
+/* the height host_dk_output_height last chose: 720 in handheld, 1080 docked */
+static uint32_t output_height = SCREEN_HEIGHT;
+
+/* the guest's, as it chooses its screen's scale (d3d8_dk.c, between frames):
+the height presented at, 1080 while the console is docked and 720 in
+handheld. present remakes the swapchain when it changes */
+unsigned int host_dk_output_height(void)
 {
-	DkDeviceMaker device_maker;
-	DkQueueMaker queue_maker;
-	DkCmdBufMaker command_maker;
+	output_height = appletGetOperationMode() == AppletOperationMode_Console ? SCREEN_FULL_HEIGHT : SCREEN_HEIGHT;
+	return output_height;
+}
+
+/* the swapchain's images and the swapchain, at output_height */
+static void swapchain_make(void)
+{
 	DkSwapchainMaker swapchain_maker;
 	DkImageLayout layout;
 	DkImage const *screen_images[SCREEN_IMAGES];
 	uint32_t image_size;
 	int index;
+
+	dk.screen_height = output_height;
+	dk.screen_width = output_height == SCREEN_FULL_HEIGHT ? SCREEN_FULL_WIDTH : SCREEN_WIDTH;
+	layout_make(&layout, DkImageFormat_RGBA8_Unorm,
+		DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression,
+		dk.screen_width, dk.screen_height);
+	image_size = (uint32_t)((dkImageLayoutGetSize(&layout) + dkImageLayoutGetAlignment(&layout) - 1) &
+		~(uint64_t)(dkImageLayoutGetAlignment(&layout) - 1));
+	dk.screen_memory = memory_block(SCREEN_IMAGES * image_size, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image, NULL);
+	for (index = 0; index < SCREEN_IMAGES; index++)
+	{
+		dkImageInitialize(&dk.screen_images[index], &layout, dk.screen_memory, (uint32_t)index * image_size);
+		screen_images[index] = &dk.screen_images[index];
+	}
+	dkSwapchainMakerDefaults(&swapchain_maker, dk.device, nwindowGetDefault(), screen_images, SCREEN_IMAGES);
+	dk.swapchain = dkSwapchainCreate(&swapchain_maker);
+}
+
+/* the swapchain made again at output_height, once the GPU has finished with
+its images (the console docked or undocked) */
+static void swapchain_remake(void)
+{
+	queue_wait_idle();
+	if (dk.faulted)
+		return;
+	dkSwapchainDestroy(dk.swapchain);
+	dkMemBlockDestroy(dk.screen_memory);
+	swapchain_make();
+	host_logf(HOST_LOG_INFO, "deko3d: presenting at %ux%u", (unsigned)dk.screen_width, (unsigned)dk.screen_height);
+}
+
+static int initialize(void)
+{
+	DkDeviceMaker device_maker;
+	DkQueueMaker queue_maker;
+	DkCmdBufMaker command_maker;
 
 	dkDeviceMakerDefaults(&device_maker);
 	device_maker.cbDebug = debug_callback;
@@ -884,20 +940,9 @@ static int initialize(void)
 	dk.commands = dkCmdBufCreate(&command_maker);
 	gpu_timing_initialize();
 
-	layout_make(&layout, DkImageFormat_RGBA8_Unorm,
-		DkImageFlags_UsageRender | DkImageFlags_UsagePresent | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression,
-		SCREEN_WIDTH, SCREEN_HEIGHT);
-	image_size = (uint32_t)((dkImageLayoutGetSize(&layout) + dkImageLayoutGetAlignment(&layout) - 1) &
-		~(uint64_t)(dkImageLayoutGetAlignment(&layout) - 1));
-	dk.screen_memory = memory_block(SCREEN_IMAGES * image_size, DkMemBlockFlags_GpuCached | DkMemBlockFlags_Image, NULL);
-	for (index = 0; index < SCREEN_IMAGES; index++)
-	{
-		dkImageInitialize(&dk.screen_images[index], &layout, dk.screen_memory, (uint32_t)index * image_size);
-		screen_images[index] = &dk.screen_images[index];
-	}
-	dkSwapchainMakerDefaults(&swapchain_maker, dk.device, nwindowGetDefault(), screen_images, SCREEN_IMAGES);
-	dk.swapchain = dkSwapchainCreate(&swapchain_maker);
-	host_logf(HOST_LOG_INFO, "deko3d: device ready, presenting at %dx%d", SCREEN_WIDTH, SCREEN_HEIGHT);
+	swapchain_make();
+	host_logf(HOST_LOG_INFO, "deko3d: device ready, presenting at %ux%u", (unsigned)dk.screen_width,
+		(unsigned)dk.screen_height);
 
 	/* the window's committed chunks, GPU-mapped (host_memory.c reports the
 	chunks; the GPU checks go as the probe's did) */
@@ -959,9 +1004,9 @@ static void targets_bind(const struct dk_command_targets *command)
 	size_from = dk.color ? dk.color : dk.depth;
 	if (size_from)
 	{
-		DkViewport viewport = { 0.0f, 0.0f, (float)size_from->surface.width, (float)size_from->surface.height,
-			0.0f, 1.0f };
-		DkScissor scissor = { 0, 0, size_from->surface.width, size_from->surface.height };
+		DkViewport viewport = { 0.0f, 0.0f, (float)SURFACE_PIXEL_WIDTH(&size_from->surface),
+			(float)SURFACE_PIXEL_HEIGHT(&size_from->surface), 0.0f, 1.0f };
+		DkScissor scissor = { 0, 0, SURFACE_PIXEL_WIDTH(&size_from->surface), SURFACE_PIXEL_HEIGHT(&size_from->surface) };
 
 		dkCmdBufSetViewports(dk.commands, 0, &viewport, 1);
 		dkCmdBufSetScissors(dk.commands, 0, &scissor, 1);
@@ -1069,11 +1114,13 @@ static void present(const struct dk_command_present *command)
 		dk.recorded = 0;
 		return;
 	}
+	if (output_height != dk.screen_height)
+		swapchain_remake();
 	slot = dkQueueAcquireImage(dk.queue, dk.swapchain);
 	DkImageView screen_view;
 	DkImageView const *screen_views[1] = { &screen_view };
-	DkScissor scissor = { 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT };
-	DkViewport viewport = { 0.0f, 0.0f, (float)SCREEN_WIDTH, (float)SCREEN_HEIGHT, 0.0f, 1.0f };
+	DkScissor scissor = { 0, 0, dk.screen_width, dk.screen_height };
+	DkViewport viewport = { 0.0f, 0.0f, (float)dk.screen_width, (float)dk.screen_height, 0.0f, 1.0f };
 
 	dkImageViewDefaults(&screen_view, &dk.screen_images[slot]);
 	dkCmdBufBindRenderTargets(dk.commands, screen_views, 1, NULL);
@@ -1083,25 +1130,27 @@ static void present(const struct dk_command_present *command)
 	if (back_buffer)
 	{
 		/* letterboxed to the back buffer's shape */
-		uint32_t width = SCREEN_WIDTH, height = SCREEN_WIDTH * back_buffer->surface.height / back_buffer->surface.width;
+		uint32_t source_width = SURFACE_PIXEL_WIDTH(&back_buffer->surface);
+		uint32_t source_height = SURFACE_PIXEL_HEIGHT(&back_buffer->surface);
+		uint32_t width = dk.screen_width, height = dk.screen_width * source_height / source_width;
 		DkImageView source;
-		DkImageRect from = { 0, 0, 0, back_buffer->surface.width, back_buffer->surface.height, 1 };
+		DkImageRect from = { 0, 0, 0, source_width, source_height, 1 };
 		DkImageRect to;
 
-		if (height > SCREEN_HEIGHT)
+		if (height > dk.screen_height)
 		{
-			height = SCREEN_HEIGHT;
-			width = SCREEN_HEIGHT * back_buffer->surface.width / back_buffer->surface.height;
+			height = dk.screen_height;
+			width = dk.screen_height * source_width / source_height;
 		}
-		to.x = (SCREEN_WIDTH - width) / 2;
-		to.y = (SCREEN_HEIGHT - height) / 2;
+		to.x = (dk.screen_width - width) / 2;
+		to.y = (dk.screen_height - height) / 2;
 		to.z = 0;
 		to.width = width;
 		to.height = height;
 		to.depth = 1;
 		dkImageViewDefaults(&source, &back_buffer->image);
 		dkCmdBufBarrier(dk.commands, DkBarrier_Fragments, 0);
-		if (command->screenshot && readback_make(back_buffer->surface.width, back_buffer->surface.height))
+		if (command->screenshot && readback_make(source_width, source_height))
 		{
 			DkImageView readback;
 
@@ -1126,9 +1175,9 @@ static void present(const struct dk_command_present *command)
 		{
 			const unsigned char *rows = (const unsigned char *)dkMemBlockGetCpuAddr(dk.readback_memory);
 			unsigned char *out = (unsigned char *)(uintptr_t)command->screenshot;
-			uint32_t row, row_bytes = screenshot->surface.width * 4;
+			uint32_t row, row_bytes = SURFACE_PIXEL_WIDTH(&screenshot->surface) * 4;
 
-			for (row = 0; row < screenshot->surface.height; row++)
+			for (row = 0; row < SURFACE_PIXEL_HEIGHT(&screenshot->surface); row++)
 				memcpy(out + (size_t)row * row_bytes, rows + (size_t)row * dk.readback_pitch, row_bytes);
 		}
 		else
@@ -2124,8 +2173,11 @@ static struct target *target_exact(uint32_t data, uint32_t width, uint32_t heigh
 	{
 		struct target *target = &dk.targets[index];
 
+		/* (drawn at its own size: a composite's levels are copied as they are) */
 		if (target->surface.data == data && target->surface.kind == DK_SURFACE_COLOR &&
-			target->surface.width == width && target->surface.height == height && (!best || target->bound > best->bound))
+			target->surface.width == width && target->surface.height == height &&
+			SURFACE_PIXEL_WIDTH(&target->surface) == width && SURFACE_PIXEL_HEIGHT(&target->surface) == height &&
+			(!best || target->bound > best->bound))
 			best = target;
 	}
 	return best;
@@ -2591,10 +2643,10 @@ static int state_apply(void)
 	top = state->scissor[1] < 0 ? 0 : state->scissor[1];
 	right = state->scissor[0] + state->scissor[2];
 	bottom = state->scissor[1] + state->scissor[3];
-	if (right > (int32_t)size_from->surface.width)
-		right = (int32_t)size_from->surface.width;
-	if (bottom > (int32_t)size_from->surface.height)
-		bottom = (int32_t)size_from->surface.height;
+	if (right > (int32_t)SURFACE_PIXEL_WIDTH(&size_from->surface))
+		right = (int32_t)SURFACE_PIXEL_WIDTH(&size_from->surface);
+	if (bottom > (int32_t)SURFACE_PIXEL_HEIGHT(&size_from->surface))
+		bottom = (int32_t)SURFACE_PIXEL_HEIGHT(&size_from->surface);
 	scissor.x = (uint32_t)left;
 	scissor.y = (uint32_t)top;
 	scissor.width = right > left ? (uint32_t)(right - left) : 0;

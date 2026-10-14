@@ -49,6 +49,8 @@ void host_storage_commit(void);
 /* performance.cpu_clock: the CPU's rate in MHz, 0 for the console's own
 (host_sdl2.c) */
 void host_clock_cpu(unsigned int mhz);
+/* the height presented at: 1080 docked, 720 in handheld (host_dk.c) */
+unsigned int host_dk_output_height(void);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);

@@ -139,7 +139,14 @@ does not wipe the first player's view.
 
 ## Performance
 
-Video Setup has a PERFORMANCE screen, the Switch's only, with the CPU's
+The console shows the game at 1280x720 in handheld and 1920x1080 docked.
+Video Setup's RESOLUTION LIMIT chooses the lines the game draws at, which
+are scaled up to that: 480P (the default, the game's own), 720P or 1080P,
+no more than the console shows (1080P draws at 720 in handheld). Docking or
+undocking switches at once. It is `display.resolution_limit` in
+`config.toml` (`"480"`, `"720"` or `"1080"`).
+
+Video Setup also has a PERFORMANCE screen, the Switch's only, with the CPU's
 clock: 1.7 GHZ (the default, the fastest Nintendo's own games use), 1 GHZ
 (the console's handheld rate: cooler, and the battery lasts longer) or
 STOCK (left at the rate the console started the game with). It changes at

@@ -68,6 +68,12 @@ static float screen_scale[2] = { 1.0f, 1.0f };
 static long ui_offset;
 #define UI_OFFSET ((GLint)ui_offset)
 
+#ifdef HALO_SWITCH
+/* the host's (host_dk.c): the height it presents at, 1080 docked and 720 in
+handheld */
+unsigned int host_dk_output_height(void);
+#endif
+
 static void screen_mode_choose(long *width, float scale[2])
 {
 #ifdef HALO_ANDROID
@@ -84,6 +90,21 @@ static void screen_mode_choose(long *width, float scale[2])
 		*width = 1600;
 	*width &= ~1L;
 	scale[0] = scale[1] = 1.0f;
+#ifdef HALO_SWITCH
+	/* display.resolution_limit: the lines the screen's targets are drawn at,
+	"480" (the game's own), "720" or "1080", no more than the host presents
+	at (1080 docked, 720 in handheld), which the host scales them up to */
+	{
+		const char *limit = config_string("display.resolution_limit");
+		unsigned int height = !strcmp(limit, "1080") ? 1080 : !strcmp(limit, "720") ? 720 : SCREEN_HEIGHT;
+		unsigned int output = host_dk_output_height();
+
+		if (height > output)
+			height = output;
+		if (height > SCREEN_HEIGHT)
+			scale[0] = scale[1] = (float)height / (float)SCREEN_HEIGHT;
+	}
+#endif
 #else
 	long display_width, display_height;
 
@@ -448,23 +469,43 @@ static void surface_dimensions(const D3DSurface *surface, unsigned long *width, 
 		format == D3DFMT_LIN_D24S8 || format == D3DFMT_LIN_F24S8 || format == D3DFMT_LIN_D16 || format == D3DFMT_LIN_F16;
 }
 
+/* the host's pixels to a game pixel in the targets bound (targets_bind):
+the screen's scale for the screen's targets, else 1. Viewports, clears and
+visibility counts are scaled by it */
+static float target_scale[2] = { 1.0f, 1.0f };
+
+/* a surface's scale: the screen's, if it is the screen's size */
+static void target_scale_of(unsigned long width, unsigned long height, float scale[2])
+{
+	scale[0] = scale[1] = 1.0f;
+	if (width == (unsigned long)halo_screen_width() && height == SCREEN_HEIGHT)
+	{
+		scale[0] = screen_scale[0];
+		scale[1] = screen_scale[1];
+	}
+}
+
 /* a surface as the host knows it; depth_only: NONE unless it is a depth
 format (a depth buffer that is not one is left unbound, as d3d8_gl.c does) */
-static void surface_describe(const D3DSurface *surface, BOOL depth_only, struct dk_surface *out)
+static void surface_describe(const D3DSurface *surface, BOOL depth_only, struct dk_surface *out, float scale[2])
 {
 	unsigned long width, height;
 	BOOL depth;
 
 	memset(out, 0, sizeof(*out));
+	scale[0] = scale[1] = 1.0f;
 	if (!surface || !surface->Data)
 		return;
 	surface_dimensions(surface, &width, &height, &depth);
 	if (depth_only && !depth)
 		return;
+	target_scale_of(width, height, scale);
 	out->data = surface->Data;
 	out->width = (uint32_t)width;
 	out->height = (uint32_t)height;
 	out->kind = depth ? DK_SURFACE_DEPTH : DK_SURFACE_COLOR;
+	out->pixel_width = (uint32_t)(width * scale[0] + 0.5f);
+	out->pixel_height = (uint32_t)(height * scale[1] + 0.5f);
 }
 
 /* the color surfaces drawn into, by their data, and the size each was last
@@ -575,12 +616,15 @@ a depth buffer. */
 static BOOL targets_bind(BOOL *has_depth)
 {
 	struct dk_command_targets targets;
+	float color_scale[2], depth_scale[2];
 
 	memset(&targets, 0, sizeof(targets));
-	surface_describe(device.render_target, FALSE, &targets.color);
-	surface_describe(device.depth_stencil, TRUE, &targets.depth);
+	surface_describe(device.render_target, FALSE, &targets.color, color_scale);
+	surface_describe(device.depth_stencil, TRUE, &targets.depth, depth_scale);
 	if (targets.color.kind == DK_SURFACE_NONE && targets.depth.kind == DK_SURFACE_NONE)
 		return FALSE;
+	target_scale[0] = targets.color.kind != DK_SURFACE_NONE ? color_scale[0] : depth_scale[0];
+	target_scale[1] = targets.color.kind != DK_SURFACE_NONE ? color_scale[1] : depth_scale[1];
 	if (has_depth)
 		*has_depth = targets.depth.kind != DK_SURFACE_NONE;
 	if (!targets_known || !words_equal(&targets.color, &targets_told.color, sizeof(targets.color)) ||
@@ -1050,10 +1094,14 @@ draws between a begin and an end pass, and writes the count to the test's
 slot when it gets there (DK_COMMAND_VISIBILITY_*). A result is the slot's
 latest count - while the GPU is behind, an earlier test's - as d3d8_gl.c's
 query buffer gives: the game asks at the start of the next frame, and
-waiting there would stop the CPU until the GPU caught up. The screen is
-drawn at the game's own pixels, so the count is in them already. */
+waiting there would stop the CPU until the GPU caught up. A count is in
+the host's pixels, made the game's (visibility_area): the screen's targets
+can be drawn bigger (display.resolution_limit). */
 
 static BOOL visibility_pending[DK_VISIBILITY_SLOTS];
+/* the host's pixels to a game pixel where each test drew: its count is
+divided by it, the game dividing by its own test's area (lens flares) */
+static float visibility_area[DK_VISIBILITY_SLOTS];
 
 void WINAPI D3DDevice_BeginVisibilityTest(void)
 {
@@ -1076,6 +1124,7 @@ HRESULT WINAPI D3DDevice_EndVisibilityTest(DWORD index)
 	command = stream_command(DK_COMMAND_VISIBILITY_END, sizeof(*command));
 	command->index = (uint32_t)index;
 	visibility_pending[index] = TRUE;
+	visibility_area[index] = target_scale[0] * target_scale[1];
 	return S_OK;
 }
 
@@ -1087,7 +1136,12 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 	if (!index)
 		index = 1;
 	if (result)
-		*result = visibility_pending[index] ? host_dk_visibility((unsigned int)index) : 0;
+	{
+		unsigned int count = visibility_pending[index] ? host_dk_visibility((unsigned int)index) : 0;
+
+		/* (in the game's pixels) */
+		*result = visibility_area[index] > 1.0f ? (UINT)(count / visibility_area[index] + 0.5f) : count;
+	}
 	return S_OK;
 }
 
@@ -1728,11 +1782,11 @@ static unsigned long stage_texture_mode(int stage)
 	return (D3D__RenderState[D3DRS_PSTEXTUREMODES] >> (5 * stage)) & 0x1f;
 }
 
-/* the pixel edge of a coordinate in the targets' units (which are the game's
-here: the host's targets are as big as the game's) */
-static int target_pixel(float coordinate)
+/* the host's pixel edge of a coordinate in the game's pixels of the targets
+bound (target_scale: the screen's targets may be drawn bigger) */
+static int target_pixel(float coordinate, int axis)
 {
-	return (int)floorf(coordinate + 0.5f);
+	return (int)floorf(coordinate * target_scale[axis] + 0.5f);
 }
 
 static uint32_t blend_equation(DWORD operation)
@@ -1756,10 +1810,10 @@ static void draw_state_make(BOOL has_depth, struct dk_draw_state *state)
 	BOOL depth_test = has_depth && rs[D3DRS_ZENABLE];
 
 	memset(state, 0, sizeof(*state));
-	state->viewport[0] = target_pixel((float)device.viewport.X);
-	state->viewport[1] = target_pixel((float)device.viewport.Y);
-	state->viewport[2] = target_pixel((float)(device.viewport.X + device.viewport.Width)) - state->viewport[0];
-	state->viewport[3] = target_pixel((float)(device.viewport.Y + device.viewport.Height)) - state->viewport[1];
+	state->viewport[0] = target_pixel((float)device.viewport.X, 0);
+	state->viewport[1] = target_pixel((float)device.viewport.Y, 1);
+	state->viewport[2] = target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - state->viewport[0];
+	state->viewport[3] = target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - state->viewport[1];
 	state->depth_range[0] = device.viewport.MinZ;
 	state->depth_range[1] = device.viewport.MaxZ;
 	/* the game never issues a scissor rectangle, and the NV2A scissor register
@@ -2523,10 +2577,12 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 	{
 		/* the NV2A clips a viewport-less clear to the viewport, which is what
 		keeps a split-screen window's clear from wiping the other window */
-		command->rectangles[0][0] = device.viewport.X;
-		command->rectangles[0][1] = device.viewport.Y;
-		command->rectangles[0][2] = device.viewport.Width;
-		command->rectangles[0][3] = device.viewport.Height;
+		int x0 = target_pixel((float)device.viewport.X, 0), y0 = target_pixel((float)device.viewport.Y, 1);
+
+		command->rectangles[0][0] = (uint32_t)x0;
+		command->rectangles[0][1] = (uint32_t)y0;
+		command->rectangles[0][2] = (uint32_t)(target_pixel((float)(device.viewport.X + device.viewport.Width), 0) - x0);
+		command->rectangles[0][3] = (uint32_t)(target_pixel((float)(device.viewport.Y + device.viewport.Height), 1) - y0);
 		command->rectangle_count = 1;
 		return;
 	}
@@ -2541,10 +2597,14 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 
 		if (left >= right || top >= bottom)
 			continue;
-		command->rectangles[kept][0] = (uint32_t)(left + UI_OFFSET);
-		command->rectangles[kept][1] = (uint32_t)top;
-		command->rectangles[kept][2] = (uint32_t)(right - left);
-		command->rectangles[kept][3] = (uint32_t)(bottom - top);
+		{
+			int x0 = target_pixel((float)(left + UI_OFFSET), 0), y0 = target_pixel((float)top, 1);
+
+			command->rectangles[kept][0] = (uint32_t)x0;
+			command->rectangles[kept][1] = (uint32_t)y0;
+			command->rectangles[kept][2] = (uint32_t)(target_pixel((float)(right + UI_OFFSET), 0) - x0);
+			command->rectangles[kept][3] = (uint32_t)(target_pixel((float)bottom, 1) - y0);
+		}
 		kept++;
 	}
 	command->rectangle_count = kept;
@@ -2632,14 +2692,16 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 		draw_statistics_log();
 	{
 		struct dk_command_present *command = stream_command(DK_COMMAND_PRESENT, sizeof(*command));
+		float scale[2];
 
-		surface_describe(&device.back_buffer, FALSE, &command->back_buffer);
+		surface_describe(&device.back_buffer, FALSE, &command->back_buffer, scale);
 		command->screenshot = 0;
 		if (screenshot_every > 0 && device.frame % (unsigned long)screenshot_every == 0 && command->back_buffer.width &&
 			*config_string("debug.screenshot_directory"))
 		{
-			screenshot_width = command->back_buffer.width;
-			screenshot_height = command->back_buffer.height;
+			/* (the back buffer's pixels: the host reads them as it has them) */
+			screenshot_width = command->back_buffer.pixel_width;
+			screenshot_height = command->back_buffer.pixel_height;
 			screenshot_pixels = malloc((unsigned long)screenshot_width * screenshot_height * 4);
 			command->screenshot = (uint32_t)(uintptr_t)screenshot_pixels;
 		}

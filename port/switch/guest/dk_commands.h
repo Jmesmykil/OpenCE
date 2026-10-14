@@ -69,14 +69,17 @@ struct dk_command_header
 };
 
 /* a render target or depth buffer, known by the physical address of its
-data (Data in its D3DSurface), as d3d8_gl.c knows them; its size is in
-pixels */
+data (Data in its D3DSurface), as d3d8_gl.c knows them; its size in the
+game's pixels, and in the host's: the screen's targets are drawn at
+display.resolution_limit's scale (d3d8_dk.c), the rest at their own */
 struct dk_surface
 {
 	uint32_t data;
 	uint32_t width;
 	uint32_t height;
 	uint32_t kind;
+	uint32_t pixel_width;
+	uint32_t pixel_height;
 };
 
 /* the surfaces later commands draw into (either can be DK_SURFACE_NONE) */
