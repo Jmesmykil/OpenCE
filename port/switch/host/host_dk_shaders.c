@@ -63,10 +63,21 @@ the 4096 the table held, 16 MB of code memory with them) */
 #define DKSH_CODE_SIZE (32 * 1024 * 1024)
 #define DKSH_CODE_FLAGS (DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code)
 #define DKSH_TABLE_LIMIT 16384
-#define DKSH_SET_SLOTS 32768 /* a power of two, for the mask */
+#define DKSH_SET_SLOTS 65536 /* a power of two, for the mask */
 /* the most the set holds: seven eighths of its slots, so linear probing
 always finds an empty slot (a full set would probe for ever) */
 #define DKSH_SET_FILL (DKSH_SET_SLOTS / 8 * 7)
+/* Every change to the generators (DK_SHADER_GENERATOR_VERSION) gives every
+shader a new name, and the old ones stayed in the pack, never asked for
+again: enough of them filled the set, the shaders compiled after had no
+place in it, and nothing they drew was drawn - a black screen. So the
+shaders the guest asks for in a run are listed (<pack>.live, written by the
+writer once the guest's preload has asked for every shader it knows), and
+when the pack is opened at the next start the ones not on the list are left
+out of it - if there are more than DKSH_PRUNE_LEAST of them and they are more
+than a quarter of it. */
+#define DKSH_PRUNE_LEAST 2000
+#define DKSH_LIVE_MAGIC 0x4c564b44u /* 'DKVL' */
 /* how often the compile thread says where it is; not one line a shader */
 #define DKSH_LOG_EVERY 16
 /* the compile thread's stack: Mesa's compiler recurses, and 2 MB is what
@@ -95,6 +106,8 @@ struct dksh_slot
 	uint8_t unloadable;
 	/* queued for the loader thread, or being loaded */
 	uint8_t loading;
+	/* asked for in this run (the live list) */
+	uint8_t live;
 	/* a file of its own in the folder (the cache before the pack), which
 	moves into the pack once it is loaded */
 	uint8_t loose;
@@ -180,6 +193,12 @@ static struct
 	/* entries in the set; it takes no more than SET_FILL of its slots, so
 	a probe always meets an empty one and ends */
 	uint32_t set_count;
+	/* the pack was pruned at start (pack_prune): what it held, what is left */
+	int pack_pruned;
+	unsigned long pruned_from, pruned_to;
+	/* shaders marked live (asked for) in this run, and how many the live
+	list on the card has */
+	uint32_t live_count, live_written;
 	int said_set_full;
 
 	/* the loaded shaders, and the code memory they live in. Both are the
@@ -340,6 +359,206 @@ static void folder_remove_locked(const char *root, const char *name)
 	rmdir(folder);
 }
 
+static void live_path(char *path, size_t size)
+{
+	snprintf(path, size, "%s/shader_cache/%s.live", host_data_root(), HOST_DK_UAM_COMMIT);
+}
+
+static int hash_compare(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* (stage in the low bit: a vertex and a pixel shader of one hash are two) */
+static uint64_t live_key(uint64_t hash, uint32_t stage)
+{
+	return (hash << 1) | (stage & 1);
+}
+
+/* The pack (open, at its end, *length long) rewritten without the shaders
+the last run's live list does not have, if they are enough to be worth it;
+TRUE if it was, with dksh.pack the new one and *length its length. The
+card's lock is held; nothing else has the pack yet. */
+static int pack_prune(long *length)
+{
+	char path[1024], live[1024], temporary[1040];
+	FILE *list, *pruned;
+	uint32_t list_header[2];
+	uint64_t *keys = NULL;
+	unsigned long key_count = 0, records = 0, kept = 0;
+	uint32_t offset;
+	int ok = 1;
+
+	live_path(live, sizeof(live));
+	list = fopen(live, "rb");
+	if (!list)
+		return 0;
+	if (fread(list_header, sizeof(list_header), 1, list) == 1 && list_header[0] == DKSH_LIVE_MAGIC &&
+		list_header[1] && list_header[1] <= DKSH_SET_SLOTS)
+	{
+		keys = malloc(list_header[1] * sizeof(*keys));
+		if (keys && fread(keys, sizeof(*keys), list_header[1], list) == list_header[1])
+			key_count = list_header[1];
+	}
+	fclose(list);
+	if (!key_count)
+	{
+		free(keys);
+		return 0;
+	}
+	qsort(keys, key_count, sizeof(*keys), hash_compare);
+	/* counted first: what would be kept */
+	offset = sizeof(struct dksh_pack_header);
+	for (;;)
+	{
+		struct dksh_pack_record record;
+		uint64_t key;
+
+		if ((long)offset + (long)sizeof(record) > *length || fseek(dksh.pack, offset, SEEK_SET) != 0 ||
+			fread(&record, sizeof(record), 1, dksh.pack) != 1 || record.magic != DKSH_RECORD_MAGIC ||
+			record.stage > 1 || !record.size || record.size > DKSH_RECORD_LIMIT ||
+			(long)offset + (long)sizeof(record) + (long)record.size > *length)
+		{
+			break;
+		}
+		records++;
+		key = live_key(record.hash, record.stage);
+		if (bsearch(&key, keys, key_count, sizeof(*keys), hash_compare))
+			kept++;
+		offset += (uint32_t)sizeof(record) + record.size;
+	}
+	if (records - kept <= DKSH_PRUNE_LEAST || (records - kept) * 4 <= records)
+	{
+		free(keys);
+		return 0;
+	}
+	/* the kept ones copied to a new pack, which then takes the old one's name */
+	pack_path(path, sizeof(path));
+	snprintf(temporary, sizeof(temporary), "%s.new", path);
+	pruned = fopen(temporary, "w+b");
+	if (!pruned)
+	{
+		free(keys);
+		return 0;
+	}
+	{
+		struct dksh_pack_header header = { DKSH_PACK_MAGIC, DKSH_PACK_VERSION };
+		unsigned char *data = malloc(DKSH_RECORD_LIMIT);
+
+		ok = data && fwrite(&header, sizeof(header), 1, pruned) == 1;
+		offset = sizeof(header);
+		while (ok)
+		{
+			struct dksh_pack_record record;
+			uint64_t key;
+
+			if ((long)offset + (long)sizeof(record) > *length || fseek(dksh.pack, offset, SEEK_SET) != 0 ||
+				fread(&record, sizeof(record), 1, dksh.pack) != 1 || record.magic != DKSH_RECORD_MAGIC ||
+				record.stage > 1 || !record.size || record.size > DKSH_RECORD_LIMIT ||
+				(long)offset + (long)sizeof(record) + (long)record.size > *length)
+			{
+				break;
+			}
+			key = live_key(record.hash, record.stage);
+			if (bsearch(&key, keys, key_count, sizeof(*keys), hash_compare))
+			{
+				ok = fread(data, 1, record.size, dksh.pack) == record.size &&
+					fwrite(&record, sizeof(record), 1, pruned) == 1 &&
+					fwrite(data, 1, record.size, pruned) == record.size;
+			}
+			offset += (uint32_t)sizeof(record) + record.size;
+		}
+		free(data);
+	}
+	free(keys);
+	if (fflush(pruned) != 0)
+		ok = 0;
+	fclose(pruned);
+	if (!ok)
+	{
+		unlink(temporary);
+		return 0;
+	}
+	fclose(dksh.pack);
+	dksh.pack = NULL;
+	unlink(path);
+	if (rename(temporary, path) != 0)
+	{
+		unlink(temporary);
+		return 0;
+	}
+	dksh.pack = fopen(path, "r+b");
+	if (!dksh.pack)
+		return 0;
+	fseek(dksh.pack, 0, SEEK_END);
+	*length = ftell(dksh.pack);
+	dksh.pruned_from = records;
+	dksh.pruned_to = kept;
+	return 1;
+}
+
+/* the live list written: every shader asked for in this run (the writer,
+once the guest's preload is done, and again whenever more have been asked
+for since) */
+static void live_list_write(void)
+{
+	char path[1024], temporary[1040];
+	uint64_t *keys;
+	uint32_t count = 0, index, header[2];
+	FILE *file;
+	int ok;
+
+	pthread_mutex_lock(&dksh.lock);
+	if (!dksh.preload_done || dksh.live_count == dksh.live_written)
+	{
+		pthread_mutex_unlock(&dksh.lock);
+		return;
+	}
+	keys = malloc((size_t)dksh.live_count * sizeof(*keys));
+	if (!keys)
+	{
+		pthread_mutex_unlock(&dksh.lock);
+		return;
+	}
+	for (index = 0; index < DKSH_SET_SLOTS && count < dksh.live_count; index++)
+	{
+		if (dksh.set[index].hash && dksh.set[index].live)
+			keys[count++] = live_key(dksh.set[index].hash, dksh.set[index].stage);
+	}
+	dksh.live_written = dksh.live_count;
+	pthread_mutex_unlock(&dksh.lock);
+	live_path(path, sizeof(path));
+	snprintf(temporary, sizeof(temporary), "%s.new", path);
+	header[0] = DKSH_LIVE_MAGIC;
+	header[1] = count;
+	host_sd_lock();
+	file = fopen(temporary, "wb");
+	ok = file && fwrite(header, sizeof(header), 1, file) == 1 && fwrite(keys, sizeof(*keys), count, file) == count;
+	if (file && fclose(file) != 0)
+		ok = 0;
+	if (ok)
+	{
+		unlink(path);
+		ok = rename(temporary, path) == 0;
+	}
+	if (!ok)
+		unlink(temporary);
+	host_sd_unlock();
+	free(keys);
+}
+
+/* a shader the guest asked for (under dksh.lock) */
+static void slot_live(struct dksh_slot *slot)
+{
+	if (slot && !slot->live)
+	{
+		slot->live = 1;
+		dksh.live_count++;
+	}
+}
+
 /* opens this compiler's pack (made if there is none, or if it is not one)
 and reads its records into the set; the card's lock is held */
 static void pack_open_locked(unsigned long *packed)
@@ -373,6 +592,12 @@ static void pack_open_locked(unsigned long *packed)
 	}
 	fseek(dksh.pack, 0, SEEK_END);
 	length = ftell(dksh.pack);
+	/* (the shaders the last run did not ask for left out: pack_prune) */
+	if (pack_prune(&length))
+		dksh.pack_pruned = 1;
+	/* (a pruned pack that would not open again: as if there were none) */
+	if (!dksh.pack)
+		return;
 	offset = sizeof(header);
 	for (;;)
 	{
@@ -500,6 +725,9 @@ static void cache_scan(void)
 		host_logf(HOST_LOG_ERROR, "dk shader: %s cannot be listed (%s); nothing is loaded from the card", folder,
 			strerror(list_error));
 	host_logf(HOST_LOG_INFO, "dk shader: %lu shaders on the card in %s", listed, folder);
+	if (dksh.pack_pruned)
+		host_logf(HOST_LOG_INFO, "dk shader: the pack held %lu shaders, %lu of them asked for by the last run; the "
+			"rest (earlier versions of the generators) are left out", dksh.pruned_from, dksh.pruned_to);
 	if (dksh.said_set_full)
 		host_logf(HOST_LOG_ERROR, "dk shader: more than %u shaders on the card; the rest are not listed, and no more "
 			"are kept (delete %s to start the cache again)", (unsigned)DKSH_SET_FILL, folder);
@@ -603,7 +831,7 @@ static void *compile_thread(void *unused)
 			/* in the set now, so a find from this moment answers "known", and
 			its load takes it from the pending list until the writer has
 			written it */
-			set_insert(request.hash, request.stage);
+			slot_live(set_insert(request.hash, request.stage));
 			dksh.compiled++;
 		}
 		else
@@ -862,6 +1090,7 @@ static void *writer_thread(void *unused)
 			host_logf(failed ? HOST_LOG_ERROR : HOST_LOG_INFO, "dk shader: %u written to the %s%s", written,
 				dksh.pack ? "pack" : "card", failed ? " (and some could not be: the card full?)" : "");
 		folder_clear_some();
+		live_list_write();
 	}
 	return NULL;
 }
@@ -1260,6 +1489,8 @@ uint32_t host_dk_shader_find(uint32_t stage, uint64_t hash, uint32_t state_out)
 		code_memory_make();
 	pthread_mutex_lock(&dksh.lock);
 	slot = set_find(hash);
+	if (slot && slot->stage == stage)
+		slot_live(slot);
 	if (slot && (slot->stage != stage || slot->broken))
 		slot = NULL;
 	if (slot && slot->handle)
@@ -1335,6 +1566,8 @@ uint32_t host_dk_shader_known(uint32_t stage, uint64_t hash)
 	service_start();
 	pthread_mutex_lock(&dksh.lock);
 	slot = set_find(hash);
+	if (slot && slot->stage == stage)
+		slot_live(slot);
 	if (slot && slot->stage == stage && !slot->broken)
 		known = slot->handle ? 3 : 2;
 	else if (dksh.compiling && dksh.compiling_hash == hash && dksh.compiling_stage == stage)
