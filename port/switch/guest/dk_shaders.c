@@ -211,12 +211,13 @@ static uint64_t debug_hash_mix(uint64_t hash)
 	if (!looked)
 	{
 		looked = 1;
-		snprintf(options, sizeof(options), "%s|%d|%d", config_string("debug.gpu_debug_expression"),
-			config_boolean("debug.gpu_debug_texture0") ? 1 : 0, config_boolean("debug.gpu_debug_flat") ? 1 : 0);
+		snprintf(options, sizeof(options), "%s|%d|%d%s", config_string("debug.gpu_debug_expression"),
+			config_boolean("debug.gpu_debug_texture0") ? 1 : 0, config_boolean("debug.gpu_debug_flat") ? 1 : 0,
+			config_boolean("debug.gpu_shader_ranges") ? "" : "|no ranges");
 		length = strcmp(options, "|0|0") ? (unsigned long)strlen(options) : 0;
 		if (length)
-			platform_log("shader cache: pixel shaders made for the debug options \"%s\" (expression|texture0|flat)",
-				options);
+			platform_log("shader cache: pixel shaders made for the debug options \"%s\" (expression|texture0|flat"
+				"|ranges)", options);
 	}
 	return length ? dk_shader_hash_mix(hash, options, length) : hash;
 }

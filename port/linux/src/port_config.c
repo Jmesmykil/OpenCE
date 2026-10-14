@@ -721,6 +721,11 @@ static const struct config_setting config_settings[] =
 		"\"no_target_barriers\" (no wait before a render target change; may draw\n"
 		"wrong), \"lod_bias\" (textures sampled three levels smaller: blurry).\n"
 		"Empty for none. Takes effect the next start." },
+	{ "debug.gpu_shader_ranges", _config_boolean, "true", "HALO_GPU_SHADER_RANGES", _environment_value,
+		_platform_android,
+		"Leave out of the pixel shaders the clamps their values cannot need\n"
+		"(port/switch/guest/nv2a_psh_dk.c); false writes them all, as before, to\n"
+		"compare the two. Takes effect the next start." },
 	{ "debug.gpu_glsl_folder", _config_string, "\"\"", "HALO_GPU_GLSL_FOLDER", _environment_value, _platform_android,
 		"A folder to write each shader the game draws with to, as GLSL named by its\n"
 		"hash (the names gpu_capture logs); the folder must exist. Empty for none." },

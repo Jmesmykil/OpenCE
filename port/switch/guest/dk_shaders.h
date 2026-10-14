@@ -25,7 +25,7 @@ nv2a_psh_dk.c write (see the comment at the top of both), so a changed
 generator makes new shader names on the card instead of new GLSL under old
 names. A change to what the host compiles (UAM's commit) is the cache
 folder's name, not this. */
-#define DK_SHADER_GENERATOR_VERSION 2
+#define DK_SHADER_GENERATOR_VERSION 3
 
 /* the stages, as the host's imports take them */
 #define DK_SHADER_STAGE_VERTEX 0
