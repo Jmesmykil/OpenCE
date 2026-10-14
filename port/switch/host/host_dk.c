@@ -713,6 +713,9 @@ static struct
 	int slot;
 	int gap_next;
 	unsigned long frame;
+	/* armed by a slow frame: its GPU time (capture_slow_frame), else 0 */
+	uint64_t slow_ns;
+	uint64_t slow_ns_recording;
 } capture;
 
 static void capture_initialize(void)
@@ -738,6 +741,24 @@ static void capture_arm(void)
 {
 	if (capture.memory && !capture.recording && !capture.waiting)
 		capture.armed = 1;
+}
+
+/* A frame the GPU took more than CAPTURE_SLOW_NS on: the next one captured
+too - a dip lasts frames (a hit's effects, a fight's lights) - at most once
+every CAPTURE_SLOW_GAP frames, and said as one */
+#define CAPTURE_SLOW_NS 18000000ull
+#define CAPTURE_SLOW_GAP 120
+
+static void capture_slow_frame(uint64_t busy_ns)
+{
+	static unsigned long last;
+
+	if (!capture.memory || busy_ns < CAPTURE_SLOW_NS || capture.armed || capture.recording || capture.waiting ||
+		(last && dk.frames_presented - last < CAPTURE_SLOW_GAP))
+		return;
+	last = dk.frames_presented;
+	capture.armed = 1;
+	capture.slow_ns = busy_ns;
 }
 
 /* a command that gives the GPU work has been recorded: the trace's report
@@ -1004,6 +1025,8 @@ static void gpu_timing_initialize(void)
 	dk.timing_commands = dkCmdBufCreate(&maker);
 }
 
+static void capture_slow_frame(uint64_t busy_ns);
+
 static uint32_t gpu_timing_region(int frame)
 {
 	return (uint32_t)frame * (TIMING_PAIRS * 2 * 16 + TIMING_COMMAND_SIZE);
@@ -1029,6 +1052,7 @@ static void gpu_timing_frame_begin(void)
 	}
 	if (dk.timing_count[dk.frame])
 	{
+		capture_slow_frame(busy);
 		dk.gpu_busy_total_ns += busy;
 		if (busy > dk.gpu_busy_peak_ns)
 			dk.gpu_busy_peak_ns = busy;
@@ -4380,6 +4404,9 @@ static void capture_report(void)
 			longest[at] = index;
 		}
 	}
+	if (capture.slow_ns_recording)
+		host_logf(HOST_LOG_INFO, "deko3d capture: (after a slow frame: the GPU %.2f ms on it)",
+			(double)capture.slow_ns_recording / 1e6);
 	host_logf(HOST_LOG_INFO, "deko3d capture: frame %lu: %u commands, the GPU %.2f ms on them, and %.2f ms on %u after "
 		"a submission (its wait for the CPU in it); %u not timed", capture.frame, (unsigned)capture.count,
 		(double)total / 1e6, (double)gaps / 1e6, (unsigned)gap_count, (unsigned)lost);
@@ -4453,6 +4480,8 @@ static void capture_frame_begin(void)
 		capture.count = 0;
 		capture.gap_next = 0;
 		capture.frame = dk.frames_presented;
+		capture.slow_ns_recording = capture.slow_ns;
+		capture.slow_ns = 0;
 		memset((void *)capture.reports, 0, (CAPTURE_LIMIT + 1) * 16);
 		dkCmdBufReportCounter(dk.commands, DkCounter_Timestamp, capture.gpu);
 	}
