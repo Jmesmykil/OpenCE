@@ -33,6 +33,7 @@ a time, and only the atlas's rows that changed are sent again.
 #include "menu_files.h"
 #include "text_hires.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -478,6 +479,96 @@ static void upload(uint32_t id, uint32_t kind, const struct xgpu_texture_descrip
 	/* (last: it may hand the stream over, which the command is in) */
 	if (decoded)
 		dk_stream_free_after_handover(decoded, total);
+}
+
+/* ---------- the normalization map
+
+Halo normalizes vectors - a bump map's normal, the direction to a light -
+by reading a cube map whose texels are their own directions, normalized and
+biased to n * 0.5 + 0.5 (its globals' vector_normalization bitmap). A cube
+map found to be one is marked (xgpu_texture_description.normalization_cube),
+and the pixel shaders compute the normalization instead of reading it: a
+dependent texture read out of the middle of the bump passes' chains, for the
+same value to within the map's own rounding (nv2a_psh_dk.c). */
+
+#define NORMALIZATION_TOLERANCE 3
+
+/* the direction of face face's texel (x, y), as Direct3D lays a cube's faces
+out: +X, -X, +Y, -Y, +Z, -Z */
+static void cube_texel_direction(unsigned long face, unsigned long x, unsigned long y, unsigned long size,
+	float direction[3])
+{
+	float s = 2.0f * ((float)x + 0.5f) / (float)size - 1.0f;
+	float t = 2.0f * ((float)y + 0.5f) / (float)size - 1.0f;
+
+	switch (face)
+	{
+	case 0: direction[0] = 1.0f; direction[1] = -t; direction[2] = -s; break;
+	case 1: direction[0] = -1.0f; direction[1] = -t; direction[2] = s; break;
+	case 2: direction[0] = s; direction[1] = 1.0f; direction[2] = t; break;
+	case 3: direction[0] = s; direction[1] = -1.0f; direction[2] = -t; break;
+	case 4: direction[0] = s; direction[1] = -t; direction[2] = 1.0f; break;
+	default: direction[0] = -s; direction[1] = -t; direction[2] = -1.0f; break;
+	}
+}
+
+static BOOL channel_matches(unsigned long channel, float value)
+{
+	long expected = (long)((value * 0.5f + 0.5f) * 255.0f + 0.5f);
+	long difference = (long)channel - expected;
+
+	return difference >= -NORMALIZATION_TOLERANCE && difference <= NORMALIZATION_TOLERANCE;
+}
+
+/* whether a cube map is a normalization map: every texel of every face's
+first level its direction, and its alpha opaque. Said once for each cube
+map looked at. */
+static BOOL normalization_cube_check(const struct xgpu_texture_description *description, const unsigned char *base,
+	const D3DCOLOR *palette, DWORD data)
+{
+	unsigned long size = description->width, face, x, y;
+	unsigned long face_size = xgpu_texture_face_size(description);
+	unsigned long *texels;
+
+	if (!description->cube_map)
+		return FALSE;
+	if (description->compressed || description->linear || size != description->height || size < 2 || size > 512)
+	{
+		platform_log("textures: cube map %08lx (%lux%lu, format %02lx) is not looked at for a normalization map",
+			(unsigned long)data, size, description->height, (unsigned long)description->format);
+		return FALSE;
+	}
+	texels = malloc(size * size * sizeof(unsigned long));
+	if (!texels)
+		return FALSE;
+	for (face = 0; face < 6; face++)
+	{
+		decode_level(description, 0, base + face * face_size, palette, texels);
+		for (y = 0; y < size; y++)
+		{
+			for (x = 0; x < size; x++)
+			{
+				unsigned long texel = texels[y * size + x];
+				float direction[3], length;
+
+				cube_texel_direction(face, x, y, size, direction);
+				length = sqrtf(direction[0] * direction[0] + direction[1] * direction[1] + direction[2] * direction[2]);
+				if ((texel >> 24) != 0xff || !channel_matches((texel >> 16) & 0xff, direction[0] / length) ||
+					!channel_matches((texel >> 8) & 0xff, direction[1] / length) ||
+					!channel_matches(texel & 0xff, direction[2] / length))
+				{
+					platform_log("textures: cube map %08lx (%lux%lu) is not a normalization map: face %lu texel %lu,%lu "
+						"is %08lx", (unsigned long)data, size, size, face, x, y, texel);
+					free(texels);
+					return FALSE;
+				}
+			}
+		}
+	}
+	free(texels);
+	platform_log("textures: cube map %08lx (%lux%lu) is a normalization map; the pixel shaders compute it",
+		(unsigned long)data, size, size);
+	return TRUE;
 }
 
 /* ---------- cache */
@@ -942,6 +1033,8 @@ uint32_t dk_texture_get(const DWORD *resource, const D3DCOLOR *palette, int *kin
 					(unsigned long)entry->description.format, entry->description.width, entry->description.height,
 					entry->size, entry->generation, (unsigned)entry->id);
 			upload(entry->id, entry->kind, &entry->description, (const unsigned char *)entry->address, palette);
+			entry->description.normalization_cube = entry->description.cube_map &&
+				normalization_cube_check(&entry->description, (const unsigned char *)entry->address, palette, data);
 		}
 	}
 	entry->last_used_frame = texture_frame;

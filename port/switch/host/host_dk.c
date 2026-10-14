@@ -117,6 +117,9 @@ struct target
 	/* its image descriptor's slot, once it has been sampled (render-to-texture) */
 	uint32_t slot;
 	int has_slot;
+	/* sampled since the last barrier: drawn into again only once the draws
+	that sampled it are done (textures_targets_changing) */
+	int sampled;
 	/* its image's memory, for the GPU trace */
 	DkGpuAddr gpu;
 	uint32_t bytes;
@@ -1491,7 +1494,7 @@ static int initialize(void)
 	return 1;
 }
 
-static void textures_targets_changing(void);
+static void textures_targets_changing(const struct target *color, const struct target *depth);
 
 static void targets_bind(const struct dk_command_targets *command)
 {
@@ -1501,9 +1504,9 @@ static void targets_bind(const struct dk_command_targets *command)
 
 	struct trace_event *event = trace_add(DK_COMMAND_TARGETS);
 
-	textures_targets_changing();
 	dk.color = target_get(&command->color);
 	dk.depth = target_get(&command->depth);
+	textures_targets_changing(dk.color, dk.depth);
 	profile.frame.targets++;
 	event->a[0] = command->color.data;
 	event->a[1] = SURFACE_PIXEL_WIDTH(&command->color) | SURFACE_PIXEL_HEIGHT(&command->color) << 16;
@@ -2776,26 +2779,41 @@ static void textures_receive(const struct dk_command_textures *command)
 	tex.stages_dirty = 1;
 }
 
-/* the targets are about to change: a target sampled since the last barrier
-is drawn into only once the draws that sampled it are done, and a stage that
-samples a target looks again (textures_apply) */
-static void textures_targets_changing(void)
+/* every target's draws that sampled it are done (a barrier was recorded) */
+static void targets_sampled_forget(void)
+{
+	int index;
+
+	for (index = 0; index < dk.target_count; index++)
+		dk.targets[index].sampled = 0;
+	tex.targets_sampled = 0;
+}
+
+/* The targets are about to change to color and depth: one of them sampled
+since the last barrier is drawn into only once the draws that sampled it are
+done, and a stage that samples a target looks again (textures_apply). Only
+those two need the wait: drawing into a target nothing has sampled - the
+next object's shadow map, while the last one's is projected - can overlap
+the draws before it, which a crowd's shadows did 40 times a frame. A
+composite's copies (the 2D engine's) end before any target is drawn into. */
+static void textures_targets_changing(const struct target *color, const struct target *depth)
 {
 	if (host_dk_no_target_barriers && !tex.targets_copied)
 	{
-		tex.targets_sampled = 0;
+		targets_sampled_forget();
 		tex.stages_dirty = 1;
 		return;
 	}
 	if (tex.targets_copied)
 	{
 		barrier(DkBarrier_Full, 0);
-		tex.targets_copied = tex.targets_sampled = 0;
+		tex.targets_copied = 0;
+		targets_sampled_forget();
 	}
-	else if (tex.targets_sampled)
+	else if ((color && color->sampled) || (depth && depth->sampled))
 	{
 		barrier(DkBarrier_Fragments, 0);
-		tex.targets_sampled = 0;
+		targets_sampled_forget();
 	}
 	tex.stages_dirty = 1;
 }
@@ -2839,6 +2857,7 @@ static struct target *target_sampled(uint32_t data)
 		best->drawn = 0;
 	}
 	tex.targets_sampled = 1;
+	best->sampled = 1;
 	return best;
 }
 

@@ -532,7 +532,12 @@ static void sample(struct xgpu_text *text, const struct nv2a_pixel_shader_key *k
 		xgpu_text_append(text, "texture(tex%d, (%s).xyz)", stage, coordinates);
 		break;
 	case _xgpu_sampler_cube:
-		xgpu_text_append(text, "texture(tex%d, (%s).xyz)", stage, coordinates);
+		/* (the game's normalization map, computed: the texel it holds for a
+		direction is the direction normalized, n * 0.5 + 0.5, and opaque) */
+		if (key->texture_modes & (NV2A_PIXEL_KEY_NORMALIZE << stage))
+			xgpu_text_append(text, "vec4(normalize_biased((%s).xyz), 1.0)", coordinates);
+		else
+			xgpu_text_append(text, "texture(tex%d, (%s).xyz)", stage, coordinates);
 		break;
 	default:
 		xgpu_text_append(text, "texture(tex%d, (%s).xy * texture_scale[%d].xy)", stage, coordinates, stage);
@@ -812,6 +817,10 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 		"vec3 signed_bytes(vec3 x)\n"
 		"{\n"
 		"	return vec3(signed_byte(x.r), signed_byte(x.g), signed_byte(x.b));\n"
+		"}\n"
+		"vec3 normalize_biased(vec3 v)\n"
+		"{\n"
+		"	return v * (0.5 * inversesqrt(max(dot(v, v), 1.0e-30))) + 0.5;\n"
 		"}\n"
 		"void main()\n"
 		"{\n"
