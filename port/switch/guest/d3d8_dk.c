@@ -190,6 +190,25 @@ changes nothing outside its map, and was shaded over the whole of every
 triangle it falls on - most of a crowd's GPU time */
 void halo_texture_clip(unsigned char clip, float low, float high)
 {
+	/* debug.gpu_texture_clip: "on", "off" (never clipped) or "wide" (clipped
+	by limits nothing reaches: the clip's own effect, apart from where) */
+	static int mode = -1;
+
+	if (mode < 0)
+	{
+		const char *setting = config_string("debug.gpu_texture_clip");
+
+		mode = !strcmp(setting, "off") ? 0 : !strcmp(setting, "wide") ? 2 : 1;
+		if (mode != 1)
+			platform_log("texture clip: %s (debug.gpu_texture_clip)", setting);
+	}
+	if (mode == 0)
+		clip = FALSE;
+	else if (mode == 2)
+	{
+		low = -1000.0f;
+		high = 1000.0f;
+	}
 	texture_clip[0] = clip ? low : 0.0f;
 	texture_clip[1] = clip ? high : 0.0f;
 	texture_clip[2] = clip ? 1.0f : 0.0f;
@@ -2040,6 +2059,17 @@ static void draw_parameters_send(float texture_scale[4][4])
 			vertex.texture_clip[1] = texture_clip[1] / u_scale;
 			vertex.texture_clip[2] = texture_clip[0] / v_scale;
 			vertex.texture_clip[3] = texture_clip[1] / v_scale;
+			{
+				static int said;
+
+				if (said < 4)
+				{
+					said++;
+					platform_log("texture clip: stage 0's scale %g x %g, so u in [%g, %g] and v in [%g, %g]",
+						(double)texture_scale[0][0], (double)texture_scale[0][1], (double)vertex.texture_clip[0],
+						(double)vertex.texture_clip[1], (double)vertex.texture_clip[2], (double)vertex.texture_clip[3]);
+				}
+			}
 		}
 
 		for (stage = 0; stage < 8; stage++)

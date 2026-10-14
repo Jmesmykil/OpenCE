@@ -726,6 +726,11 @@ static const struct config_setting config_settings[] =
 		"Leave out of the pixel shaders the clamps their values cannot need\n"
 		"(port/switch/guest/nv2a_psh_dk.c); false writes them all, as before, to\n"
 		"compare the two. Takes effect the next start." },
+	{ "debug.gpu_texture_clip", _config_string, "\"on\"", "HALO_GPU_TEXTURE_CLIP", _environment_value,
+		_platform_android,
+		"Shadows cast on the level drawn only over their map: \"on\", \"off\", or\n"
+		"\"wide\" (clipped by limits nothing reaches, to tell the clip's own effect).\n"
+		"Takes effect the next start." },
 	{ "debug.gpu_glsl_folder", _config_string, "\"\"", "HALO_GPU_GLSL_FOLDER", _environment_value, _platform_android,
 		"A folder to write each shader the game draws with to, as GLSL named by its\n"
 		"hash (the names gpu_capture logs); the folder must exist. Empty for none." },
