@@ -30,7 +30,7 @@ from .android_build import (ANDROID_API, GUEST_ABI_FLAGS, GUEST_CODE_FLAGS, MUSL
                             MUSL_FILES, MUSL_THREAD_PREFIXES, MUSL_URL, MUSL_VERSION, VARIADIC_PROTOTYPE_FILES,
                             ZLIB_DEFINES, ZLIB_DIR, ZLIB_SOURCES,
                             _musl_sources, _find_ndk, fetch_third_party)
-from .linux_build import (LINUX_PROFILE, MINIUPNPC_DEFINES, MINIUPNPC_DIR, MUSL_MATH_DIR, XDK_INCLUDE,
+from .linux_build import (LINUX_PROFILE, MINIUPNPC_DEFINES, MINIUPNPC_DIR, MUSL_MATH_DIR, STB_VORBIS_SOURCE, XDK_INCLUDE,
                           compile_launcher, game_defines_and_includes, game_sources, miniupnpc_sources,
                           musl_math_sources, opus_cflags, opus_sources, pgo_mode, pgo_profile,
                           profile_use_flags, updater_defines, xdk_headers)
@@ -524,6 +524,7 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
         objects.append(guest_object(source, cflags))
     for source in sorted(Path(config["game_sources"]).glob("*.c")):
         objects.append(guest_object(source, game_cflags))
+    objects.append(guest_object(STB_VORBIS_SOURCE, game_cflags))
 
     platform_cflags = " ".join([
         guest_abi, guest_code, "-std=gnu11", "-D_GNU_SOURCE", "-DHALO_LINUX_PLATFORM_LAYER", "-w", profile_flags,
