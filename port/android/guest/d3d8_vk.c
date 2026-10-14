@@ -781,6 +781,14 @@ void halo_render_marker(char const *name)
 	(void)name;
 }
 
+/* (only the Switch's renderer clips: d3d8_dk.c) */
+void halo_texture_clip(unsigned char clip, float low, float high)
+{
+	(void)clip;
+	(void)low;
+	(void)high;
+}
+
 /* display.anti_aliasing's FXAA over a window's 3D view (render.c calls this before the HUD and menus are drawn over it):
 the rectangle in the game's units, of the back buffer, which the host passes over in place (host_vk_post.c) */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1)

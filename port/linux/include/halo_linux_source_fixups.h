@@ -69,6 +69,12 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
 the Switch's renderer keeps it in its record of the commands it ran, for
 the log after a GPU fault (port/switch/host/host_dk.c); nothing elsewhere */
 void halo_render_marker(char const *name);
+/* the draws that follow drawn only where texture coordinate 0's u and v are
+in [low, high], or (clip FALSE) everywhere: a shadow cast on the level
+(source/rasterizer/xbox/rasterizer_xbox_shadows.c), which changes nothing
+outside its map; the Switch's renderer clips there (port/switch/guest/
+d3d8_dk.c), the others draw it all */
+void halo_texture_clip(unsigned char clip, float low, float high);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 /* TRUE when B steps out of a custom-map folder or the Map screen's

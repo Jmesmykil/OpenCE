@@ -25,7 +25,7 @@ nv2a_psh_dk.c write (see the comment at the top of both), so a changed
 generator makes new shader names on the card instead of new GLSL under old
 names. A change to what the host compiles (UAM's commit) is the cache
 folder's name, not this. */
-#define DK_SHADER_GENERATOR_VERSION 3
+#define DK_SHADER_GENERATOR_VERSION 4
 
 /* the stages, as the host's imports take them */
 #define DK_SHADER_STAGE_VERTEX 0
@@ -120,8 +120,11 @@ struct dk_vertex_parameters
 	/* x: the point size; y: the columns the menus shift by to center on a
 	wide screen (the OpenGL renderer's screen_offset) */
 	float point_and_screen[4];
+	/* texture coordinate 0's clip (halo_texture_clip): x and y the lowest
+	and highest u and v drawn, z 1 to clip and 0 not to */
+	float texture_clip[4];
 };
-typedef char dk_vertex_parameters_size_check[sizeof(struct dk_vertex_parameters) == 48 ? 1 : -1];
+typedef char dk_vertex_parameters_size_check[sizeof(struct dk_vertex_parameters) == 64 ? 1 : -1];
 
 /* layout(std140, binding = 0) uniform pixel_parameters: the combiner
 registers that live outside the program, and the texture stages' constants

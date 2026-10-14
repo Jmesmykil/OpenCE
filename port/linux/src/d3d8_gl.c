@@ -5650,6 +5650,14 @@ void halo_render_marker(char const *name)
 	(void)name;
 }
 
+/* (only the Switch's renderer clips: d3d8_dk.c) */
+void halo_texture_clip(unsigned char clip, float low, float high)
+{
+	(void)clip;
+	(void)low;
+	(void)high;
+}
+
 /* ---------- the anti-aliasing passes */
 
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and

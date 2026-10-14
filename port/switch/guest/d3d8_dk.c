@@ -177,6 +177,23 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 
 static void *stream_command(uint32_t type, unsigned long size);
 
+/* texture coordinate 0's clip, for the draws that follow (the vertex
+parameters' texture_clip) */
+static float texture_clip[4];
+
+/* The draws that follow drawn only where texture coordinate 0's u and v are
+in [low, high] (the vertex shaders' clip distances, nv2a_vsh_dk.c), or
+everywhere: an object's shadow cast on the level (rasterizer_xbox_shadows.c)
+changes nothing outside its map, and was shaded over the whole of every
+triangle it falls on - most of a crowd's GPU time */
+void halo_texture_clip(unsigned char clip, float low, float high)
+{
+	texture_clip[0] = clip ? low : 0.0f;
+	texture_clip[1] = clip ? high : 0.0f;
+	texture_clip[2] = clip ? 1.0f : 0.0f;
+	texture_clip[3] = 0.0f;
+}
+
 /* the part of a frame the game is about to draw, for the host's record of
 the commands it ran (DK_COMMAND_MARKER) */
 void halo_render_marker(char const *name)
@@ -1790,7 +1807,7 @@ static unsigned long long constants_told;
 
 /* the state the uniform blocks above come from: when none of it has changed
 they need no converting (most draws share it with the draw before) */
-#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 6 * D3DTSS_MAXSTAGES)
+#define DRAW_UNIFORM_INPUT_COUNT (4 + 4 + 16 + 1 + 16 + 2 + 4 + 1 + 1 + 3 + 6 * D3DTSS_MAXSTAGES)
 
 static DWORD draw_uniform_inputs[DRAW_UNIFORM_INPUT_COUNT];
 static BOOL draw_uniform_inputs_known;
@@ -1981,6 +1998,8 @@ static void draw_parameters_send(float texture_scale[4][4])
 	inputs[count++] = D3D__RenderState[D3DRS_FOGDENSITY];
 	inputs[count++] = D3D__RenderState[D3DRS_ALPHAREF];
 	inputs[count++] = (DWORD)UI_OFFSET;
+	memcpy(&inputs[count], texture_clip, 3 * sizeof(float));
+	count += 3;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		DWORD *state = D3D__TextureState[stage];
@@ -2007,6 +2026,7 @@ static void draw_parameters_send(float texture_scale[4][4])
 		vertex.point_and_screen[0] = D3D__RenderState[D3DRS_POINTSIZE] ?
 			dword_to_float(D3D__RenderState[D3DRS_POINTSIZE]) : 1.0f;
 		vertex.point_and_screen[1] = (float)UI_OFFSET;
+		memcpy(vertex.texture_clip, texture_clip, sizeof(vertex.texture_clip));
 
 		for (stage = 0; stage < 8; stage++)
 		{

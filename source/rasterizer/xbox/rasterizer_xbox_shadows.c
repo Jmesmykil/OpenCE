@@ -849,11 +849,19 @@ void _rasterizer_environment_shadow_draw(
 		}
 
 		rasterizer_set_stencil_mode(RASTERIZER_STENCIL_MODE_REJECT);
+		/* port: drawn only over the shadow's map. Outside it the map's
+		border (0) is read, and the combiners above leave the pixel as it was
+		(r0 is 1, the result 0, and the alpha test takes it), so the
+		triangles the shadow falls on - the level's, much bigger than it -
+		need not be shaded there; a margin of a texel's width keeps the
+		linear filter's fringe at the border. */
+		halo_texture_clip(TRUE, -1.0f / 64.0f, 1.0f + 1.0f / 64.0f);
 		rasterizer_draw_dynamic_triangles_static_vertices(
 			dynamic_triangle_buffer_index,
 			first_triangle_index,
 			triangle_count,
 			vertex_buffer);
+		halo_texture_clip(FALSE, 0.0f, 0.0f);
 
 		if (rasterizer_debug_options.statistics_mode ==
 			_rasterizer_statistics_mode_enabled)
