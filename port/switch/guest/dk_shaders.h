@@ -25,7 +25,13 @@ nv2a_psh_dk.c write (see the comment at the top of both), so a changed
 generator makes new shader names on the card instead of new GLSL under old
 names. A change to what the host compiles (UAM's commit) is the cache
 folder's name, not this. */
-#define DK_SHADER_GENERATOR_VERSION 5
+#define DK_SHADER_GENERATOR_VERSION 6
+
+/* The pixel key's texture_modes: four 5-bit modes, and above them this bit
+when texture coordinate 0 is clipped (halo_texture_clip, d3d8_dk.c): the
+shader lets a pixel go first if its u or v is outside the limits in its
+alpha_reference. The Xbox leaves the bit 0. */
+#define NV2A_PIXEL_KEY_CLIP 0x10000000u
 
 /* the stages, as the host's imports take them */
 #define DK_SHADER_STAGE_VERTEX 0
@@ -118,15 +124,10 @@ struct dk_vertex_parameters
 	float viewport_scale[4];
 	float viewport_offset[4];
 	/* x: the point size; y: the columns the menus shift by to center on a
-	wide screen (the OpenGL renderer's screen_offset); z: 1 to clip by
-	texture_clip, 0 not to */
+	wide screen (the OpenGL renderer's screen_offset) */
 	float point_and_screen[4];
-	/* texture coordinate 0's clip (halo_texture_clip), in its own units (a
-	linear texture's are its texels): the lowest and highest u, the lowest
-	and highest v drawn */
-	float texture_clip[4];
 };
-typedef char dk_vertex_parameters_size_check[sizeof(struct dk_vertex_parameters) == 64 ? 1 : -1];
+typedef char dk_vertex_parameters_size_check[sizeof(struct dk_vertex_parameters) == 48 ? 1 : -1];
 
 /* layout(std140, binding = 0) uniform pixel_parameters: the combiner
 registers that live outside the program, and the texture stages' constants
@@ -139,7 +140,9 @@ struct dk_pixel_parameters
 	float ps_final_c1[4];
 	float fog_color[4];
 	float fog_parameters[4];
-	/* the alpha test's reference value, in x */
+	/* the alpha test's reference value, in x; texture coordinate 0's clip
+	(halo_texture_clip) in y and z, the lowest and highest u and v drawn as
+	the texture is sampled (0 to 1 across it), and w 1 to clip, 0 not to */
 	float alpha_reference[4];
 	float bump_matrix[4][4];
 	float bump_luminance[4][4];

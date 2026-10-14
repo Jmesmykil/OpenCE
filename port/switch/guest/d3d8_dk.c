@@ -2055,31 +2055,7 @@ static void draw_parameters_send(float texture_scale[4][4])
 		vertex.point_and_screen[0] = D3D__RenderState[D3DRS_POINTSIZE] ?
 			dword_to_float(D3D__RenderState[D3DRS_POINTSIZE]) : 1.0f;
 		vertex.point_and_screen[1] = (float)UI_OFFSET;
-		/* (a linear texture - a render target, as a shadow's map - is
-		addressed in texels: texture_scale is how the pixel shader makes them
-		0 to 1, and its inverse makes the clip's limits texels) */
-		vertex.point_and_screen[2] = texture_clip[2];
-		if (texture_clip[2] != 0.0f)
-		{
-			float u_scale = texture_scale[0][0] > 0.0f ? texture_scale[0][0] : 1.0f;
-			float v_scale = texture_scale[0][1] > 0.0f ? texture_scale[0][1] : 1.0f;
 
-			vertex.texture_clip[0] = texture_clip[0] / u_scale;
-			vertex.texture_clip[1] = texture_clip[1] / u_scale;
-			vertex.texture_clip[2] = texture_clip[0] / v_scale;
-			vertex.texture_clip[3] = texture_clip[1] / v_scale;
-			{
-				static int said;
-
-				if (said < 4)
-				{
-					said++;
-					platform_log("texture clip: stage 0's scale %g x %g, so u in [%g, %g] and v in [%g, %g]",
-						(double)texture_scale[0][0], (double)texture_scale[0][1], (double)vertex.texture_clip[0],
-						(double)vertex.texture_clip[1], (double)vertex.texture_clip[2], (double)vertex.texture_clip[3]);
-				}
-			}
-		}
 
 		for (stage = 0; stage < 8; stage++)
 		{
@@ -2093,6 +2069,11 @@ static void draw_parameters_send(float texture_scale[4][4])
 		pixel.fog_parameters[1] = dword_to_float(D3D__RenderState[D3DRS_FOGEND]);
 		pixel.fog_parameters[2] = dword_to_float(D3D__RenderState[D3DRS_FOGDENSITY]);
 		pixel.alpha_reference[0] = (float)(D3D__RenderState[D3DRS_ALPHAREF] & 0xff);
+		/* (the clip, which the pixel shader makes before anything else: its
+		limits in the units the stage is sampled in, 0 to 1) */
+		pixel.alpha_reference[1] = texture_clip[0];
+		pixel.alpha_reference[2] = texture_clip[1];
+		pixel.alpha_reference[3] = texture_clip[2];
 		memcpy(pixel.texture_scale, texture_scale, sizeof(pixel.texture_scale));
 		for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 		{
@@ -2204,6 +2185,8 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT0] = 0;
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT1] = 0;
 	key->texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
+	if (texture_clip[2] != 0.0f)
+		key->texture_modes |= NV2A_PIXEL_KEY_CLIP;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		D3DBaseTexture *texture = device.textures[stage];

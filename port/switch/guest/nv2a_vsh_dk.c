@@ -205,9 +205,7 @@ char *nv2a_dk_vertex_shader_to_glsl(const uint32_t *instructions, unsigned long 
 		"\tvec4 viewport_scale;\n"
 		"\tvec4 viewport_offset;\n"
 		"\tvec4 point_and_screen;\n"
-		"\tvec4 texture_clip;\n"
-		"};\n"
-		"out float gl_ClipDistance[4];\n",
+		"};\n",
 		DK_BINDING_VERTEX_CONSTANTS, XGPU_VERTEX_CONSTANT_COUNT, DK_BINDING_VERTEX_PARAMETERS);
 	xgpu_text_append(&text,
 		"layout(location = %d) out vec4 xD0;\n"
@@ -391,19 +389,6 @@ char *nv2a_dk_vertex_shader_to_glsl(const uint32_t *instructions, unsigned long 
 		"\txT2 = oT2;\n"
 		"\txT3 = oT3;\n"
 		"\txFog = oFog.x;\n"
-		/* texture coordinate 0's clip (halo_texture_clip, d3d8_dk.c): its u
-		in [texture_clip.x, .y] and its v in [.z, .w], as the pixel shader
-		divides them (by w, or by 1 where w is 0) */
-		"\tif (point_and_screen.z != 0.0)\n"
-		"\t{\n"
-		"\t\tfloat clip_w = oT0.w != 0.0 ? oT0.w : 1.0;\n"
-		"\t\tgl_ClipDistance[0] = oT0.x - texture_clip.x * clip_w;\n"
-		"\t\tgl_ClipDistance[1] = texture_clip.y * clip_w - oT0.x;\n"
-		"\t\tgl_ClipDistance[2] = oT0.y - texture_clip.z * clip_w;\n"
-		"\t\tgl_ClipDistance[3] = texture_clip.w * clip_w - oT0.y;\n"
-		"\t}\n"
-		"\telse\n"
-		"\t\tgl_ClipDistance[0] = gl_ClipDistance[1] = gl_ClipDistance[2] = gl_ClipDistance[3] = 1.0;\n"
 		"}\n"
 		, XGPU_VERTEX_CONSTANT_BIAS - 38, XGPU_VERTEX_CONSTANT_BIAS - 37
 		);
