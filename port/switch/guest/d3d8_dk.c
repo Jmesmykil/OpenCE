@@ -190,15 +190,19 @@ changes nothing outside its map, and was shaded over the whole of every
 triangle it falls on - most of a crowd's GPU time */
 void halo_texture_clip(unsigned char clip, float low, float high)
 {
-	/* debug.gpu_texture_clip: "on", "off" (never clipped) or "wide" (clipped
-	by limits nothing reaches: the clip's own effect, apart from where) */
+	/* debug.gpu_texture_clip: "on", "off" (never clipped), "wide" (clipped
+	by limits nothing reaches: the clip's own effect, apart from where), or
+	"<low>,<high>": the limits to clip by, whatever the caller asks */
 	static int mode = -1;
+	static float set_low, set_high;
 
 	if (mode < 0)
 	{
 		const char *setting = config_string("debug.gpu_texture_clip");
 
 		mode = !strcmp(setting, "off") ? 0 : !strcmp(setting, "wide") ? 2 : 1;
+		if (mode == 1 && sscanf(setting, "%f,%f", &set_low, &set_high) == 2)
+			mode = 3;
 		if (mode != 1)
 			platform_log("texture clip: %s (debug.gpu_texture_clip)", setting);
 	}
@@ -208,6 +212,11 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	{
 		low = -1000.0f;
 		high = 1000.0f;
+	}
+	else if (mode == 3)
+	{
+		low = set_low;
+		high = set_high;
 	}
 	texture_clip[0] = clip ? low : 0.0f;
 	texture_clip[1] = clip ? high : 0.0f;
