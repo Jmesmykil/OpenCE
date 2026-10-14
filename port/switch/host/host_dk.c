@@ -416,6 +416,8 @@ static void trace_check(const char *format, ...)
 		(unsigned)trace.next, (unsigned)dk.serial, dk.frames_presented, trace_pass_name(trace.pass));
 }
 
+static void profile_mark(uint32_t pass);
+
 static void marker_receive(const struct dk_command_marker *command)
 {
 	char name[DK_MARKER_NAME_SIZE];
@@ -437,6 +439,7 @@ static void marker_receive(const struct dk_command_marker *command)
 			strcpy(trace.names[trace.name_count++], name);
 	}
 	trace.pass = (uint8_t)index;
+	profile_mark(index);
 	event = trace_add(DK_COMMAND_MARKER);
 	event->a[0] = index;
 }
@@ -452,6 +455,197 @@ static void trace_dump_if_faulted(void)
 		trace.dumped = 1;
 		trace_dump();
 	}
+}
+
+/* ---------- the GPU's time by part of the frame (debug.gpu_profile)
+
+The GPU writes a timestamp (dkCmdBufReportCounter) where each part of the
+frame the game names begins (DK_COMMAND_MARKER), and where each submission
+ends and the next begins: the time from one to the next is the part's, and
+from a submission's end to the next's start the GPU's wait for the CPU. A
+frame slot's timestamps are read once its fence has passed (frame_begin).
+What a frame asks of the GPU is counted as well - draws, barriers, target
+changes, clears, texels written - and every PROFILE_FRAMES frames the
+averages go into the log, the parts that took longest first. */
+
+int host_dk_profile;
+
+#define PROFILE_MARKS 512
+#define PROFILE_FRAMES 300
+/* (the pass of the time between submissions) */
+#define PROFILE_IDLE TRACE_NAMES
+
+struct profile_counts
+{
+	uint32_t draws, skipped, targets, clears, barriers_full, barriers_fragments, barriers_other;
+	uint32_t texture_writes, rows, composite_copies, submissions, rollovers;
+	uint64_t texture_bytes, upload_bytes;
+};
+
+static struct
+{
+	DkMemBlock memory;
+	const char *cpu;
+	DkGpuAddr gpu;
+	uint8_t pass[FRAMES][PROFILE_MARKS];
+	uint32_t count[FRAMES];
+	/* the time of each part (PROFILE_IDLE: between submissions) over the
+	frames timed, and how many */
+	uint64_t ns[TRACE_NAMES + 1];
+	uint32_t timed_frames;
+	uint32_t lost_marks;
+	struct profile_counts frame, total;
+	uint32_t frames;
+} profile;
+
+static void profile_initialize(void)
+{
+	if (!host_dk_profile)
+		return;
+	profile.memory = memory_block(FRAMES * PROFILE_MARKS * 16, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
+		NULL);
+	if (!profile.memory)
+	{
+		host_logf(HOST_LOG_ERROR, "deko3d: no memory for the GPU profile; it is off");
+		return;
+	}
+	profile.cpu = (const char *)dkMemBlockGetCpuAddr(profile.memory);
+	profile.gpu = dkMemBlockGetGpuAddr(profile.memory);
+	memset((void *)profile.cpu, 0, FRAMES * PROFILE_MARKS * 16);
+	host_logf(HOST_LOG_INFO, "deko3d: the GPU profile is on (debug.gpu_profile): every %u frames, the GPU's time by "
+		"part of the frame", (unsigned)PROFILE_FRAMES);
+}
+
+/* the GPU's time from here on is the part pass's */
+static void profile_mark(uint32_t pass)
+{
+	uint32_t index;
+
+	if (!profile.memory || dk.faulted)
+		return;
+	index = profile.count[dk.frame];
+	if (index >= PROFILE_MARKS)
+		return;
+	dkCmdBufReportCounter(dk.commands, DkCounter_Timestamp,
+		profile.gpu + ((DkGpuAddr)dk.frame * PROFILE_MARKS + index) * 16);
+	profile.pass[dk.frame][index] = (uint8_t)pass;
+	profile.count[dk.frame] = index + 1;
+}
+
+/* (frame_begin, the slot's fence passed) the slot's last frame timed */
+static void profile_frame_begin(void)
+{
+	const uint64_t *reports;
+	uint32_t index, count = profile.count[dk.frame];
+
+	if (!profile.memory || !count)
+		return;
+	reports = (const uint64_t *)(profile.cpu + (size_t)dk.frame * PROFILE_MARKS * 16);
+	for (index = 0; index + 1 < count; index++)
+	{
+		uint64_t start = reports[index * 2 + 1], end = reports[index * 2 + 3];
+
+		/* (a mark recorded and then thrown away, by a rollover, is 0) */
+		if (!start || !end || end < start)
+		{
+			profile.lost_marks++;
+			continue;
+		}
+		profile.ns[profile.pass[dk.frame][index]] += dkTimestampToNs(end - start);
+	}
+	profile.timed_frames++;
+	memset((void *)reports, 0, (size_t)count * 16);
+	profile.count[dk.frame] = 0;
+}
+
+static void barrier(DkBarrier mode, uint32_t invalidate)
+{
+	if (mode == DkBarrier_Full)
+		profile.frame.barriers_full++;
+	else if (mode == DkBarrier_Fragments)
+		profile.frame.barriers_fragments++;
+	else
+		profile.frame.barriers_other++;
+	dkCmdBufBarrier(dk.commands, mode, invalidate);
+}
+
+/* (present) the frame's counts added up, and every PROFILE_FRAMES frames
+the averages logged */
+static void profile_frame_end(void)
+{
+	struct profile_counts *total = &profile.total, *frame = &profile.frame;
+	uint32_t order[TRACE_NAMES + 1], count = 0, index, frames, timed;
+	uint64_t all = 0;
+	char line[1024];
+	int length;
+
+	if (!profile.memory)
+	{
+		memset(frame, 0, sizeof(*frame));
+		return;
+	}
+	frame->upload_bytes += dk.upload_used;
+	total->draws += frame->draws;
+	total->skipped += frame->skipped;
+	total->targets += frame->targets;
+	total->clears += frame->clears;
+	total->barriers_full += frame->barriers_full;
+	total->barriers_fragments += frame->barriers_fragments;
+	total->barriers_other += frame->barriers_other;
+	total->texture_writes += frame->texture_writes;
+	total->rows += frame->rows;
+	total->composite_copies += frame->composite_copies;
+	total->submissions += frame->submissions;
+	total->rollovers += frame->rollovers;
+	total->texture_bytes += frame->texture_bytes;
+	total->upload_bytes += frame->upload_bytes;
+	memset(frame, 0, sizeof(*frame));
+	if (++profile.frames < PROFILE_FRAMES)
+		return;
+	frames = profile.frames;
+	timed = profile.timed_frames ? profile.timed_frames : 1;
+	for (index = 0; index <= TRACE_NAMES; index++)
+	{
+		all += profile.ns[index];
+		if (profile.ns[index])
+			order[count++] = index;
+	}
+	/* (the longest first) */
+	for (index = 1; index < count; index++)
+	{
+		uint32_t moving = order[index], at = index;
+
+		while (at > 0 && profile.ns[order[at - 1]] < profile.ns[moving])
+		{
+			order[at] = order[at - 1];
+			at--;
+		}
+		order[at] = moving;
+	}
+	length = snprintf(line, sizeof(line), "deko3d profile: GPU %.2f ms a frame:", (double)all / timed / 1e6);
+	for (index = 0; index < count && length > 0 && length < (int)sizeof(line) - 64; index++)
+	{
+		double ms = (double)profile.ns[order[index]] / timed / 1e6;
+
+		if (ms < 0.01)
+			break;
+		length += snprintf(line + length, sizeof(line) - (size_t)length, " %s %.2f%s",
+			order[index] == PROFILE_IDLE ? "(between submissions)" : trace_pass_name(order[index]), ms,
+			index + 1 < count ? "," : "");
+	}
+	host_logf(HOST_LOG_INFO, "%s", line);
+	host_logf(HOST_LOG_INFO, "deko3d profile: a frame: %.0f draws (%.1f skipped), %.1f target changes, %.1f clears, "
+		"barriers %.1f full %.1f fragments %.1f other, %.1f texture writes and %.1f row writes (%.0f KB), %.2f composite "
+		"copies, %.1f submissions, %.0f KB uploaded, %.2f rollovers; %u marks lost",
+		(double)total->draws / frames, (double)total->skipped / frames, (double)total->targets / frames,
+		(double)total->clears / frames, (double)total->barriers_full / frames, (double)total->barriers_fragments / frames,
+		(double)total->barriers_other / frames, (double)total->texture_writes / frames, (double)total->rows / frames,
+		(double)total->texture_bytes / frames / 1024.0, (double)total->composite_copies / frames,
+		(double)total->submissions / frames, (double)total->upload_bytes / frames / 1024.0,
+		(double)total->rollovers / frames, (unsigned)profile.lost_marks);
+	memset(total, 0, sizeof(*total));
+	memset(profile.ns, 0, sizeof(profile.ns));
+	profile.frames = profile.timed_frames = profile.lost_marks = 0;
 }
 
 /* Whether a GPU fault has put the queue in an error state. deko3d ends the
@@ -762,6 +956,7 @@ static void frame_begin(void)
 	}
 	pthread_mutex_unlock(&dk_lock);
 	gpu_timing_frame_begin();
+	profile_frame_begin();
 	command_memory_begin();
 	/* the upload slice is reused the same way, behind the same fence */
 	dk.upload_used = 0;
@@ -803,6 +998,8 @@ static void command_memory_roll(void)
 			"waited for, and the frame goes on from the start", (unsigned)COMMAND_MEMORY_SIZE);
 	command_memory_begin();
 	dk.command_rolled_bytes = used;
+	profile.frame.rollovers++;
+	profile_mark(trace.pass);
 }
 
 /* ---------- the game's memory, where the game keeps it (DEKO3D.md, phase 3)
@@ -990,6 +1187,8 @@ static void commands_submit_serial(uint32_t finished)
 		dk.recorded = 0;
 		return;
 	}
+	profile_mark(PROFILE_IDLE);
+	profile.frame.submissions++;
 	gpu_timing_bracket();
 	dkQueueSubmitCommands(dk.queue, dkCmdBufFinishList(dk.commands));
 	if (queue_faulted())
@@ -1028,6 +1227,7 @@ static void commands_submit_partial(void)
 
 	commands_submit_serial(dk.serial - 1);
 	dk.serial_fenced = fenced;
+	profile_mark(trace.pass);
 }
 
 /* (under dk_lock) */
@@ -1175,6 +1375,7 @@ static int initialize(void)
 	textures_initialize();
 	visibility_initialize();
 	trace_initialize();
+	profile_initialize();
 	dk.uniform_memory = memory_block(UNIFORM_MEMORY_SIZE, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached, NULL);
 	if (dk.uniform_memory)
 		dk.uniform_gpu = dkMemBlockGetGpuAddr(dk.uniform_memory);
@@ -1198,6 +1399,7 @@ static void targets_bind(const struct dk_command_targets *command)
 	textures_targets_changing();
 	dk.color = target_get(&command->color);
 	dk.depth = target_get(&command->depth);
+	profile.frame.targets++;
 	event->a[0] = command->color.data;
 	event->a[1] = SURFACE_PIXEL_WIDTH(&command->color) | SURFACE_PIXEL_HEIGHT(&command->color) << 16;
 	event->a[2] = command->color.kind | command->depth.kind << 8;
@@ -1280,6 +1482,7 @@ static void clear(const struct dk_command_clear *command)
 					(unsigned)size_from->surface.data);
 		}
 	}
+	profile.frame.clears++;
 	if (!dk.color)
 		mask = 0;
 	if (!mask && !depth && !stencil)
@@ -1410,7 +1613,7 @@ static void present(const struct dk_command_present *command)
 		to.height = height;
 		to.depth = 1;
 		dkImageViewDefaults(&source, &back_buffer->image);
-		dkCmdBufBarrier(dk.commands, DkBarrier_Fragments, 0);
+		barrier(DkBarrier_Fragments, 0);
 		if (command->screenshot && readback_make(source_width, source_height))
 		{
 			DkImageView readback;
@@ -1422,6 +1625,7 @@ static void present(const struct dk_command_present *command)
 		dkCmdBufBlitImage(dk.commands, &source, &from, &screen_view, &to, DkBlitFlag_FilterLinear, 0);
 	}
 	trace_reached(event);
+	profile_frame_end();
 	commands_submit();
 	/* (the GPU may have faulted since the frame began: the image is not
 	presented, as a faulted queue would end the program) */
@@ -2015,13 +2219,13 @@ static void textures_fence(int before_writes)
 	if (before_writes)
 	{
 		if (tex.draws_unfenced)
-			dkCmdBufBarrier(dk.commands, DkBarrier_Full, 0);
+			barrier(DkBarrier_Full, 0);
 		tex.draws_unfenced = 0;
 		return;
 	}
 	if (!tex.written_unfenced)
 		return;
-	dkCmdBufBarrier(dk.commands, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors);
+	barrier(DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_Descriptors);
 	tex.written_unfenced = 0;
 	tex.draws_unfenced = 0;
 }
@@ -2049,7 +2253,7 @@ static void texture_verify(struct texture *texture, const struct dk_command_text
 	}
 	if (command->source_bytes > STAGING_SLICE_SIZE)
 		return;
-	dkCmdBufBarrier(dk.commands, DkBarrier_Full, 0);
+	barrier(DkBarrier_Full, 0);
 	{
 		uint32_t at = 0;
 
@@ -2194,6 +2398,8 @@ static void texture_write(struct texture *texture, const struct dk_command_textu
 	}
 	tex.written_unfenced = 1;
 	dk.recorded = 1;
+	profile.frame.texture_writes++;
+	profile.frame.texture_bytes += command->source_bytes;
 	if (host_dk_verify_compressed && !host_texels && command->format != DK_TEXTURE_BGRA)
 		texture_verify(texture, command);
 }
@@ -2336,6 +2542,8 @@ static void texture_rows_receive(const struct dk_command_texture_rows *command)
 	tex.written_unfenced = 1;
 	tex.stages_dirty = 1;
 	dk.recorded = 1;
+	profile.frame.rows++;
+	profile.frame.texture_bytes += command->source_bytes;
 	event->a[6] = texture->slot;
 	event->g[0] = source;
 	event->g[1] = dkMemBlockGetGpuAddr(tex.blocks[texture->block].memory) + texture->offset;
@@ -2465,12 +2673,12 @@ static void textures_targets_changing(void)
 {
 	if (tex.targets_copied)
 	{
-		dkCmdBufBarrier(dk.commands, DkBarrier_Full, 0);
+		barrier(DkBarrier_Full, 0);
 		tex.targets_copied = tex.targets_sampled = 0;
 	}
 	else if (tex.targets_sampled)
 	{
-		dkCmdBufBarrier(dk.commands, DkBarrier_Fragments, 0);
+		barrier(DkBarrier_Fragments, 0);
 		tex.targets_sampled = 0;
 	}
 	tex.stages_dirty = 1;
@@ -2507,11 +2715,11 @@ static struct target *target_sampled(uint32_t data)
 		dkImageViewDefaults(&view, &best->image);
 		dkImageDescriptorInitialize(&descriptors[best->slot], &view, false, false);
 		best->has_slot = 1;
-		dkCmdBufBarrier(dk.commands, DkBarrier_None, DkInvalidateFlags_Descriptors);
+		barrier(DkBarrier_None, DkInvalidateFlags_Descriptors);
 	}
 	if (best->drawn)
 	{
-		dkCmdBufBarrier(dk.commands, DkBarrier_Fragments, DkInvalidateFlags_Image);
+		barrier(DkBarrier_Fragments, DkInvalidateFlags_Image);
 		best->drawn = 0;
 	}
 	tex.targets_sampled = 1;
@@ -2599,7 +2807,7 @@ static void composite_receive(const struct dk_command_composite *command)
 	dkImageViewDefaults(&view, &composite->image);
 	dkImageDescriptorInitialize(&((DkImageDescriptor *)dkMemBlockGetCpuAddr(tex.image_descriptors))[composite->slot],
 		&view, false, false);
-	dkCmdBufBarrier(dk.commands, DkBarrier_None, DkInvalidateFlags_Descriptors);
+	barrier(DkBarrier_None, DkInvalidateFlags_Descriptors);
 	dk.recorded = 1;
 	composite_count++;
 }
@@ -2662,7 +2870,7 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 	/* the targets' draws done, then each level copied (the 2D engine), the
 	ones not drawn halved from the one above, and the copies done before
 	the draws that sample them */
-	dkCmdBufBarrier(dk.commands, DkBarrier_Fragments, 0);
+	barrier(DkBarrier_Fragments, 0);
 	for (level = 0; level < levels; level++)
 	{
 		DkImageView source, destination;
@@ -2683,7 +2891,7 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 		}
 		else
 		{
-			dkCmdBufBarrier(dk.commands, DkBarrier_Full, 0);
+			barrier(DkBarrier_Full, 0);
 			dkImageViewDefaults(&source, &composite->image);
 			source.mipLevelOffset = (uint8_t)(level - 1);
 			source.mipLevelCount = 1;
@@ -2692,7 +2900,7 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 			dkCmdBufBlitImage(dk.commands, &source, &from, &destination, &to, DkBlitFlag_FilterLinear, 0);
 		}
 	}
-	dkCmdBufBarrier(dk.commands, DkBarrier_Full, DkInvalidateFlags_Image);
+	barrier(DkBarrier_Full, DkInvalidateFlags_Image);
 	composite->copied = 1;
 	composite->rendered_levels = rendered;
 	composite->stamp = dk.target_clock;
@@ -2703,6 +2911,7 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 		event->a[1] = rendered;
 		event->a[2] = levels;
 		event->a[3] = composite->slot;
+		profile.frame.composite_copies++;
 		trace_reached(event);
 	}
 	tex.targets_copied = 1;
@@ -3269,23 +3478,27 @@ static void draw(const struct dk_command_draw *command)
 		streams += (dk.format.stream_mask >> stream) & 1;
 	if (!dk.format_valid || !dk.state_valid || (!dk.color && !dk.depth) || streams != command->stream_count)
 	{
+		profile.frame.skipped++;
 		event->a[0] |= 1u << 24;
 		draw_problem("what it needs is not in place");
 		return;
 	}
 	if (!state_apply())
 	{
+		profile.frame.skipped++;
 		event->a[0] |= 2u << 24;
 		return;
 	}
 	if (!shaders_apply())
 	{
+		profile.frame.skipped++;
 		event->a[0] |= 3u << 24;
 		draw_problem("a shader is not loaded");
 		return;
 	}
 	if (!textures_apply())
 	{
+		profile.frame.skipped++;
 		event->a[0] |= 4u << 24;
 		draw_problem("the textures could not be bound");
 		return;
@@ -3300,6 +3513,7 @@ static void draw(const struct dk_command_draw *command)
 
 		if (!gpu)
 		{
+			profile.frame.skipped++;
 			event->a[0] |= 5u << 24;
 			draw_problem("a stream could not be read");
 			return;
@@ -3324,6 +3538,7 @@ static void draw(const struct dk_command_draw *command)
 		}
 		if (!dk.constants_gpu)
 		{
+			profile.frame.skipped++;
 			event->a[0] |= 6u << 24;
 			draw_problem("the constants could not be copied");
 			return;
@@ -3337,6 +3552,7 @@ static void draw(const struct dk_command_draw *command)
 		index_gpu = upload_copy(inline_data + ((command->inline_bytes + 3) & ~3u), command->count * sizeof(uint16_t));
 		if (!index_gpu)
 		{
+			profile.frame.skipped++;
 			event->a[0] |= 7u << 24;
 			draw_problem("the indices could not be copied");
 			return;
@@ -3347,6 +3563,7 @@ static void draw(const struct dk_command_draw *command)
 		index_gpu = range_read((const void *)(uintptr_t)command->index_address, command->count * sizeof(uint16_t));
 		if (!index_gpu)
 		{
+			profile.frame.skipped++;
 			event->a[0] |= 8u << 24;
 			draw_problem("the indices could not be read");
 			return;
@@ -3375,6 +3592,7 @@ static void draw(const struct dk_command_draw *command)
 	}
 	dk.recorded = 1;
 	tex.draws_unfenced = 1;
+	profile.frame.draws++;
 	trace_reached(event);
 }
 
@@ -3391,6 +3609,7 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 	dk.serial++;
 	chunks_map();
 	trace_add(TRACE_SUBMIT)->a[0] = size;
+	profile_mark(trace.pass);
 	if (trace.events && !dk.faulted)
 		dkCmdBufReportValue(dk.commands, dk.serial, trace.progress_gpu + 16);
 	if (host_dk_fault_test && dk.frames_presented == 1200 && !dk.faulted)

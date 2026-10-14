@@ -187,6 +187,9 @@ them and the kernel's account of the fault to the log (host_dk.c) */
 extern int host_dk_trace;
 /* debug.gpu_fault_test: a GPU fault made on purpose, to see the record */
 extern int host_dk_fault_test;
+/* debug.gpu_profile: the GPU's time by part of the frame, and what a frame
+asks of it, in the log every 300 frames (host_dk.c) */
+extern int host_dk_profile;
 
 /* host_dk.c: runs a frame's commands from the deko3d renderer's guest half
 (port/switch/guest/dk_commands.h); commands is a guest address */

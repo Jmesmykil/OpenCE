@@ -1023,6 +1023,7 @@ static void *game_main(void *unused)
 		host_dk_trace = config_flag_or(path, "debug.gpu_trace", 1);
 		host_logf(HOST_LOG_INFO, "deko3d: the GPU trace is %s (debug.gpu_trace)", host_dk_trace ? "on" : "off");
 		host_dk_fault_test = config_flag(path, "debug.gpu_fault_test");
+		host_dk_profile = config_flag(path, "debug.gpu_profile");
 	}
 	log_marker("marker: building the guest's boot structure");
 	boot = make_boot(&environment);
