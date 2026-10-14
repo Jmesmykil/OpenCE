@@ -321,8 +321,9 @@ static struct
 	struct trace_event *events;
 	/* the next record's number (from 1) */
 	uint32_t next;
-	/* written by the GPU: [0] the last command it finished, [1] the last
-	submission it began */
+	/* written by the GPU, each a report of 16 bytes (the value, then a
+	timestamp): [0] the last command it finished, [4] the last submission it
+	began */
 	DkMemBlock memory;
 	volatile uint32_t *progress;
 	DkGpuAddr progress_gpu;
@@ -346,7 +347,7 @@ static void trace_initialize(void)
 	if (!host_dk_trace)
 		return;
 	trace.events = (struct trace_event *)calloc(TRACE_EVENTS, sizeof(struct trace_event));
-	trace.memory = memory_block(DK_MEMBLOCK_ALIGNMENT, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached, NULL);
+	trace.memory = memory_block(DK_MEMBLOCK_ALIGNMENT, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuUncached, NULL);
 	if (!trace.events || !trace.memory)
 	{
 		host_logf(HOST_LOG_ERROR, "deko3d: no memory for the GPU trace; it is off");
@@ -355,7 +356,7 @@ static void trace_initialize(void)
 		return;
 	}
 	trace.progress = (volatile uint32_t *)dkMemBlockGetCpuAddr(trace.memory);
-	trace.progress[0] = trace.progress[1] = 0;
+	memset((void *)trace.progress, 0, 32);
 	trace.progress_gpu = dkMemBlockGetGpuAddr(trace.memory);
 	trace.next = 1;
 	strcpy(trace.names[0], "(none yet)");
@@ -3391,7 +3392,7 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 	chunks_map();
 	trace_add(TRACE_SUBMIT)->a[0] = size;
 	if (trace.events && !dk.faulted)
-		dkCmdBufReportValue(dk.commands, dk.serial, trace.progress_gpu + 4);
+		dkCmdBufReportValue(dk.commands, dk.serial, trace.progress_gpu + 16);
 	if (host_dk_fault_test && dk.frames_presented == 1200 && !dk.faulted)
 	{
 		host_dk_fault_test = 0;
@@ -3719,7 +3720,7 @@ static void trace_dump(void)
 		(unsigned)error.type, notification_name(error.type), words);
 
 	finished = trace.progress ? trace.progress[0] : 0;
-	begun = trace.progress ? trace.progress[1] : 0;
+	begun = trace.progress ? trace.progress[4] : 0;
 	host_logf(HOST_LOG_WARN, "deko3d fault: submission %u being recorded, %u fenced, %u retired; the GPU began "
 		"submission %u and finished command #%u; %u commands recorded; frame %lu", (unsigned)dk.serial,
 		(unsigned)dk.serial_fenced, (unsigned)dk.serial_retired, (unsigned)begun, (unsigned)finished,
