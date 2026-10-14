@@ -761,6 +761,23 @@ static int config_flag(const char *path, const char *name)
 	return config_flag_or(path, name, 0);
 }
 
+/* a text setting of config.toml into text, or "" */
+static void config_text(const char *path, const char *name, char *text, size_t size)
+{
+	toml_result_t result = toml_parse_file_ex(path);
+
+	text[0] = 0;
+	if (!result.ok)
+		return;
+	{
+		toml_datum_t datum = toml_seek(result.toptab, name);
+
+		if (datum.type == TOML_STRING)
+			snprintf(text, size, "%s", datum.u.s);
+	}
+	toml_free(result);
+}
+
 /* debug.sample_seconds from config.toml, as text for the sampler, or 0 */
 static int config_sample_seconds(const char *path, char *text, size_t size)
 {
@@ -1024,6 +1041,20 @@ static void *game_main(void *unused)
 		host_logf(HOST_LOG_INFO, "deko3d: the GPU trace is %s (debug.gpu_trace)", host_dk_trace ? "on" : "off");
 		host_dk_fault_test = config_flag(path, "debug.gpu_fault_test");
 		host_dk_profile = config_flag(path, "debug.gpu_profile");
+		host_dk_capture = config_flag(path, "debug.gpu_capture");
+		{
+			char experiment[256];
+
+			config_text(path, "debug.gpu_experiment", experiment, sizeof(experiment));
+			host_dk_no_compression = strstr(experiment, "no_compression") != NULL;
+			host_dk_no_target_barriers = strstr(experiment, "no_target_barriers") != NULL;
+			host_dk_lod_bias = strstr(experiment, "lod_bias") != NULL;
+			if (experiment[0])
+				host_logf(HOST_LOG_WARN, "deko3d: GPU experiment \"%s\": %s%s%s(debug.gpu_experiment)", experiment,
+					host_dk_no_compression ? "targets without compression, " : "",
+					host_dk_no_target_barriers ? "no waits before a target change, " : "",
+					host_dk_lod_bias ? "textures three levels smaller, " : "");
+		}
 	}
 	log_marker("marker: building the guest's boot structure");
 	boot = make_boot(&environment);

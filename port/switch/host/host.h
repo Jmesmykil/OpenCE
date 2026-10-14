@@ -190,6 +190,15 @@ extern int host_dk_fault_test;
 /* debug.gpu_profile: the GPU's time by part of the frame, and what a frame
 asks of it, in the log every 300 frames (host_dk.c) */
 extern int host_dk_profile;
+/* debug.gpu_capture: with the profile, one frame of each 300 timed draw by
+draw, and the GPU's time by shader, target and kind of command logged */
+extern int host_dk_capture;
+/* debug.gpu_experiment: what-ifs that measure what part of the GPU's time a
+change could take back, comma-separated: "no_compression" (render targets
+without hardware compression), "no_target_barriers" (no wait before a
+target change; may draw wrong), "lod_bias" (textures sampled three levels
+smaller) */
+extern int host_dk_no_compression, host_dk_no_target_barriers, host_dk_lod_bias;
 
 /* host_dk.c: runs a frame's commands from the deko3d renderer's guest half
 (port/switch/guest/dk_commands.h); commands is a guest address */
@@ -252,6 +261,9 @@ uint32_t host_dk_shader_loose_loads(void);
 /* the DkShader (as a const void *) a handle of find's names, or NULL: for the
 backend's draws, on the game thread */
 const void *host_dk_shader(uint32_t handle);
+/* a loaded shader's hash, stage, code bytes and registers, for the GPU
+profile; 0 if the handle names none */
+int host_dk_shader_describe(uint32_t handle, uint64_t *hash, uint32_t *stage, uint32_t *code_size, uint32_t *registers);
 
 /* voice chat's microphone, a headset in the console's jack through libnx's
 audin (host_microphone.c): 48 kHz mono floats, which host_sdl2.c's audio

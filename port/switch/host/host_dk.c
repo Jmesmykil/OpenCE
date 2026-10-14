@@ -372,7 +372,13 @@ static struct trace_event *trace_add(uint32_t kind)
 	struct trace_event *event;
 
 	if (!trace.events)
+	{
+		/* (the GPU profile's capture reads it: command_done) */
+		memset(&spare, 0, sizeof(spare));
+		spare.kind = (uint16_t)kind;
+		spare.pass = trace.pass;
 		return &spare;
+	}
 	event = &trace.events[trace.next % TRACE_EVENTS];
 	memset(event, 0, sizeof(*event));
 	event->number = trace.next++;
@@ -558,6 +564,8 @@ static void profile_frame_begin(void)
 	profile.count[dk.frame] = 0;
 }
 
+static void capture_arm(void);
+
 static void barrier(DkBarrier mode, uint32_t invalidate)
 {
 	if (mode == DkBarrier_Full)
@@ -646,6 +654,100 @@ static void profile_frame_end(void)
 	memset(total, 0, sizeof(*total));
 	memset(profile.ns, 0, sizeof(profile.ns));
 	profile.frames = profile.timed_frames = profile.lost_marks = 0;
+	capture_arm();
+}
+
+/* ---------- one frame timed command by command (debug.gpu_capture)
+
+With the profile, the frame after each window of PROFILE_FRAMES is timed
+command by command: the GPU writes a timestamp as it finishes each draw,
+clear, texel write, copy and the present (command_done), and the time from
+one to the next is the command's. The GPU overlaps neighbouring draws, so a
+command's time is what it added, not what it took alone; summed, they are
+the frame's. Once the frame's fence has passed (frame_begin) the log gets
+its time by pixel shader, vertex shader, target and kind of command, and
+its longest commands. A command that follows a submission's end carries the
+GPU's wait for the CPU, and is counted apart. */
+
+int host_dk_capture;
+int host_dk_no_compression, host_dk_no_target_barriers, host_dk_lod_bias;
+
+#define CAPTURE_LIMIT 6144
+#define CAPTURE_GROUPS 512
+#define CAPTURE_LONGEST 16
+
+struct capture_entry
+{
+	uint16_t kind;
+	uint8_t pass;
+	uint8_t after_gap;
+	uint32_t vertex_shader, pixel_shader;
+	uint32_t count, primitive;
+	uint32_t color, depth;
+	uint32_t texture0;
+};
+
+static struct
+{
+	DkMemBlock memory;
+	const uint64_t *reports;
+	DkGpuAddr gpu;
+	struct capture_entry entries[CAPTURE_LIMIT];
+	uint32_t count;
+	int armed, recording, waiting;
+	int slot;
+	int gap_next;
+	unsigned long frame;
+} capture;
+
+static void capture_initialize(void)
+{
+	if (!host_dk_capture || !host_dk_profile)
+		return;
+	capture.memory = memory_block((CAPTURE_LIMIT + 1) * 16, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached,
+		NULL);
+	if (!capture.memory)
+		return;
+	capture.reports = (const uint64_t *)dkMemBlockGetCpuAddr(capture.memory);
+	capture.gpu = dkMemBlockGetGpuAddr(capture.memory);
+	host_logf(HOST_LOG_INFO, "deko3d: the GPU capture is on (debug.gpu_capture): a frame of every %u timed command "
+		"by command", (unsigned)PROFILE_FRAMES);
+}
+
+/* (frame_begin, the slot's fence passed) a captured frame read, and the
+next started if one is asked for */
+static void capture_frame_begin(void);
+
+/* (the profile's window ended) the next frame to be captured */
+static void capture_arm(void)
+{
+	if (capture.memory && !capture.recording && !capture.waiting)
+		capture.armed = 1;
+}
+
+/* a command that gives the GPU work has been recorded: the trace's report
+and the capture's timestamp */
+static void command_done(struct trace_event *event)
+{
+	trace_reached(event);
+	if (capture.recording && dk.frame == capture.slot && capture.count < CAPTURE_LIMIT && !dk.faulted)
+	{
+		struct capture_entry *entry = &capture.entries[capture.count];
+
+		dkCmdBufReportCounter(dk.commands, DkCounter_Timestamp, capture.gpu + (DkGpuAddr)(capture.count + 1) * 16);
+		entry->kind = event->kind;
+		entry->pass = event->pass;
+		entry->after_gap = (uint8_t)capture.gap_next;
+		capture.gap_next = 0;
+		entry->vertex_shader = event->kind == DK_COMMAND_DRAW ? event->a[6] : 0;
+		entry->pixel_shader = event->kind == DK_COMMAND_DRAW ? event->a[7] : 0;
+		entry->count = event->kind == DK_COMMAND_DRAW ? event->a[1] : 0;
+		entry->primitive = event->kind == DK_COMMAND_DRAW ? event->a[0] : 0;
+		entry->color = dk.color ? dk.color->surface.data : 0;
+		entry->depth = dk.depth ? dk.depth->surface.data : 0;
+		entry->texture0 = event->kind == DK_COMMAND_DRAW ? event->a[8] : 0;
+		capture.count++;
+	}
 }
 
 /* Whether a GPU fault has put the queue in an error state. deko3d ends the
@@ -811,7 +913,7 @@ static struct target *target_get(const struct dk_surface *surface)
 		return NULL;
 	}
 	layout_make(&layout, surface->kind == DK_SURFACE_DEPTH ? DkImageFormat_Z24S8 : DkImageFormat_RGBA8_Unorm,
-		DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | DkImageFlags_HwCompression,
+		DkImageFlags_UsageRender | DkImageFlags_Usage2DEngine | (host_dk_no_compression ? 0 : DkImageFlags_HwCompression),
 		SURFACE_PIXEL_WIDTH(surface), SURFACE_PIXEL_HEIGHT(surface));
 	if (!image_memory(&layout, &block, &offset))
 	{
@@ -958,6 +1060,7 @@ static void frame_begin(void)
 	gpu_timing_frame_begin();
 	profile_frame_begin();
 	command_memory_begin();
+	capture_frame_begin();
 	/* the upload slice is reused the same way, behind the same fence */
 	dk.upload_used = 0;
 	dk.upload_generation++;
@@ -1189,6 +1292,7 @@ static void commands_submit_serial(uint32_t finished)
 	}
 	profile_mark(PROFILE_IDLE);
 	profile.frame.submissions++;
+	capture.gap_next = 1;
 	gpu_timing_bracket();
 	dkQueueSubmitCommands(dk.queue, dkCmdBufFinishList(dk.commands));
 	if (queue_faulted())
@@ -1376,6 +1480,7 @@ static int initialize(void)
 	visibility_initialize();
 	trace_initialize();
 	profile_initialize();
+	capture_initialize();
 	dk.uniform_memory = memory_block(UNIFORM_MEMORY_SIZE, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached, NULL);
 	if (dk.uniform_memory)
 		dk.uniform_gpu = dkMemBlockGetGpuAddr(dk.uniform_memory);
@@ -1511,7 +1616,7 @@ static void clear(const struct dk_command_clear *command)
 			dkCmdBufClearDepthStencil(dk.commands, depth, command->depth, stencil ? 0xff : 0,
 				(uint8_t)command->stencil);
 	}
-	trace_reached(event);
+	command_done(event);
 }
 
 /* A screenshot's destination: a pitch-linear image in CPU-visible memory,
@@ -1624,9 +1729,14 @@ static void present(const struct dk_command_present *command)
 		}
 		dkCmdBufBlitImage(dk.commands, &source, &from, &screen_view, &to, DkBlitFlag_FilterLinear, 0);
 	}
-	trace_reached(event);
+	command_done(event);
 	profile_frame_end();
 	commands_submit();
+	if (capture.recording && dk.frame == capture.slot)
+	{
+		capture.recording = 0;
+		capture.waiting = 1;
+	}
 	/* (the GPU may have faulted since the frame began: the image is not
 	presented, as a faulted queue would end the program) */
 	if (queue_faulted())
@@ -2474,7 +2584,7 @@ static void texture_receive(const struct dk_command_texture *command)
 	event->a[10] = texture->size;
 	event->g[0] = dkMemBlockGetGpuAddr(tex.blocks[texture->block].memory) + texture->offset;
 	event->g[1] = trace.texture_source_gpu;
-	trace_reached(event);
+	command_done(event);
 }
 
 /* writes some rows of one level of a 2D BGRA image (the text's atlas and
@@ -2547,7 +2657,7 @@ static void texture_rows_receive(const struct dk_command_texture_rows *command)
 	event->a[6] = texture->slot;
 	event->g[0] = source;
 	event->g[1] = dkMemBlockGetGpuAddr(tex.blocks[texture->block].memory) + texture->offset;
-	trace_reached(event);
+	command_done(event);
 }
 
 static void texture_free_receive(const struct dk_command_texture_free *command)
@@ -2631,7 +2741,7 @@ static uint32_t sampler_slot(const struct dk_sampler *sampler)
 	made.wrapMode[1] = wrap_mode(sampler->wrap[1]);
 	made.wrapMode[2] = wrap_mode(sampler->wrap[2]);
 	made.lodClampMin = sampler->lod_minimum;
-	made.lodBias = sampler->lod_bias;
+	made.lodBias = sampler->lod_bias + (host_dk_lod_bias ? 3.0f : 0.0f);
 	made.maxAnisotropy = sampler->anisotropy < 1.0f ? 1.0f : sampler->anisotropy > 16.0f ? 16.0f : sampler->anisotropy;
 	for (index = 0; index < 4; index++)
 		made.borderColor[index].value_f = sampler->border[index];
@@ -2671,6 +2781,12 @@ is drawn into only once the draws that sampled it are done, and a stage that
 samples a target looks again (textures_apply) */
 static void textures_targets_changing(void)
 {
+	if (host_dk_no_target_barriers && !tex.targets_copied)
+	{
+		tex.targets_sampled = 0;
+		tex.stages_dirty = 1;
+		return;
+	}
 	if (tex.targets_copied)
 	{
 		barrier(DkBarrier_Full, 0);
@@ -2912,7 +3028,7 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 		event->a[2] = levels;
 		event->a[3] = composite->slot;
 		profile.frame.composite_copies++;
-		trace_reached(event);
+		command_done(event);
 	}
 	tex.targets_copied = 1;
 	dk.recorded = 1;
@@ -2951,7 +3067,7 @@ static void visibility_end(const struct dk_command_visibility_end *command)
 		struct trace_event *event = trace_add(DK_COMMAND_VISIBILITY_END);
 
 		event->a[0] = command->index;
-		trace_reached(event);
+		command_done(event);
 	}
 }
 
@@ -3593,7 +3709,7 @@ static void draw(const struct dk_command_draw *command)
 	dk.recorded = 1;
 	tex.draws_unfenced = 1;
 	profile.frame.draws++;
-	trace_reached(event);
+	command_done(event);
 }
 
 /* runs size bytes of commands at commands (a guest address): one
@@ -4014,4 +4130,247 @@ static void trace_dump(void)
 		trace_dump_events(trace.next - TRACE_DUMP_TAIL, trace.next, 0);
 	}
 	host_logf(HOST_LOG_ERROR, "deko3d fault: the record ends");
+}
+
+/* ---------- a captured frame read (debug.gpu_capture) */
+
+struct capture_group
+{
+	uint32_t key;
+	uint64_t ns;
+	uint32_t commands;
+	uint64_t vertices;
+	/* the time in each part of the frame, for the part it is mostly in */
+	uint64_t pass_ns[TRACE_NAMES];
+};
+
+static struct capture_group *capture_group_get(struct capture_group *groups, uint32_t *count, uint32_t key)
+{
+	uint32_t index;
+
+	for (index = 0; index < *count; index++)
+	{
+		if (groups[index].key == key)
+			return &groups[index];
+	}
+	if (*count == CAPTURE_GROUPS)
+		return NULL;
+	memset(&groups[*count], 0, sizeof(groups[0]));
+	groups[*count].key = key;
+	return &groups[(*count)++];
+}
+
+static void capture_groups_sort(struct capture_group *groups, uint32_t count)
+{
+	uint32_t index;
+
+	for (index = 1; index < count; index++)
+	{
+		struct capture_group moving = groups[index];
+		uint32_t at = index;
+
+		while (at > 0 && groups[at - 1].ns < moving.ns)
+		{
+			groups[at] = groups[at - 1];
+			at--;
+		}
+		groups[at] = moving;
+	}
+}
+
+static const char *capture_group_pass(const struct capture_group *group)
+{
+	uint32_t pass, best = 0;
+
+	for (pass = 1; pass < TRACE_NAMES; pass++)
+	{
+		if (group->pass_ns[pass] > group->pass_ns[best])
+			best = pass;
+	}
+	return trace_pass_name(best);
+}
+
+static void capture_shader_name(uint32_t handle, char *text, size_t size)
+{
+	uint64_t hash;
+	uint32_t stage, code_size, registers;
+
+	if (host_dk_shader_describe(handle, &hash, &stage, &code_size, &registers))
+		snprintf(text, size, "%c%016llx (%u bytes of code, %u registers)", stage ? 'f' : 'v', (unsigned long long)hash,
+			(unsigned)code_size, (unsigned)registers);
+	else
+		snprintf(text, size, "handle %u", (unsigned)handle);
+}
+
+static void capture_target_name(uint32_t data, char *text, size_t size)
+{
+	int index;
+
+	for (index = dk.target_count - 1; index >= 0; index--)
+	{
+		const struct target *target = &dk.targets[index];
+
+		if (target->surface.data == data && target->surface.kind == DK_SURFACE_COLOR)
+		{
+			snprintf(text, size, "%08x %ux%u", (unsigned)data, (unsigned)SURFACE_PIXEL_WIDTH(&target->surface),
+				(unsigned)SURFACE_PIXEL_HEIGHT(&target->surface));
+			return;
+		}
+	}
+	snprintf(text, size, "%08x", (unsigned)data);
+}
+
+static void capture_report(void)
+{
+	static struct capture_group pixel[CAPTURE_GROUPS], vertex[CAPTURE_GROUPS], targets[CAPTURE_GROUPS],
+		kinds[CAPTURE_GROUPS];
+	uint32_t pixel_count = 0, vertex_count = 0, target_count = 0, kind_count = 0;
+	uint32_t longest[CAPTURE_LONGEST], longest_count = 0;
+	static uint64_t ns[CAPTURE_LIMIT];
+	uint64_t total = 0, gaps = 0, lost = 0;
+	uint32_t index, gap_count = 0;
+	char name[96], target[64];
+
+	for (index = 0; index < capture.count; index++)
+	{
+		uint64_t start = capture.reports[index * 2 + 1], end = capture.reports[(index + 1) * 2 + 1];
+		const struct capture_entry *entry = &capture.entries[index];
+		struct capture_group *group;
+
+		ns[index] = 0;
+		if (!start || !end || end < start)
+		{
+			lost++;
+			continue;
+		}
+		ns[index] = dkTimestampToNs(end - start);
+		if (entry->after_gap)
+		{
+			gaps += ns[index];
+			gap_count++;
+			continue;
+		}
+		total += ns[index];
+		if ((group = capture_group_get(kinds, &kind_count, entry->kind)) != NULL)
+		{
+			group->ns += ns[index];
+			group->commands++;
+		}
+		if ((group = capture_group_get(targets, &target_count, entry->color)) != NULL)
+		{
+			group->ns += ns[index];
+			group->commands++;
+			group->pass_ns[entry->pass % TRACE_NAMES] += ns[index];
+		}
+		if (entry->kind == DK_COMMAND_DRAW)
+		{
+			if ((group = capture_group_get(pixel, &pixel_count, entry->pixel_shader)) != NULL)
+			{
+				group->ns += ns[index];
+				group->commands++;
+				group->vertices += entry->count;
+				group->pass_ns[entry->pass % TRACE_NAMES] += ns[index];
+			}
+			if ((group = capture_group_get(vertex, &vertex_count, entry->vertex_shader)) != NULL)
+			{
+				group->ns += ns[index];
+				group->commands++;
+				group->vertices += entry->count;
+				group->pass_ns[entry->pass % TRACE_NAMES] += ns[index];
+			}
+		}
+		/* (the longest, kept in order) */
+		{
+			uint32_t at;
+
+			if (longest_count < CAPTURE_LONGEST)
+				at = longest_count++;
+			else if (ns[index] > ns[longest[CAPTURE_LONGEST - 1]])
+				at = CAPTURE_LONGEST - 1;
+			else
+				continue;
+			while (at > 0 && ns[longest[at - 1]] < ns[index])
+			{
+				longest[at] = longest[at - 1];
+				at--;
+			}
+			longest[at] = index;
+		}
+	}
+	host_logf(HOST_LOG_INFO, "deko3d capture: frame %lu: %u commands, the GPU %.2f ms on them, and %.2f ms on %u after "
+		"a submission (its wait for the CPU in it); %u not timed", capture.frame, (unsigned)capture.count,
+		(double)total / 1e6, (double)gaps / 1e6, (unsigned)gap_count, (unsigned)lost);
+	capture_groups_sort(kinds, kind_count);
+	for (index = 0; index < kind_count; index++)
+		host_logf(HOST_LOG_INFO, "deko3d capture: %s: %.2f ms in %u", trace_kind_name(kinds[index].key),
+			(double)kinds[index].ns / 1e6, (unsigned)kinds[index].commands);
+	capture_groups_sort(pixel, pixel_count);
+	host_logf(HOST_LOG_INFO, "deko3d capture: %u pixel shaders drew; the 24 that took longest:", (unsigned)pixel_count);
+	for (index = 0; index < pixel_count && index < 24; index++)
+	{
+		capture_shader_name(pixel[index].key, name, sizeof(name));
+		host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, %u draws, %llu vertices: %s, mostly in %s",
+			(double)pixel[index].ns / 1e6, (unsigned)pixel[index].commands, (unsigned long long)pixel[index].vertices,
+			name, capture_group_pass(&pixel[index]));
+	}
+	capture_groups_sort(vertex, vertex_count);
+	host_logf(HOST_LOG_INFO, "deko3d capture: %u vertex shaders drew; the 12 that took longest:", (unsigned)vertex_count);
+	for (index = 0; index < vertex_count && index < 12; index++)
+	{
+		capture_shader_name(vertex[index].key, name, sizeof(name));
+		host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, %u draws, %llu vertices: %s, mostly in %s",
+			(double)vertex[index].ns / 1e6, (unsigned)vertex[index].commands, (unsigned long long)vertex[index].vertices,
+			name, capture_group_pass(&vertex[index]));
+	}
+	capture_groups_sort(targets, target_count);
+	host_logf(HOST_LOG_INFO, "deko3d capture: %u color targets drawn into; the 10 that took longest:",
+		(unsigned)target_count);
+	for (index = 0; index < target_count && index < 10; index++)
+	{
+		capture_target_name(targets[index].key, target, sizeof(target));
+		host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, %u commands: %s, mostly in %s",
+			(double)targets[index].ns / 1e6, (unsigned)targets[index].commands, target,
+			capture_group_pass(&targets[index]));
+	}
+	host_logf(HOST_LOG_INFO, "deko3d capture: the longest commands:");
+	for (index = 0; index < longest_count; index++)
+	{
+		const struct capture_entry *entry = &capture.entries[longest[index]];
+		char vertex_name[96];
+
+		capture_shader_name(entry->pixel_shader, name, sizeof(name));
+		capture_shader_name(entry->vertex_shader, vertex_name, sizeof(vertex_name));
+		capture_target_name(entry->color, target, sizeof(target));
+		if (entry->kind == DK_COMMAND_DRAW)
+			host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, #%u %s [%s]: primitive %u, %u %s, pixel %s, vertex %s, "
+				"texture %08x, into %s", (double)ns[longest[index]] / 1e6, (unsigned)longest[index],
+				trace_kind_name(entry->kind), trace_pass_name(entry->pass), (unsigned)(entry->primitive & 0xff),
+				(unsigned)entry->count, ((entry->primitive >> 16) & 0xff) ? "indices" : "vertices", name, vertex_name,
+				(unsigned)entry->texture0, target);
+		else
+			host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, #%u %s [%s], into %s", (double)ns[longest[index]] / 1e6,
+				(unsigned)longest[index], trace_kind_name(entry->kind), trace_pass_name(entry->pass), target);
+	}
+}
+
+static void capture_frame_begin(void)
+{
+	if (!capture.memory)
+		return;
+	if (capture.waiting && dk.frame == capture.slot)
+	{
+		capture.waiting = 0;
+		capture_report();
+	}
+	if (capture.armed && !capture.recording && !capture.waiting && !dk.faulted)
+	{
+		capture.armed = 0;
+		capture.recording = 1;
+		capture.slot = dk.frame;
+		capture.count = 0;
+		capture.gap_next = 0;
+		capture.frame = dk.frames_presented;
+		memset((void *)capture.reports, 0, (CAPTURE_LIMIT + 1) * 16);
+		dkCmdBufReportCounter(dk.commands, DkCounter_Timestamp, capture.gpu);
+	}
 }

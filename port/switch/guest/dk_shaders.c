@@ -42,6 +42,7 @@ what tests the writer in this phase.
 
 #include "platform.h"
 #include "posix.h"
+#include "port_config.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -137,6 +138,8 @@ struct dk_key
 	uint32_t handle;
 	/* the pass found it on the card (or loaded): nothing to compile */
 	int ready;
+	/* its GLSL written to debug.gpu_glsl_folder (glsl_write) */
+	int glsl_written;
 };
 
 static struct dk_key *keys;
@@ -574,6 +577,42 @@ static void hash_log_once(uint64_t hash)
 	}
 }
 
+/* debug.gpu_glsl_folder: a shader the game draws with, written once as
+<folder>/<v or f><hash>.glsl, the name the GPU profile's capture logs it by
+(port/switch/host/host_dk.c) */
+static void glsl_write(struct dk_key *key)
+{
+	static const char *folder;
+	static int looked;
+	char path[512];
+	char *glsl;
+	FILE *file;
+
+	if (key->glsl_written)
+		return;
+	key->glsl_written = 1;
+	if (!looked)
+	{
+		looked = 1;
+		/* (the folder must be there already) */
+		folder = config_string("debug.gpu_glsl_folder");
+	}
+	if (!folder || !folder[0])
+		return;
+	glsl = key_glsl(key);
+	if (!glsl)
+		return;
+	snprintf(path, sizeof(path), "%s/%c%016llx.glsl", folder, key->stage == DK_SHADER_STAGE_PIXEL ? 'f' : 'v',
+		(unsigned long long)key->hash);
+	file = fopen(path, "w");
+	if (file)
+	{
+		fputs(glsl, file);
+		fclose(file);
+	}
+	free(glsl);
+}
+
 /* asks for one key: a handle if the shader is ready, and the key queued
 with the host if it was unknown to it. The priority is the caller's */
 static uint32_t key_ask(struct dk_key *key, uint32_t priority)
@@ -584,7 +623,10 @@ static uint32_t key_ask(struct dk_key *key, uint32_t priority)
 	hash_log_once(key->hash);
 	handle = host_dk_shader_find(key->stage, key->hash, (uint32_t)(uintptr_t)&state);
 	if (handle)
+	{
+		glsl_write(key);
 		return handle;
+	}
 	if (state == 1)
 	{
 		/* queued or compiling: raise it in the queue, if the caller is

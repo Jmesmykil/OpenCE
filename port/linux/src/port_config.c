@@ -701,6 +701,29 @@ static const struct config_setting config_settings[] =
 		"Read each DXT-compressed texture back out of its image after it is written,\n"
 		"and log where it differs from the game's bytes (port/switch/host/host_dk.c).\n"
 		"Slow: it waits for the GPU each time. Takes effect the next start." },
+	{ "debug.gpu_trace", _config_boolean, "true", "HALO_GPU_TRACE_FAULTS", _environment_value, _platform_android,
+		"Keep a record of the GPU's last commands, and after a GPU fault write it and\n"
+		"the console's account of the fault to halo.log (port/switch/host/host_dk.c).\n"
+		"It costs the GPU some time. Takes effect the next start." },
+	{ "debug.gpu_fault_test", _config_boolean, "false", "HALO_GPU_FAULT_TEST", _environment_set_is_true,
+		_platform_android,
+		"Make the GPU fault on purpose at the 1200th frame, to see gpu_trace's record.\n"
+		"Takes effect the next start." },
+	{ "debug.gpu_profile", _config_boolean, "false", "HALO_GPU_PROFILE", _environment_set_is_true, _platform_android,
+		"Every 300 frames, log the GPU's time by part of the frame (the sky, the\n"
+		"objects, the fog...) and what a frame asks of it. Takes effect the next start." },
+	{ "debug.gpu_capture", _config_boolean, "false", "HALO_GPU_CAPTURE", _environment_set_is_true, _platform_android,
+		"With gpu_profile, time one frame of every 300 draw by draw, and log the GPU's\n"
+		"time by shader, target and kind of command. Takes effect the next start." },
+	{ "debug.gpu_experiment", _config_string, "\"\"", "HALO_GPU_EXPERIMENT", _environment_value, _platform_android,
+		"Measurements of what a change could save, comma-separated:\n"
+		"\"no_compression\" (render targets without hardware compression),\n"
+		"\"no_target_barriers\" (no wait before a render target change; may draw\n"
+		"wrong), \"lod_bias\" (textures sampled three levels smaller: blurry).\n"
+		"Empty for none. Takes effect the next start." },
+	{ "debug.gpu_glsl_folder", _config_string, "\"\"", "HALO_GPU_GLSL_FOLDER", _environment_value, _platform_android,
+		"A folder to write each shader the game draws with to, as GLSL named by its\n"
+		"hash (the names gpu_capture logs); the folder must exist. Empty for none." },
 #endif
 #ifndef HALO_SWITCH
 	{ "debug.vk_present_marker", _config_boolean, "false", "HALO_VK_PRESENT_MARKER", _environment_set_is_true, _platform_android,

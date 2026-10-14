@@ -108,6 +108,10 @@ struct dksh_loaded
 	DkShader shader;
 	uint64_t hash;
 	uint32_t stage;
+	/* its code's bytes and the registers it needs (the program header's
+	num_gprs), for the GPU profile (host_dk_shader_describe) */
+	uint32_t code_size;
+	uint32_t registers;
 };
 
 /* what the guest asks to have compiled */
@@ -1104,6 +1108,11 @@ static uint32_t shader_load(uint64_t hash, uint32_t stage)
 				dksh.code_used += header.code_size;
 				loaded->hash = hash;
 				loaded->stage = stage;
+				loaded->code_size = header.code_size;
+				loaded->registers = 0;
+				/* (a program header: type, entry point, then num_gprs) */
+				if (header.programs_offset + 12 <= header.control_size)
+					memcpy(&loaded->registers, contents + header.programs_offset + 8, sizeof(loaded->registers));
 				if (dkShaderIsValid(&loaded->shader))
 				{
 					struct dksh_slot *slot = set_insert(hash, stage);
@@ -1299,6 +1308,17 @@ const void *host_dk_shader(uint32_t handle)
 	if (!handle || handle > dksh.loaded_count)
 		return NULL;
 	return &dksh.loaded[handle - 1].shader;
+}
+
+int host_dk_shader_describe(uint32_t handle, uint64_t *hash, uint32_t *stage, uint32_t *code_size, uint32_t *registers)
+{
+	if (!handle || handle > dksh.loaded_count)
+		return 0;
+	*hash = dksh.loaded[handle - 1].hash;
+	*stage = dksh.loaded[handle - 1].stage;
+	*code_size = dksh.loaded[handle - 1].code_size;
+	*registers = dksh.loaded[handle - 1].registers;
+	return 1;
 }
 
 /* what the host has of a shader, without loading it: 0 nothing, 1 queued
