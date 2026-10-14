@@ -59,6 +59,18 @@ wait for an image) */
 so that the host knows how much of it a frame has used (command_memory_added) */
 #define COMMAND_PIECE_SIZE (1024 * 1024)
 #define COMMAND_PIECES (COMMAND_MEMORY_SIZE / COMMAND_PIECE_SIZE)
+/* The end of each piece is left unused. deko3d 0.5.0's dkCmdBufBindVtxBuffers
+asks for room for 5 words a buffer and writes 6, so a call that finds
+between 5 and 6 words a buffer left runs up to a word a buffer past the
+piece; deko3d then gives the next command a new piece, and closes the old
+one with those words in it. With the pieces end to end, the next command's
+header was written over them before the GPU read them: it took
+dkCmdBufDraw's or dkCmdBufBindIdxBuffer's header for the third vertex
+buffer's limit, and the 3D engine stopped on SET_VERTEX_STREAM_LIMIT_A(2)
+(the kernel's error info, with that header as the value; crowded games on
+Longest, after minutes or after seconds). Here what runs past a piece lands
+in memory nothing else writes. */
+#define COMMAND_PIECE_GUARD 1024
 #define IMAGE_BLOCK_SIZE (32 * 1024 * 1024)
 #define IMAGE_BLOCK_LIMIT 16
 #define TARGET_LIMIT 256
@@ -796,7 +808,8 @@ static void queue_wait_idle(void)
 static void command_piece_add(void)
 {
 	dkCmdBufAddMemory(dk.commands, dk.command_memory,
-		(uint32_t)dk.frame * COMMAND_MEMORY_SIZE + dk.command_pieces * COMMAND_PIECE_SIZE, COMMAND_PIECE_SIZE);
+		(uint32_t)dk.frame * COMMAND_MEMORY_SIZE + dk.command_pieces * COMMAND_PIECE_SIZE,
+		COMMAND_PIECE_SIZE - COMMAND_PIECE_GUARD);
 	dk.command_pieces++;
 	/* (a command is a few KB, so the last piece, 1 MB, has room for the
 	commands up to the next time host_dk_submit looks) */
@@ -833,7 +846,7 @@ static void command_memory_exhausted(void *user, DkCmdBuf commands, size_t neede
 {
 	(void)user;
 	(void)commands;
-	if (dk.command_pieces == COMMAND_PIECES || needed > COMMAND_PIECE_SIZE)
+	if (dk.command_pieces == COMMAND_PIECES || needed > COMMAND_PIECE_SIZE - COMMAND_PIECE_GUARD)
 		host_fatal("deko3d: a frame needs more than %u bytes of commands (%zu more asked for)",
 			(unsigned)COMMAND_MEMORY_SIZE, needed);
 	command_piece_add();
