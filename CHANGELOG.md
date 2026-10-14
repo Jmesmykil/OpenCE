@@ -1,5 +1,14 @@
 # Changelog
 
+## Build 96
+
+- Switch: the program's main thread sleeps instead of spinning on the
+  game's core, which kept the CPU busy for nothing. (nx-mod)
+- Network games catch up at most 4 ticks a frame, so one slow frame no
+  longer snowballs into frames of several seconds. (nx-mod)
+
+Network version 28
+
 ## Build 95
 
 - Switch: a GPU fault no longer ends the game; it is logged and the
