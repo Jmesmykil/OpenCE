@@ -1,5 +1,18 @@
 # Changelog
 
+## Build 97
+
+- Custom Edition maps keep their own names; a game names its map's
+  version, which a client finds its copy by, and maps an earlier build
+  renamed get their names back. A download beside another version of its
+  name is listed as "(2)". (MrBruh)
+- Map sharing and Custom Edition map loading are hardened against damaged
+  or hostile files. (MrBruh)
+- custom_maps subfolders work with the above: a client in a network game
+  finds its copy of the game's map in a subfolder too. (thelinkin3000)
+
+Network version 29
+
 ## Build 96
 
 - Switch: the program's main thread sleeps instead of spinning on the
