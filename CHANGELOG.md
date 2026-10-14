@@ -1,5 +1,21 @@
 # Changelog
 
+## Build 95
+
+- Switch: a GPU fault no longer ends the game; it is logged and the
+  picture stops. (thelinkin3000)
+- Android and Switch: text that starts with an underscore keeps it, so
+  shared Custom Edition maps are named once, not again at every start.
+  (thelinkin3000)
+- A config.toml line that cannot be read is set aside, instead of every
+  setting going back to its default. (thelinkin3000)
+- Switch: CPU clock in Video Setup, Performance: 1.7 GHz (default), 1 GHz
+  or stock. (thelinkin3000)
+- Switch: Resolution Limit in Video Setup: 480p (default), 720p or 1080p,
+  shown at 720p in handheld and 1080p docked. (thelinkin3000)
+
+Network version 28
+
 ## Build 94
 
 - Bodies in multiplayer fall as ragdolls: game.ragdoll "woody" (default),
