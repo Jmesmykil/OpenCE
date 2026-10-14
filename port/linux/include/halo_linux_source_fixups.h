@@ -65,6 +65,10 @@ void halo_vertex_shader_lighting(unsigned long handle);
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and
 menus (source/render/render.c): the window's bounds on the screen */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
+/* the part of a frame the game is about to draw (source/render/render.c):
+the Switch's renderer keeps it in its record of the commands it ran, for
+the log after a GPU fault (port/switch/host/host_dk.c); nothing elsewhere */
+void halo_render_marker(char const *name);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 /* TRUE when B steps out of a custom-map folder or the Map screen's

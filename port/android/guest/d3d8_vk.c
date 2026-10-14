@@ -774,6 +774,13 @@ static BOOL targets_bind(BOOL *has_depth)
 	return TRUE;
 }
 
+/* the part of a frame being drawn: only the Switch's renderer keeps it
+(port/switch/guest/d3d8_dk.c) */
+void halo_render_marker(char const *name)
+{
+	(void)name;
+}
+
 /* display.anti_aliasing's FXAA over a window's 3D view (render.c calls this before the HUD and menus are drawn over it):
 the rectangle in the game's units, of the back buffer, which the host passes over in place (host_vk_post.c) */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1)

@@ -43,6 +43,7 @@ give.
 #include <deko3d.h>
 #include <switch.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,6 +117,9 @@ struct target
 	/* its image descriptor's slot, once it has been sampled (render-to-texture) */
 	uint32_t slot;
 	int has_slot;
+	/* its image's memory, for the GPU trace */
+	DkGpuAddr gpu;
+	uint32_t bytes;
 };
 
 /* one committed 16 MB chunk of the window, GPU-mapped on the game thread
@@ -258,6 +262,197 @@ static void debug_callback(void *user, const char *context, DkResult result, con
 		message ? message : "");
 }
 
+/* ---------- the record of the commands run, for a GPU fault (debug.gpu_trace)
+
+A GPU fault leaves deko3d's queue in an error state and says nothing more.
+So the host keeps each command it runs in a ring of the last TRACE_EVENTS,
+and after each one that gives the GPU work it has the GPU write the
+command's number into the trace memory as the GPU gets there
+(dkCmdBufReportValue): after a fault, the number there is the last command
+the GPU finished, and the one it faulted in comes after it. The log then
+gets the kernel's account of the fault (the queue's GPU channel's error
+notification and error info), where the GPU got to, the commands around it
+and what the host held (trace_dump). What a command asks for is checked as
+it is run, and anything wrong said at once (trace_check). The game says
+which part of the frame it is drawing (DK_COMMAND_MARKER), and each record
+has it. */
+
+int host_dk_trace = 1;
+/* debug.gpu_fault_test: the GPU made to fault on purpose, a write to memory
+it does not have, at the 1200th frame presented: the record checked */
+int host_dk_fault_test;
+
+#define TRACE_EVENTS 32768
+/* the commands written before the first one the GPU had not finished, and
+the most written in all */
+#define TRACE_DUMP_BEFORE 64
+#define TRACE_DUMP_LIMIT 900
+#define TRACE_DUMP_TAIL 100
+#define TRACE_CHECK_LIMIT 96
+#define TRACE_NAMES 64
+
+/* the kinds of record past the commands' own (DK_COMMAND_*) */
+enum
+{
+	TRACE_SUBMIT = 100,
+	TRACE_QUEUE,
+	TRACE_ROLLOVER,
+	TRACE_COMPOSITE_COPY,
+	TRACE_RELEASE,
+};
+
+struct trace_event
+{
+	uint32_t number;
+	/* the submission being recorded, and the frames presented before it */
+	uint32_t serial;
+	uint32_t frame;
+	uint16_t kind;
+	/* the GPU writes number when it gets past this one */
+	uint8_t reported;
+	/* the part of the frame (trace.names) */
+	uint8_t pass;
+	uint32_t a[12];
+	uint64_t g[4];
+};
+
+static struct
+{
+	struct trace_event *events;
+	/* the next record's number (from 1) */
+	uint32_t next;
+	/* written by the GPU: [0] the last command it finished, [1] the last
+	submission it began */
+	DkMemBlock memory;
+	volatile uint32_t *progress;
+	DkGpuAddr progress_gpu;
+	char names[TRACE_NAMES][DK_MARKER_NAME_SIZE];
+	uint32_t name_count;
+	uint8_t pass;
+	uint32_t checks;
+	/* a fault seen; the record written (on the game thread, at its next
+	submission: trace_dump_if_faulted) */
+	int dump_pending, dumped;
+	/* the texture handles bound for the draws (textures_apply) */
+	uint32_t handles[4];
+	/* the GPU address texture_write copied from */
+	uint64_t texture_source_gpu;
+} trace;
+
+static DkMemBlock memory_block(uint32_t size, uint32_t flags, void *storage);
+
+static void trace_initialize(void)
+{
+	if (!host_dk_trace)
+		return;
+	trace.events = (struct trace_event *)calloc(TRACE_EVENTS, sizeof(struct trace_event));
+	trace.memory = memory_block(DK_MEMBLOCK_ALIGNMENT, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached, NULL);
+	if (!trace.events || !trace.memory)
+	{
+		host_logf(HOST_LOG_ERROR, "deko3d: no memory for the GPU trace; it is off");
+		free(trace.events);
+		trace.events = NULL;
+		return;
+	}
+	trace.progress = (volatile uint32_t *)dkMemBlockGetCpuAddr(trace.memory);
+	trace.progress[0] = trace.progress[1] = 0;
+	trace.progress_gpu = dkMemBlockGetGpuAddr(trace.memory);
+	trace.next = 1;
+	strcpy(trace.names[0], "(none yet)");
+	trace.name_count = 1;
+	host_logf(HOST_LOG_INFO, "deko3d: the GPU trace keeps the last %u commands (%u KB)", (unsigned)TRACE_EVENTS,
+		(unsigned)(TRACE_EVENTS * sizeof(struct trace_event) / 1024));
+}
+
+/* a new record, filled by the caller; a spare one when there is no trace */
+static struct trace_event *trace_add(uint32_t kind)
+{
+	static struct trace_event spare;
+	struct trace_event *event;
+
+	if (!trace.events)
+		return &spare;
+	event = &trace.events[trace.next % TRACE_EVENTS];
+	memset(event, 0, sizeof(*event));
+	event->number = trace.next++;
+	event->serial = dk.serial;
+	event->frame = (uint32_t)dk.frames_presented;
+	event->kind = (uint16_t)kind;
+	event->pass = trace.pass;
+	return event;
+}
+
+/* the GPU writes the record's number once it has finished what came before */
+static void trace_reached(struct trace_event *event)
+{
+	if (!trace.events || !event->number || dk.faulted)
+		return;
+	dkCmdBufReportValue(dk.commands, event->number, trace.progress_gpu);
+	event->reported = 1;
+}
+
+static const char *trace_pass_name(uint32_t pass)
+{
+	return pass < trace.name_count ? trace.names[pass] : "?";
+}
+
+static void trace_check(const char *format, ...) __attribute__((format(printf, 1, 2)));
+
+/* something a command asks for that the GPU may not take, said at once */
+static void trace_check(const char *format, ...)
+{
+	char message[320];
+	va_list arguments;
+
+	if (trace.checks >= TRACE_CHECK_LIMIT)
+		return;
+	if (++trace.checks == TRACE_CHECK_LIMIT)
+		host_logf(HOST_LOG_WARN, "deko3d check: (no more of these are said)");
+	va_start(arguments, format);
+	vsnprintf(message, sizeof(message), format, arguments);
+	va_end(arguments);
+	host_logf(HOST_LOG_WARN, "deko3d check: %s (command %u, submission %u, frame %lu, %s)", message,
+		(unsigned)trace.next, (unsigned)dk.serial, dk.frames_presented, trace_pass_name(trace.pass));
+}
+
+static void marker_receive(const struct dk_command_marker *command)
+{
+	char name[DK_MARKER_NAME_SIZE];
+	uint32_t index;
+	struct trace_event *event;
+
+	memcpy(name, command->name, sizeof(name));
+	name[sizeof(name) - 1] = 0;
+	for (index = 0; index < trace.name_count; index++)
+	{
+		if (!strcmp(trace.names[index], name))
+			break;
+	}
+	if (index == trace.name_count)
+	{
+		if (trace.name_count == TRACE_NAMES)
+			index = 0;
+		else
+			strcpy(trace.names[trace.name_count++], name);
+	}
+	trace.pass = (uint8_t)index;
+	event = trace_add(DK_COMMAND_MARKER);
+	event->a[0] = index;
+}
+
+static void trace_dump(void);
+static void trace_held(void);
+
+/* the record of a fault written, once, on the game thread */
+static void trace_dump_if_faulted(void)
+{
+	if (trace.dump_pending && !trace.dumped)
+	{
+		trace.dumped = 1;
+		trace_dump();
+	}
+}
+
 /* Whether a GPU fault has put the queue in an error state. deko3d ends the
 program at the next call that needs such a queue (dkQueueSubmitCommands,
 dkQueueSignalFence, dkQueueWaitIdle, the swapchain's), with nothing said and
@@ -273,6 +468,7 @@ static int queue_faulted(void)
 	if (!dk.queue || !dkQueueIsInErrorState(dk.queue))
 		return 0;
 	dk.faulted = 1;
+	trace.dump_pending = 1;
 	host_logf(HOST_LOG_ERROR, "deko3d: the GPU faulted (the queue is in an error state) by submission %u, frame %lu; "
 		"nothing more is drawn or presented", (unsigned)dk.serial, dk.frames_presented);
 	return 1;
@@ -431,6 +627,8 @@ static struct target *target_get(const struct dk_surface *surface)
 	target = &dk.targets[dk.target_count++];
 	target->surface = *surface;
 	dkImageInitialize(&target->image, &layout, block, offset);
+	target->gpu = dkMemBlockGetGpuAddr(block) + offset;
+	target->bytes = (uint32_t)dkImageLayoutGetSize(&layout);
 	host_logf(HOST_LOG_INFO, "deko3d: %s target %08x, %ux%u (%ux%u pixels)",
 		surface->kind == DK_SURFACE_DEPTH ? "depth" : "color", (unsigned)surface->data, (unsigned)surface->width,
 		(unsigned)surface->height, (unsigned)SURFACE_PIXEL_WIDTH(surface), (unsigned)SURFACE_PIXEL_HEIGHT(surface));
@@ -585,6 +783,7 @@ static void command_memory_roll(void)
 {
 	uint32_t used = command_memory_used();
 
+	trace_add(TRACE_ROLLOVER)->a[0] = used;
 	if (dk.recorded)
 		commands_submit_partial();
 	pthread_mutex_lock(&dk_lock);
@@ -772,6 +971,12 @@ invalidates the GPU's caches, so the next submission reads what the CPU has
 written (and cleaned) since. */
 static void commands_submit_serial(uint32_t finished)
 {
+	struct trace_event *event = trace_add(TRACE_QUEUE);
+
+	event->a[0] = finished;
+	event->a[1] = command_memory_used();
+	event->a[2] = dk.upload_used;
+	event->a[3] = finished != dk.serial;
 	/* (a faulted queue takes nothing: what is recorded goes, and the
 	submission counts as finished) */
 	if (queue_faulted())
@@ -968,6 +1173,7 @@ static int initialize(void)
 
 	textures_initialize();
 	visibility_initialize();
+	trace_initialize();
 	dk.uniform_memory = memory_block(UNIFORM_MEMORY_SIZE, DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached, NULL);
 	if (dk.uniform_memory)
 		dk.uniform_gpu = dkMemBlockGetGpuAddr(dk.uniform_memory);
@@ -986,9 +1192,30 @@ static void targets_bind(const struct dk_command_targets *command)
 	DkImageView const *colors[1] = { &color_view };
 	struct target *size_from;
 
+	struct trace_event *event = trace_add(DK_COMMAND_TARGETS);
+
 	textures_targets_changing();
 	dk.color = target_get(&command->color);
 	dk.depth = target_get(&command->depth);
+	event->a[0] = command->color.data;
+	event->a[1] = SURFACE_PIXEL_WIDTH(&command->color) | SURFACE_PIXEL_HEIGHT(&command->color) << 16;
+	event->a[2] = command->color.kind | command->depth.kind << 8;
+	event->a[3] = command->depth.data;
+	event->a[4] = SURFACE_PIXEL_WIDTH(&command->depth) | SURFACE_PIXEL_HEIGHT(&command->depth) << 16;
+	event->a[5] = dk.color ? (uint32_t)(dk.color - dk.targets) + 1 : 0;
+	event->a[6] = dk.depth ? (uint32_t)(dk.depth - dk.targets) + 1 : 0;
+	event->a[7] = command->color.width | command->color.height << 16;
+	event->g[0] = dk.color ? dk.color->gpu : 0;
+	event->g[1] = dk.depth ? dk.depth->gpu : 0;
+	if (command->color.kind != DK_SURFACE_NONE && !dk.color)
+		trace_check("color target %08x (%ux%u) has no image", (unsigned)command->color.data,
+			(unsigned)command->color.width, (unsigned)command->color.height);
+	if (dk.color && dk.depth && (SURFACE_PIXEL_WIDTH(&dk.color->surface) > SURFACE_PIXEL_WIDTH(&dk.depth->surface) ||
+		SURFACE_PIXEL_HEIGHT(&dk.color->surface) > SURFACE_PIXEL_HEIGHT(&dk.depth->surface)))
+		trace_check("color target %08x (%ux%u pixels) is bigger than its depth target %08x (%ux%u pixels)",
+			(unsigned)dk.color->surface.data, (unsigned)SURFACE_PIXEL_WIDTH(&dk.color->surface),
+			(unsigned)SURFACE_PIXEL_HEIGHT(&dk.color->surface), (unsigned)dk.depth->surface.data,
+			(unsigned)SURFACE_PIXEL_WIDTH(&dk.depth->surface), (unsigned)SURFACE_PIXEL_HEIGHT(&dk.depth->surface));
 	if (dk.color)
 	{
 		dk.color->bound = ++dk.target_clock;
@@ -1025,6 +1252,33 @@ static void clear(const struct dk_command_clear *command)
 	int stencil = dk.depth && (command->flags & DK_CLEAR_STENCIL);
 	uint32_t index;
 
+	struct trace_event *event = trace_add(DK_COMMAND_CLEAR);
+	const struct target *size_from = dk.color ? dk.color : dk.depth;
+
+	event->a[0] = command->flags;
+	event->a[1] = command->rectangle_count;
+	if (command->rectangle_count)
+	{
+		event->a[2] = command->rectangles[0][0];
+		event->a[3] = command->rectangles[0][1];
+		event->a[4] = command->rectangles[0][2];
+		event->a[5] = command->rectangles[0][3];
+	}
+	if (size_from)
+	{
+		event->a[6] = SURFACE_PIXEL_WIDTH(&size_from->surface) | SURFACE_PIXEL_HEIGHT(&size_from->surface) << 16;
+		for (index = 0; index < command->rectangle_count; index++)
+		{
+			const uint32_t *rectangle = command->rectangles[index];
+
+			if ((uint64_t)rectangle[0] + rectangle[2] > SURFACE_PIXEL_WIDTH(&size_from->surface) ||
+				(uint64_t)rectangle[1] + rectangle[3] > SURFACE_PIXEL_HEIGHT(&size_from->surface))
+				trace_check("a clear of %u,%u %ux%u is outside its %ux%u target %08x", (unsigned)rectangle[0],
+					(unsigned)rectangle[1], (unsigned)rectangle[2], (unsigned)rectangle[3],
+					(unsigned)SURFACE_PIXEL_WIDTH(&size_from->surface), (unsigned)SURFACE_PIXEL_HEIGHT(&size_from->surface),
+					(unsigned)size_from->surface.data);
+		}
+	}
 	if (!dk.color)
 		mask = 0;
 	if (!mask && !depth && !stencil)
@@ -1053,6 +1307,7 @@ static void clear(const struct dk_command_clear *command)
 			dkCmdBufClearDepthStencil(dk.commands, depth, command->depth, stencil ? 0xff : 0,
 				(uint8_t)command->stencil);
 	}
+	trace_reached(event);
 }
 
 /* A screenshot's destination: a pitch-linear image in CPU-visible memory,
@@ -1098,8 +1353,13 @@ static void present(const struct dk_command_present *command)
 {
 	struct target *back_buffer = target_get(&command->back_buffer);
 	struct target *screenshot = NULL;
+	struct trace_event *event = trace_add(DK_COMMAND_PRESENT);
 	int slot;
 
+	event->a[0] = command->back_buffer.data;
+	event->a[1] = SURFACE_PIXEL_WIDTH(&command->back_buffer) | SURFACE_PIXEL_HEIGHT(&command->back_buffer) << 16;
+	event->a[2] = command->screenshot;
+	event->g[0] = back_buffer ? back_buffer->gpu : 0;
 	/* A GPU fault puts the queue in an error state, and deko3d then ends the
 	program at the next call that needs the queue - the swapchain's acquire,
 	here - with nothing said about the fault. Say it, with the frame, and
@@ -1160,6 +1420,7 @@ static void present(const struct dk_command_present *command)
 		}
 		dkCmdBufBlitImage(dk.commands, &source, &from, &screen_view, &to, DkBlitFlag_FilterLinear, 0);
 	}
+	trace_reached(event);
 	commands_submit();
 	/* (the GPU may have faulted since the frame began: the image is not
 	presented, as a faulted queue would end the program) */
@@ -1208,6 +1469,8 @@ static void present(const struct dk_command_present *command)
 		dk.gpu_busy_total_ns = dk.gpu_busy_peak_ns = 0;
 		dk.gpu_frames = 0;
 		dk.command_peak_bytes = 0;
+		if (trace.events && dk.frames_presented % 600 == 0)
+			trace_held();
 	}
 	dk.frame = (dk.frame + 1) % FRAMES;
 	frame_begin();
@@ -1307,7 +1570,61 @@ static struct
 	int written_unfenced;
 	int draws_unfenced;
 	int said_problem;
+	/* who holds each descriptor slot, for the GPU trace's checks
+	(slot_owner_name): 0 nobody */
+	uint32_t slot_owner[IMAGE_SLOTS];
 } tex;
+
+/* a slot's holder: a texture's id, or one of these with an index */
+#define SLOT_OWNER_TARGET 0x10000u
+#define SLOT_OWNER_COMPOSITE 0x20000u
+#define SLOT_OWNER_DUMMY 0x30000u
+#define SLOT_OWNER_RELEASED 0x40000u
+
+static const char *slot_owner_name(uint32_t owner, char *text, size_t size)
+{
+	if (!owner)
+		snprintf(text, size, "nobody");
+	else if (owner == SLOT_OWNER_DUMMY)
+		snprintf(text, size, "the dummy");
+	else if ((owner & 0xf0000u) == SLOT_OWNER_TARGET)
+		snprintf(text, size, "target %u", (unsigned)(owner & 0xffffu));
+	else if ((owner & 0xf0000u) == SLOT_OWNER_COMPOSITE)
+		snprintf(text, size, "composite %u", (unsigned)(owner & 0xffffu));
+	else if ((owner & 0xf0000u) == SLOT_OWNER_RELEASED)
+		snprintf(text, size, "texture %u, released", (unsigned)(owner & 0xffffu));
+	else
+		snprintf(text, size, "texture %u", (unsigned)owner);
+	return text;
+}
+
+/* a slot taken by owner: said if somebody holds it still */
+static void slot_claim(uint32_t slot, uint32_t owner)
+{
+	char held[48], taker[48];
+
+	if (slot >= IMAGE_SLOTS)
+	{
+		trace_check("descriptor slot %u is past the %u there are", (unsigned)slot, (unsigned)IMAGE_SLOTS);
+		return;
+	}
+	if (tex.slot_owner[slot])
+		trace_check("descriptor slot %u given to %s while %s holds it", (unsigned)slot,
+			slot_owner_name(owner, taker, sizeof(taker)), slot_owner_name(tex.slot_owner[slot], held, sizeof(held)));
+	tex.slot_owner[slot] = owner;
+}
+
+/* a slot back on the free list */
+static void slot_unclaim(uint32_t slot)
+{
+	if (slot >= IMAGE_SLOTS)
+		return;
+	if (!tex.slot_owner[slot])
+		trace_check("descriptor slot %u is let go twice", (unsigned)slot);
+	tex.slot_owner[slot] = 0;
+}
+
+static uint32_t texture_owner(const struct texture *texture);
 
 static void texture_problem(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
@@ -1331,6 +1648,16 @@ static void block_free_range(struct texture_block *block, uint32_t offset, uint3
 {
 	uint32_t index, insert = block->free_count;
 
+	for (index = 0; index < block->free_count; index++)
+	{
+		if (offset < block->free[index].offset + block->free[index].size && block->free[index].offset < offset + size)
+		{
+			trace_check("image memory %08x+%08x of block %u is let go while %08x+%08x of it is free already",
+				(unsigned)offset, (unsigned)size, (unsigned)(block - tex.blocks), (unsigned)block->free[index].offset,
+				(unsigned)block->free[index].size);
+			break;
+		}
+	}
 	for (index = 0; index < block->free_count; index++)
 	{
 		if (block->free[index].offset > offset)
@@ -1435,7 +1762,10 @@ static void releases_collect(void)
 		if (release->size)
 			block_free_range(&tex.blocks[release->block], release->offset, release->size);
 		if (release->slot != (uint32_t)-1 && tex.slots_free_count < IMAGE_SLOTS)
+		{
+			slot_unclaim(release->slot);
 			tex.slots_free[tex.slots_free_count++] = release->slot;
+		}
 	}
 	tex.release_count = kept;
 }
@@ -1459,8 +1789,19 @@ static int slot_take(uint32_t *slot)
 has run */
 static void texture_release(struct texture *texture)
 {
+	struct trace_event *event;
+
 	if (!texture->present)
 		return;
+	event = trace_add(TRACE_RELEASE);
+	event->a[0] = texture_owner(texture);
+	event->a[1] = texture->slot;
+	event->a[2] = texture->block;
+	event->a[3] = texture->offset;
+	event->a[4] = texture->size;
+	event->a[5] = tex.release_count;
+	if (texture->slot < IMAGE_SLOTS && tex.slot_owner[texture->slot] == texture_owner(texture))
+		tex.slot_owner[texture->slot] = SLOT_OWNER_RELEASED | (texture_owner(texture) & 0xffffu);
 	if (tex.release_count == RELEASE_LIMIT)
 	{
 		/* too many waiting: the GPU is waited for, which is rare and lets them all go */
@@ -1477,6 +1818,9 @@ static void texture_release(struct texture *texture)
 		release->size = texture->size;
 		release->slot = texture->slot;
 	}
+	else
+		trace_check("an image could not wait for the GPU to finish with it: slot %u and %u bytes of block %u are lost",
+			(unsigned)texture->slot, (unsigned)texture->size, (unsigned)texture->block);
 	texture->present = 0;
 }
 
@@ -1589,6 +1933,7 @@ static int texture_make(struct texture *texture, const struct dk_command_texture
 		texture_problem("no descriptor slot for texture %u", (unsigned)command->id);
 		return 0;
 	}
+	slot_claim(texture->slot, texture_owner(texture));
 	dkImageLayoutMakerDefaults(&maker, dk.device);
 	maker.type = command->kind == DK_TEXTURE_CUBE ? DkImageType_Cubemap : command->kind == DK_TEXTURE_3D ?
 		DkImageType_3D : DkImageType_2D;
@@ -1610,13 +1955,45 @@ static int texture_make(struct texture *texture, const struct dk_command_texture
 		if (!texture_memory_take(size, alignment, &texture->block, &texture->offset))
 		{
 			if (tex.slots_free_count < IMAGE_SLOTS)
+			{
+				slot_unclaim(texture->slot);
 				tex.slots_free[tex.slots_free_count++] = texture->slot;
+			}
 			texture_problem("no image memory for texture %u (%ux%u, %u levels, %u bytes)", (unsigned)command->id,
 				(unsigned)command->width, (unsigned)command->height, (unsigned)command->levels, (unsigned)size);
 			return 0;
 		}
 	}
 	texture->size = size;
+	if (trace.events)
+	{
+		uint32_t index;
+
+		/* (memory a live image has, or one the GPU may still read) */
+		for (index = 0; index < DK_TEXTURE_LIMIT; index++)
+		{
+			const struct texture *other = &tex.table[index];
+
+			if (other != texture && other->present && other->block == texture->block &&
+				texture->offset < other->offset + other->size && other->offset < texture->offset + size)
+				trace_check("texture %u's image memory %08x+%08x of block %u is texture %u's, %08x+%08x",
+					(unsigned)command->id, (unsigned)texture->offset, (unsigned)size, (unsigned)texture->block,
+					(unsigned)index, (unsigned)other->offset, (unsigned)other->size);
+		}
+		for (index = 0; index < tex.release_count; index++)
+		{
+			const struct release *release = &tex.releases[index];
+
+			if (release->size && release->block == texture->block &&
+				texture->offset < release->offset + release->size && release->offset < texture->offset + size)
+				trace_check("texture %u's image memory %08x+%08x of block %u is still waiting for submission %u "
+					"(retired %u)", (unsigned)command->id, (unsigned)texture->offset, (unsigned)size,
+					(unsigned)texture->block, (unsigned)release->serial, (unsigned)host_dk_retired());
+		}
+		if (texture->offset + size > TEXTURE_BLOCK_SIZE)
+			trace_check("texture %u's image runs past its block: %08x+%08x", (unsigned)command->id,
+				(unsigned)texture->offset, (unsigned)size);
+	}
 	dkImageInitialize(&texture->image, &layout, tex.blocks[texture->block].memory, texture->offset);
 	dkImageViewDefaults(&view, &texture->image);
 	dkImageDescriptorInitialize(&descriptors[texture->slot], &view, false, false);
@@ -1782,6 +2159,7 @@ static void texture_write(struct texture *texture, const struct dk_command_textu
 			(unsigned)command->source_bytes);
 		return;
 	}
+	trace.texture_source_gpu = source;
 	/* (a texture written in place waits for the draws that read it) */
 	textures_fence(1);
 	for (face = 0; face < faces; face++)
@@ -1857,9 +2235,21 @@ static void texture_receive(const struct dk_command_texture *command)
 			(unsigned)command->height, (unsigned)command->depth, (unsigned)command->levels);
 		return;
 	}
+	struct trace_event *event;
+
 	if (!dk.ready || !tex.image_descriptors)
 		return;
+	event = trace_add(DK_COMMAND_TEXTURE);
+	trace.texture_source_gpu = 0;
 	texture = &tex.table[command->id];
+	event->a[0] = command->id;
+	event->a[1] = command->kind | command->format << 8 | command->levels << 16;
+	event->a[2] = command->width;
+	event->a[3] = command->height;
+	event->a[4] = command->depth;
+	event->a[5] = command->source;
+	event->a[6] = command->source_bytes;
+	event->a[11] = texture->present;
 	/* the same shape: written in place; else remade */
 	if (texture->present && (texture->kind != command->kind || texture->format != command->format ||
 		texture->width != command->width || texture->height != command->height || texture->depth != command->depth ||
@@ -1871,6 +2261,13 @@ static void texture_receive(const struct dk_command_texture *command)
 	if (command->source_bytes)
 		texture_write(texture, command, NULL);
 	tex.stages_dirty = 1;
+	event->a[7] = texture->slot;
+	event->a[8] = texture->block;
+	event->a[9] = texture->offset;
+	event->a[10] = texture->size;
+	event->g[0] = dkMemBlockGetGpuAddr(tex.blocks[texture->block].memory) + texture->offset;
+	event->g[1] = trace.texture_source_gpu;
+	trace_reached(event);
 }
 
 /* writes some rows of one level of a 2D BGRA image (the text's atlas and
@@ -1884,8 +2281,17 @@ static void texture_rows_receive(const struct dk_command_texture_rows *command)
 	DkImageRect rectangle;
 	DkCopyBuf copy;
 
+	struct trace_event *event;
+
 	if (!dk.ready || !tex.image_descriptors || !command->id || command->id >= DK_TEXTURE_LIMIT)
 		return;
+	event = trace_add(DK_COMMAND_TEXTURE_ROWS);
+	event->a[0] = command->id;
+	event->a[1] = command->level;
+	event->a[2] = command->top;
+	event->a[3] = command->rows;
+	event->a[4] = command->source;
+	event->a[5] = command->source_bytes;
 	texture = &tex.table[command->id];
 	if (!texture->present || texture->kind != DK_TEXTURE_2D || texture->format != DK_TEXTURE_BGRA ||
 		command->level >= texture->levels)
@@ -1929,12 +2335,20 @@ static void texture_rows_receive(const struct dk_command_texture_rows *command)
 	tex.written_unfenced = 1;
 	tex.stages_dirty = 1;
 	dk.recorded = 1;
+	event->a[6] = texture->slot;
+	event->g[0] = source;
+	event->g[1] = dkMemBlockGetGpuAddr(tex.blocks[texture->block].memory) + texture->offset;
+	trace_reached(event);
 }
 
 static void texture_free_receive(const struct dk_command_texture_free *command)
 {
+	struct trace_event *event = trace_add(DK_COMMAND_TEXTURE_FREE);
+
+	event->a[0] = command->id;
 	if (command->id && command->id < DK_TEXTURE_LIMIT && dk.ready)
 	{
+		event->a[1] = tex.table[command->id].present;
 		texture_release(&tex.table[command->id]);
 		tex.stages_dirty = 1;
 	}
@@ -1961,6 +2375,12 @@ static void dummy_make(void)
 	staging buffer, not as the command's guest address) */
 	if (texture_make(&tex.dummy, &command))
 		texture_write(&tex.dummy, &command, black);
+}
+
+/* who a texture's slot is for: its id, or the dummy */
+static uint32_t texture_owner(const struct texture *texture)
+{
+	return texture == &tex.dummy ? SLOT_OWNER_DUMMY : (uint32_t)(texture - tex.table);
 }
 
 /* ---------- samplers */
@@ -2016,10 +2436,19 @@ static void textures_receive(const struct dk_command_textures *command)
 {
 	uint32_t stage;
 
+	struct trace_event *event;
+
 	if (!tex.sampler_descriptors)
 		return;
+	event = trace_add(DK_COMMAND_TEXTURES);
 	for (stage = 0; stage < 4; stage++)
 	{
+		event->a[stage] = command->stages[stage].id;
+		event->a[4 + stage] = command->stages[stage].target;
+		event->a[8 + stage] = command->stages[stage].composite;
+		if (command->stages[stage].id >= DK_TEXTURE_LIMIT)
+			trace_check("stage %u samples image %u, past the %u there are", (unsigned)stage,
+				(unsigned)command->stages[stage].id, (unsigned)DK_TEXTURE_LIMIT);
 		tex.stage_id[stage] = command->stages[stage].id;
 		tex.stage_target[stage] = command->stages[stage].target;
 		tex.stage_composite[stage] = command->stages[stage].composite;
@@ -2073,6 +2502,7 @@ static struct target *target_sampled(uint32_t data)
 
 		if (!slot_take(&best->slot))
 			return NULL;
+		slot_claim(best->slot, SLOT_OWNER_TARGET | (uint32_t)(best - dk.targets));
 		dkImageViewDefaults(&view, &best->image);
 		dkImageDescriptorInitialize(&descriptors[best->slot], &view, false, false);
 		best->has_slot = 1;
@@ -2153,6 +2583,16 @@ static void composite_receive(const struct dk_command_composite *command)
 	memset(composite, 0, sizeof(*composite));
 	if (!slot_take(&composite->slot))
 		return;
+	slot_claim(composite->slot, SLOT_OWNER_COMPOSITE | (uint32_t)composite_count);
+	{
+		struct trace_event *event = trace_add(DK_COMMAND_COMPOSITE);
+
+		event->a[0] = command->data;
+		event->a[1] = command->width;
+		event->a[2] = command->height;
+		event->a[3] = command->levels;
+		event->a[4] = composite->slot;
+	}
 	composite->defined = *command;
 	dkImageInitialize(&composite->image, &layout, block, offset);
 	dkImageViewDefaults(&view, &composite->image);
@@ -2255,6 +2695,15 @@ static struct composite *composite_sampled(uint32_t data, uint32_t levels)
 	composite->copied = 1;
 	composite->rendered_levels = rendered;
 	composite->stamp = dk.target_clock;
+	{
+		struct trace_event *event = trace_add(TRACE_COMPOSITE_COPY);
+
+		event->a[0] = composite->defined.data;
+		event->a[1] = rendered;
+		event->a[2] = levels;
+		event->a[3] = composite->slot;
+		trace_reached(event);
+	}
 	tex.targets_copied = 1;
 	dk.recorded = 1;
 	return composite;
@@ -2288,6 +2737,12 @@ static void visibility_end(const struct dk_command_visibility_end *command)
 	dkCmdBufReportCounter(dk.commands, DkCounter_SamplesPassed,
 		dkMemBlockGetGpuAddr(visibility_memory) + (DkGpuAddr)command->index * 16);
 	dk.recorded = 1;
+	{
+		struct trace_event *event = trace_add(DK_COMMAND_VISIBILITY_END);
+
+		event->a[0] = command->index;
+		trace_reached(event);
+	}
 }
 
 /* the latest count the GPU has written to a slot: from the slot's latest
@@ -2348,8 +2803,17 @@ static int textures_apply(void)
 		}
 		if (!texture->present)
 			return 0;
+		if (trace.events && texture->slot < IMAGE_SLOTS && tex.slot_owner[texture->slot] != texture_owner(texture))
+		{
+			char held[48];
+
+			trace_check("stage %u samples image %u by slot %u, which %s holds", (unsigned)stage, (unsigned)id,
+				(unsigned)texture->slot, slot_owner_name(tex.slot_owner[texture->slot], held, sizeof(held)));
+		}
 		handles[stage] = dkMakeTextureHandle(texture->slot, tex.stage_sampler[stage]);
 	}
+	for (stage = 0; stage < 4; stage++)
+		trace.handles[stage] = handles[stage];
 	dkCmdBufBindTextures(dk.commands, DkStage_Fragment, DK_BINDING_TEXTURE0, handles, 4);
 	tex.stages_dirty = 0;
 	return 1;
@@ -2503,6 +2967,19 @@ static int attribute_format_make(uint32_t format, DkVtxAttribSize *size, DkVtxAt
 
 static void state_receive(const struct dk_command_state *command)
 {
+	struct trace_event *event = trace_add(DK_COMMAND_STATE);
+
+	event->a[0] = (uint32_t)command->state.viewport[0];
+	event->a[1] = (uint32_t)command->state.viewport[1];
+	event->a[2] = (uint32_t)command->state.viewport[2];
+	event->a[3] = (uint32_t)command->state.viewport[3];
+	event->a[4] = (uint32_t)command->state.scissor[0];
+	event->a[5] = (uint32_t)command->state.scissor[1];
+	event->a[6] = (uint32_t)command->state.scissor[2];
+	event->a[7] = (uint32_t)command->state.scissor[3];
+	event->a[8] = command->state.blend | command->state.depth_test << 8 | command->state.depth_write << 9 |
+		command->state.stencil_test << 10 | command->state.cull << 12 | command->state.fill_mode << 16;
+	event->a[9] = command->state.color_mask;
 	dk.state = command->state;
 	dk.state_valid = 1;
 	dk.state_dirty = 1;
@@ -2510,6 +2987,10 @@ static void state_receive(const struct dk_command_state *command)
 
 static void shaders_receive(const struct dk_command_shaders *command)
 {
+	struct trace_event *event = trace_add(DK_COMMAND_SHADERS);
+
+	event->a[0] = command->vertex;
+	event->a[1] = command->pixel;
 	dk.vertex_shader = command->vertex;
 	dk.pixel_shader = command->pixel;
 	dk.shaders_dirty = 1;
@@ -2547,6 +3028,14 @@ static void format_receive(const struct dk_command_vertex_format *command)
 	uint32_t binding_of_stream[DK_STREAM_COUNT];
 	uint32_t stream, index, constants_binding;
 
+	struct trace_event *event = trace_add(DK_COMMAND_VERTEX_FORMAT);
+
+	event->a[0] = command->format.stream_mask;
+	for (stream = 0, index = 0; stream < DK_STREAM_COUNT && index < 8; stream++)
+	{
+		if ((command->format.stream_mask >> stream) & 1)
+			event->a[1 + index++] = command->format.strides[stream];
+	}
 	dk.format = command->format;
 	dk.format_valid = 0;
 	dk.format_dirty = 1;
@@ -2761,26 +3250,47 @@ static void draw(const struct dk_command_draw *command)
 	const unsigned char *inline_data = (const unsigned char *)&command->streams[command->stream_count];
 	uint32_t binding = 0, stream, streams = 0;
 	DkGpuAddr index_gpu = 0;
+	struct trace_event *event = trace_add(DK_COMMAND_DRAW);
 
+	event->a[0] = command->primitive | command->stream_count << 8 |
+		(command->index_address == DK_INDEX_INLINE ? 1u : command->index_address ? 2u : 0u) << 16;
+	event->a[1] = command->count;
+	event->a[2] = (uint32_t)command->vertex_offset;
+	if (command->stream_count)
+	{
+		event->a[3] = command->inline_bytes ? 0 : command->streams[0][0];
+		event->a[4] = command->inline_bytes ? command->inline_bytes : command->streams[0][1];
+	}
+	event->a[6] = dk.vertex_shader;
+	event->a[7] = dk.pixel_shader;
+	event->g[3] = (uint64_t)(dk.color ? dk.color->surface.data : 0) << 32 | (dk.depth ? dk.depth->surface.data : 0);
 	for (stream = 0; stream < DK_STREAM_COUNT; stream++)
 		streams += (dk.format.stream_mask >> stream) & 1;
 	if (!dk.format_valid || !dk.state_valid || (!dk.color && !dk.depth) || streams != command->stream_count)
 	{
+		event->a[0] |= 1u << 24;
 		draw_problem("what it needs is not in place");
 		return;
 	}
 	if (!state_apply())
+	{
+		event->a[0] |= 2u << 24;
 		return;
+	}
 	if (!shaders_apply())
 	{
+		event->a[0] |= 3u << 24;
 		draw_problem("a shader is not loaded");
 		return;
 	}
 	if (!textures_apply())
 	{
+		event->a[0] |= 4u << 24;
 		draw_problem("the textures could not be bound");
 		return;
 	}
+	for (stream = 0; stream < 4; stream++)
+		event->a[8 + stream] = trace.handles[stream];
 	for (binding = 0; binding < streams; binding++)
 	{
 		uint32_t size = command->streams[binding][1];
@@ -2789,11 +3299,20 @@ static void draw(const struct dk_command_draw *command)
 
 		if (!gpu)
 		{
+			event->a[0] |= 5u << 24;
 			draw_problem("a stream could not be read");
 			return;
 		}
 		extents[binding].addr = gpu;
 		extents[binding].size = command->inline_bytes ? command->inline_bytes : size;
+		if (binding < 2)
+			event->g[binding] = gpu;
+		if (!extents[binding].size)
+			trace_check("a draw's stream %u is empty (guest %08x)", (unsigned)binding,
+				(unsigned)command->streams[binding][0]);
+		else if (dk.vertex.buffers[binding].stride && extents[binding].size < dk.vertex.buffers[binding].stride)
+			trace_check("a draw's stream %u has %u bytes, less than a vertex of %u", (unsigned)binding,
+				(unsigned)extents[binding].size, (unsigned)dk.vertex.buffers[binding].stride);
 	}
 	if (dk.vertex.has_constants)
 	{
@@ -2804,6 +3323,7 @@ static void draw(const struct dk_command_draw *command)
 		}
 		if (!dk.constants_gpu)
 		{
+			event->a[0] |= 6u << 24;
 			draw_problem("the constants could not be copied");
 			return;
 		}
@@ -2816,6 +3336,7 @@ static void draw(const struct dk_command_draw *command)
 		index_gpu = upload_copy(inline_data + ((command->inline_bytes + 3) & ~3u), command->count * sizeof(uint16_t));
 		if (!index_gpu)
 		{
+			event->a[0] |= 7u << 24;
 			draw_problem("the indices could not be copied");
 			return;
 		}
@@ -2825,10 +3346,15 @@ static void draw(const struct dk_command_draw *command)
 		index_gpu = range_read((const void *)(uintptr_t)command->index_address, command->count * sizeof(uint16_t));
 		if (!index_gpu)
 		{
+			event->a[0] |= 8u << 24;
 			draw_problem("the indices could not be read");
 			return;
 		}
 	}
+	event->g[2] = index_gpu;
+	event->a[5] = binding;
+	if (!command->count)
+		trace_check("a draw of no vertices (primitive %u)", (unsigned)command->primitive);
 	if (dk.format_dirty)
 	{
 		dkCmdBufBindVtxAttribState(dk.commands, dk.vertex.attributes, DK_ATTRIBUTE_COUNT);
@@ -2848,6 +3374,7 @@ static void draw(const struct dk_command_draw *command)
 	}
 	dk.recorded = 1;
 	tex.draws_unfenced = 1;
+	trace_reached(event);
 }
 
 /* runs size bytes of commands at commands (a guest address): one
@@ -2859,8 +3386,19 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 
 	if (!dk.ready && !initialize())
 		return;
+	trace_dump_if_faulted();
 	dk.serial++;
 	chunks_map();
+	trace_add(TRACE_SUBMIT)->a[0] = size;
+	if (trace.events && !dk.faulted)
+		dkCmdBufReportValue(dk.commands, dk.serial, trace.progress_gpu + 4);
+	if (host_dk_fault_test && dk.frames_presented == 1200 && !dk.faulted)
+	{
+		host_dk_fault_test = 0;
+		host_logf(HOST_LOG_WARN, "deko3d: the GPU is made to fault now (debug.gpu_fault_test)");
+		trace_add(TRACE_SUBMIT)->a[0] = 0xdead;
+		dkCmdBufReportValue(dk.commands, 1, 0x1000);
+	}
 	while (at + sizeof(struct dk_command_header) <= end)
 	{
 		const struct dk_command_header *header = (const struct dk_command_header *)at;
@@ -2931,6 +3469,10 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 		case DK_COMMAND_VISIBILITY_END:
 			visibility_end((const struct dk_command_visibility_end *)header);
 			break;
+		case DK_COMMAND_MARKER:
+			if (header->size >= sizeof(struct dk_command_marker))
+				marker_receive((const struct dk_command_marker *)header);
+			break;
 		default:
 			host_logf(HOST_LOG_ERROR, "deko3d: unknown command %u", (unsigned)header->type);
 			break;
@@ -2943,6 +3485,7 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 	goes on in the same slice of command memory. */
 	if (dk.recorded || dk.serial_fenced != dk.serial)
 		commands_submit();
+	trace_dump_if_faulted();
 }
 
 /* the deko3d device, on the game thread only: the shader cache's code
@@ -2954,4 +3497,301 @@ struct tag_DkDevice *host_dk_device(void)
 	if (!dk.ready && !initialize())
 		return NULL;
 	return dk.device;
+}
+
+/* ---------- the record of a GPU fault (debug.gpu_trace) */
+
+static const char *trace_kind_name(uint32_t kind)
+{
+	switch (kind)
+	{
+	case DK_COMMAND_TARGETS: return "targets";
+	case DK_COMMAND_CLEAR: return "clear";
+	case DK_COMMAND_PRESENT: return "present";
+	case DK_COMMAND_STATE: return "state";
+	case DK_COMMAND_SHADERS: return "shaders";
+	case DK_COMMAND_VERTEX_FORMAT: return "format";
+	case DK_COMMAND_DRAW: return "draw";
+	case DK_COMMAND_TEXTURE: return "texture";
+	case DK_COMMAND_TEXTURE_FREE: return "texture free";
+	case DK_COMMAND_TEXTURES: return "stages";
+	case DK_COMMAND_TEXTURE_ROWS: return "texture rows";
+	case DK_COMMAND_COMPOSITE: return "composite";
+	case DK_COMMAND_VISIBILITY_END: return "visibility";
+	case DK_COMMAND_MARKER: return "pass";
+	case TRACE_SUBMIT: return "SUBMISSION";
+	case TRACE_QUEUE: return "to the queue";
+	case TRACE_ROLLOVER: return "rollover";
+	case TRACE_COMPOSITE_COPY: return "composite copy";
+	case TRACE_RELEASE: return "release";
+	default: return "?";
+	}
+}
+
+/* (the kernel's NvNotificationType) */
+static const char *notification_name(uint32_t type)
+{
+	switch (type)
+	{
+	case 8: return "FIFO idle timeout";
+	case 13: return "graphics software notify";
+	case 24: return "graphics semaphore timeout";
+	case 25: return "graphics illegal notify (a bad method or state)";
+	case 31: return "MMU fault (memory the GPU may not read or write)";
+	case 32: return "PBDMA error (the command stream)";
+	case 43: return "channel reset";
+	case 80: return "push buffer CRC mismatch";
+	default: return "?";
+	}
+}
+
+static void trace_event_describe(const struct trace_event *event, char *text, size_t size)
+{
+	const uint32_t *a = event->a;
+	const char *pass = trace_pass_name(event->pass);
+	int length;
+
+	length = snprintf(text, size, "#%u s%u f%u %c %-13s [%s] ", (unsigned)event->number, (unsigned)event->serial,
+		(unsigned)event->frame, event->reported ? 'r' : ' ', trace_kind_name(event->kind), pass);
+	if (length < 0 || (size_t)length >= size)
+		return;
+	text += length;
+	size -= (size_t)length;
+	switch (event->kind)
+	{
+	case DK_COMMAND_TARGETS:
+		snprintf(text, size, "color %08x %ux%u (game %ux%u) #%u gpu %010llx, depth %08x %ux%u #%u gpu %010llx, kinds %x",
+			(unsigned)a[0], (unsigned)(a[1] & 0xffff), (unsigned)(a[1] >> 16), (unsigned)(a[7] & 0xffff),
+			(unsigned)(a[7] >> 16), (unsigned)a[5], (unsigned long long)event->g[0], (unsigned)a[3],
+			(unsigned)(a[4] & 0xffff), (unsigned)(a[4] >> 16), (unsigned)a[6], (unsigned long long)event->g[1],
+			(unsigned)a[2]);
+		break;
+	case DK_COMMAND_CLEAR:
+		snprintf(text, size, "flags %02x, %u rectangles, the first %u,%u %ux%u, target %ux%u", (unsigned)a[0],
+			(unsigned)a[1], (unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)a[5], (unsigned)(a[6] & 0xffff),
+			(unsigned)(a[6] >> 16));
+		break;
+	case DK_COMMAND_PRESENT:
+		snprintf(text, size, "back buffer %08x %ux%u gpu %010llx, screenshot %08x", (unsigned)a[0],
+			(unsigned)(a[1] & 0xffff), (unsigned)(a[1] >> 16), (unsigned long long)event->g[0], (unsigned)a[2]);
+		break;
+	case DK_COMMAND_STATE:
+		snprintf(text, size, "viewport %d,%d %dx%d, scissor %d,%d %dx%d, flags %x, color mask %x", (int)a[0], (int)a[1],
+			(int)a[2], (int)a[3], (int)a[4], (int)a[5], (int)a[6], (int)a[7], (unsigned)a[8], (unsigned)a[9]);
+		break;
+	case DK_COMMAND_SHADERS:
+		snprintf(text, size, "vertex %u, pixel %u", (unsigned)a[0], (unsigned)a[1]);
+		break;
+	case DK_COMMAND_VERTEX_FORMAT:
+		snprintf(text, size, "streams %04x, strides %u %u %u %u %u %u", (unsigned)a[0], (unsigned)a[1], (unsigned)a[2],
+			(unsigned)a[3], (unsigned)a[4], (unsigned)a[5], (unsigned)a[6]);
+		break;
+	case DK_COMMAND_DRAW:
+		snprintf(text, size, "%s primitive %u, %u %s, offset %d, %u streams (first %08x %u bytes gpu %010llx, second gpu "
+			"%010llx), indices %s gpu %010llx, shaders %u/%u, textures %08x %08x %08x %08x, into %08x/%08x",
+			(a[0] >> 24) ? "SKIPPED" : "", (unsigned)(a[0] & 0xff), (unsigned)a[1],
+			((a[0] >> 16) & 0xff) ? "indices" : "vertices", (int)a[2], (unsigned)((a[0] >> 8) & 0xff), (unsigned)a[3],
+			(unsigned)a[4], (unsigned long long)event->g[0], (unsigned long long)event->g[1],
+			((a[0] >> 16) & 0xff) == 1 ? "inline" : ((a[0] >> 16) & 0xff) == 2 ? "at an address" : "none",
+			(unsigned long long)event->g[2], (unsigned)a[6], (unsigned)a[7], (unsigned)a[8], (unsigned)a[9],
+			(unsigned)a[10], (unsigned)a[11], (unsigned)(event->g[3] >> 32), (unsigned)(event->g[3] & 0xffffffffu));
+		break;
+	case DK_COMMAND_TEXTURE:
+		snprintf(text, size, "image %u kind %u format %u %ux%ux%u %u levels, from %08x (%u bytes, gpu %010llx), slot %u, "
+			"block %u %08x+%08x gpu %010llx%s", (unsigned)a[0], (unsigned)(a[1] & 0xff), (unsigned)((a[1] >> 8) & 0xff),
+			(unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)(a[1] >> 16), (unsigned)a[5], (unsigned)a[6],
+			(unsigned long long)event->g[1], (unsigned)a[7], (unsigned)a[8], (unsigned)a[9], (unsigned)a[10],
+			(unsigned long long)event->g[0], a[11] ? ", was there" : ", new");
+		break;
+	case DK_COMMAND_TEXTURE_ROWS:
+		snprintf(text, size, "image %u level %u rows %u+%u from %08x (%u bytes, gpu %010llx), slot %u, image gpu %010llx",
+			(unsigned)a[0], (unsigned)a[1], (unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)a[5],
+			(unsigned long long)event->g[0], (unsigned)a[6], (unsigned long long)event->g[1]);
+		break;
+	case DK_COMMAND_TEXTURE_FREE:
+		snprintf(text, size, "image %u%s", (unsigned)a[0], a[1] ? "" : " (not there)");
+		break;
+	case DK_COMMAND_TEXTURES:
+		snprintf(text, size, "images %u %u %u %u, targets %08x %08x %08x %08x, composites %u %u %u %u", (unsigned)a[0],
+			(unsigned)a[1], (unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)a[5], (unsigned)a[6], (unsigned)a[7],
+			(unsigned)a[8], (unsigned)a[9], (unsigned)a[10], (unsigned)a[11]);
+		break;
+	case DK_COMMAND_COMPOSITE:
+		snprintf(text, size, "%08x %ux%u %u levels, slot %u", (unsigned)a[0], (unsigned)a[1], (unsigned)a[2],
+			(unsigned)a[3], (unsigned)a[4]);
+		break;
+	case TRACE_COMPOSITE_COPY:
+		snprintf(text, size, "%08x, %u of %u levels drawn, slot %u", (unsigned)a[0], (unsigned)a[1], (unsigned)a[2],
+			(unsigned)a[3]);
+		break;
+	case DK_COMMAND_VISIBILITY_END:
+		snprintf(text, size, "slot %u", (unsigned)a[0]);
+		break;
+	case DK_COMMAND_MARKER:
+		snprintf(text, size, "%s", trace_pass_name(a[0]));
+		break;
+	case TRACE_SUBMIT:
+		snprintf(text, size, "%u bytes of commands", (unsigned)a[0]);
+		break;
+	case TRACE_QUEUE:
+		snprintf(text, size, "fenced as %u%s, %u KB of command memory, %u bytes uploaded", (unsigned)a[0],
+			a[3] ? " (part of a stream)" : "", (unsigned)(a[1] / 1024), (unsigned)a[2]);
+		break;
+	case TRACE_ROLLOVER:
+		snprintf(text, size, "%u KB of command memory", (unsigned)(a[0] / 1024));
+		break;
+	case TRACE_RELEASE:
+		snprintf(text, size, "image %u slot %u block %u %08x+%08x (%u waiting)", (unsigned)a[0], (unsigned)a[1],
+			(unsigned)a[2], (unsigned)a[3], (unsigned)a[4], (unsigned)a[5]);
+		break;
+	default:
+		text[0] = 0;
+		break;
+	}
+}
+
+/* what the host holds: a line every ten seconds, and in a fault's record */
+static void trace_held(void)
+{
+	uint32_t index, present = 0, free_ranges = 0, image_bytes = 0;
+
+	for (index = 0; index < DK_TEXTURE_LIMIT; index++)
+		present += tex.table[index].present ? 1 : 0;
+	for (index = 0; index < tex.block_count; index++)
+		free_ranges += tex.blocks[index].free_count;
+	for (index = 0; index < (uint32_t)dk.image_block_count; index++)
+		image_bytes += dk.image_blocks[index].used;
+	host_logf(HOST_LOG_INFO, "deko3d: held: %u images, slots %u made %u free, %u releases waiting, %u texture blocks "
+		"(%u free ranges), %u targets and composites in %u KB, %u composites, %u samplers; commands %u, checks %u",
+		(unsigned)present, (unsigned)tex.slot_next, (unsigned)tex.slots_free_count, (unsigned)tex.release_count,
+		(unsigned)tex.block_count, (unsigned)free_ranges, (unsigned)dk.target_count, (unsigned)(image_bytes / 1024),
+		(unsigned)composite_count, (unsigned)tex.sampler_count, (unsigned)trace.next, (unsigned)trace.checks);
+}
+
+static void trace_dump_events(uint32_t first, uint32_t end, uint32_t finished)
+{
+	char line[640];
+	uint32_t number;
+	int said_boundary = 0;
+
+	for (number = first; number < end; number++)
+	{
+		const struct trace_event *event = &trace.events[number % TRACE_EVENTS];
+
+		if (event->number != number)
+			continue;
+		if (!said_boundary && finished && number > finished)
+		{
+			host_logf(HOST_LOG_WARN, "deko3d fault: ---- the GPU finished the commands above; it faulted in one of "
+				"those below, most likely the first marked r ----");
+			said_boundary = 1;
+		}
+		trace_event_describe(event, line, sizeof(line));
+		host_logf(HOST_LOG_WARN, "deko3d fault: %s", line);
+	}
+}
+
+static void trace_dump(void)
+{
+	NvGpuChannel *channel;
+	NvNotification notification;
+	NvError error;
+	Result result;
+	uint32_t finished, begun, oldest, first, index;
+	char words[400];
+	int length = 0;
+
+	host_logf(HOST_LOG_ERROR, "deko3d fault: the record of the GPU fault follows (debug.gpu_trace)");
+	/* the queue's GPU channel: deko3d's Queue keeps it 0x18 bytes in (its
+	checkError asks the channel the same two questions); this deko3d's
+	layout, read from its dkQueueIsInErrorState and Queue::checkError */
+	channel = (NvGpuChannel *)((char *)dk.queue + 0x18);
+	memset(&notification, 0, sizeof(notification));
+	result = nvGpuChannelGetErrorNotification(channel, &notification);
+	host_logf(HOST_LOG_WARN, "deko3d fault: the kernel's notification (result %08x): type %u, %s; info16 %u, status %u, "
+		"timestamp %llu", (unsigned)result, (unsigned)notification.info32, notification_name(notification.info32),
+		(unsigned)notification.info16, (unsigned)notification.status, (unsigned long long)notification.timestamp);
+	memset(&error, 0, sizeof(error));
+	result = nvGpuChannelGetErrorInfo(channel, &error);
+	for (index = 0; index < 31 && length < (int)sizeof(words) - 12; index++)
+		length += snprintf(words + length, sizeof(words) - (size_t)length, " %08x", (unsigned)error.info[index]);
+	host_logf(HOST_LOG_WARN, "deko3d fault: the kernel's error info (result %08x): type %u, %s; words%s", (unsigned)result,
+		(unsigned)error.type, notification_name(error.type), words);
+
+	finished = trace.progress ? trace.progress[0] : 0;
+	begun = trace.progress ? trace.progress[1] : 0;
+	host_logf(HOST_LOG_WARN, "deko3d fault: submission %u being recorded, %u fenced, %u retired; the GPU began "
+		"submission %u and finished command #%u; %u commands recorded; frame %lu", (unsigned)dk.serial,
+		(unsigned)dk.serial_fenced, (unsigned)dk.serial_retired, (unsigned)begun, (unsigned)finished,
+		(unsigned)(trace.next - 1), dk.frames_presented);
+	for (index = 0; index < FRAMES; index++)
+		host_logf(HOST_LOG_WARN, "deko3d fault: fence %u: %s, submission %u, %s", (unsigned)index,
+			dk.fence_pending[index] ? "waited for" : "not waited for", (unsigned)dk.fence_serial[index],
+			dkFenceWait(&dk.fences[index], 0) == DkResult_Success ? "passed" : "not passed");
+
+	trace_held();
+	host_logf(HOST_LOG_WARN, "deko3d fault: upload %u bytes, staging %u bytes, command memory %u KB, %d window chunks, "
+		"%d image blocks, %u texture blocks", (unsigned)dk.upload_used, (unsigned)tex.staging_used,
+		(unsigned)(command_memory_used() / 1024), dk.window_chunk_count, dk.image_block_count, (unsigned)tex.block_count);
+	for (index = 0; index < (uint32_t)dk.window_chunk_count; index++)
+		host_logf(HOST_LOG_WARN, "deko3d fault: window chunk %u at %08llx, gpu %010llx", (unsigned)index,
+			(unsigned long long)dk.window_chunks[index].address, (unsigned long long)dk.window_chunks[index].gpu);
+	for (index = 0; index < tex.block_count; index++)
+	{
+		uint32_t range, free_bytes = 0, largest = 0;
+
+		for (range = 0; range < tex.blocks[index].free_count; range++)
+		{
+			free_bytes += tex.blocks[index].free[range].size;
+			if (tex.blocks[index].free[range].size > largest)
+				largest = tex.blocks[index].free[range].size;
+		}
+		host_logf(HOST_LOG_WARN, "deko3d fault: texture block %u gpu %010llx: %u ranges free, %u KB, the largest %u KB",
+			(unsigned)index, (unsigned long long)dkMemBlockGetGpuAddr(tex.blocks[index].memory),
+			(unsigned)tex.blocks[index].free_count, (unsigned)(free_bytes / 1024), (unsigned)(largest / 1024));
+	}
+	for (index = 0; index < (uint32_t)dk.target_count; index++)
+	{
+		const struct target *target = &dk.targets[index];
+
+		host_logf(HOST_LOG_WARN, "deko3d fault: target #%u %s %08x game %ux%u pixels %ux%u gpu %010llx+%u, slot %d, "
+			"bound at %u%s", (unsigned)index + 1, target->surface.kind == DK_SURFACE_DEPTH ? "depth" : "color",
+			(unsigned)target->surface.data, (unsigned)target->surface.width, (unsigned)target->surface.height,
+			(unsigned)SURFACE_PIXEL_WIDTH(&target->surface), (unsigned)SURFACE_PIXEL_HEIGHT(&target->surface),
+			(unsigned long long)target->gpu, (unsigned)target->bytes, target->has_slot ? (int)target->slot : -1,
+			(unsigned)target->bound, target == dk.color || target == dk.depth ? ", bound now" : "");
+	}
+	for (index = 0; index < (uint32_t)composite_count; index++)
+		host_logf(HOST_LOG_WARN, "deko3d fault: composite %u %08x %ux%u %u levels, slot %u", (unsigned)index,
+			(unsigned)composites[index].defined.data, (unsigned)composites[index].defined.width,
+			(unsigned)composites[index].defined.height, (unsigned)composites[index].defined.levels,
+			(unsigned)composites[index].slot);
+
+	if (!trace.events)
+	{
+		host_logf(HOST_LOG_ERROR, "deko3d fault: no commands were kept");
+		return;
+	}
+	oldest = trace.next > TRACE_EVENTS ? trace.next - TRACE_EVENTS + 1 : 1;
+	if (finished >= oldest && finished < trace.next)
+		first = finished > oldest + TRACE_DUMP_BEFORE ? finished - TRACE_DUMP_BEFORE : oldest;
+	else
+	{
+		host_logf(HOST_LOG_WARN, "deko3d fault: the command the GPU finished last (#%u) is not kept; the last ones "
+			"recorded follow", (unsigned)finished);
+		first = trace.next > oldest + TRACE_DUMP_LIMIT ? trace.next - TRACE_DUMP_LIMIT : oldest;
+		finished = 0;
+	}
+	host_logf(HOST_LOG_WARN, "deko3d fault: the commands (#number, submission, frame, r: the GPU reports getting past it, "
+		"kind, [part of the frame]):");
+	if (trace.next - first <= TRACE_DUMP_LIMIT + TRACE_DUMP_TAIL)
+		trace_dump_events(first, trace.next, finished);
+	else
+	{
+		trace_dump_events(first, first + TRACE_DUMP_LIMIT, finished);
+		host_logf(HOST_LOG_WARN, "deko3d fault: ... %u commands left out ...",
+			(unsigned)(trace.next - TRACE_DUMP_TAIL - first - TRACE_DUMP_LIMIT));
+		trace_dump_events(trace.next - TRACE_DUMP_TAIL, trace.next, 0);
+	}
+	host_logf(HOST_LOG_ERROR, "deko3d fault: the record ends");
 }

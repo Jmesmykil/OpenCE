@@ -245,6 +245,7 @@ void render_frame_pregame(
 	render.frame_index++;
 
 	rasterizer_frame_begin(&parameters);
+	halo_render_marker("frame");
 	rasterizer_windows_begin();
 	profile_render_window_start(FALSE);
 
@@ -274,6 +275,7 @@ void render_frame_pregame(
 
 	rasterizer_window_end();
 	profile_render_window_end();
+	halo_render_marker("frame end");
 	rasterizer_windows_end();
 	rasterizer_frame_end();
 
@@ -332,20 +334,28 @@ static void render_window(
 	structure_visibility_compute();
 	player_effect_get_screen_flash(local_player_index, &parameters.screen_flash);
 	rasterizer_window_begin(&parameters);
+	halo_render_marker("window");
 
 	if (!bink_playback_in_progress())
 	{
 		build_sprite_prepare_for_window();
+		halo_render_marker("sky");
 		render_sky();
 		first_person_weapon_render_update();
 		lights_preprocess_scene();
+		halo_render_marker("objects");
 		render_objects();
 		structure_render_preprocess();
+		halo_render_marker("lightmaps");
 		structure_render_lightmaps();
+		halo_render_marker("lens flare tests");
 		rasterizer_lens_flares_submit_occlusion_tests();
+		halo_render_marker("object shadows");
 		render_object_shadows();
+		halo_render_marker("diffuse lights");
 		lights_render_diffuse();
 
+		halo_render_marker("decals light");
 		rasterizer_decals_begin(_decal_layer_light);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -355,6 +365,7 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		halo_render_marker("decals alpha tested");
 		rasterizer_decals_begin(_decal_layer_alpha_tested);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -364,8 +375,10 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		halo_render_marker("diffuse texture");
 		structure_render_diffuse_texture();
 
+		halo_render_marker("decals primary");
 		rasterizer_decals_begin(_decal_layer_primary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -375,6 +388,7 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		halo_render_marker("decals secondary");
 		rasterizer_decals_begin(_decal_layer_secondary);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -384,20 +398,34 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		halo_render_marker("specular lights");
 		lights_render_specular();
+		halo_render_marker("specular lightmaps");
 		structure_render_specular_lightmaps();
+		halo_render_marker("reflection masks");
 		structure_render_reflection_lightmap_masks();
+		halo_render_marker("mirrors");
 		structure_render_reflection_mirrors();
+		halo_render_marker("reflections");
 		structure_render_reflections();
+		halo_render_marker("transparent structure");
 		structure_render_transparent_geometry();
+		halo_render_marker("planar fog");
 		structure_render_fog();
+		halo_render_marker("game engine objects");
 		game_engine_post_rasterize_objects();
+		halo_render_marker("weather");
 		weather_particle_systems_render();
+		halo_render_marker("particles");
 		render_particles();
+		halo_render_marker("particle systems");
 		particle_systems_render();
+		halo_render_marker("contrails");
 		render_contrails_normal();
+		halo_render_marker("transparent");
 		rasterizer_transparent_geometry_draw(TRUE);
 
+		halo_render_marker("decals water");
 		rasterizer_decals_begin(_decal_layer_water);
 		for (rendered_cluster_index = 0;
 			rendered_cluster_index < render.rendered_cluster_count;
@@ -407,10 +435,14 @@ static void render_window(
 		}
 		rasterizer_decals_end();
 
+		halo_render_marker("detail objects");
 		structure_render_detail_objects();
+		halo_render_marker("transparent late");
 		rasterizer_transparent_geometry_draw(FALSE);
 		rasterizer_transparent_geometry_stop();
+		halo_render_marker("fog screen");
 		structure_render_fog_screen();
+		halo_render_marker("lens flares");
 		rasterizer_lens_flares_draw();
 		/* port: the 3D view antialiased (display.anti_aliasing), before the
 		HUD and menus are drawn over it */
@@ -422,13 +454,17 @@ static void render_window(
 				rasterizer_camera->viewport_bounds.x1,
 				rasterizer_camera->viewport_bounds.y1);
 		}
+		halo_render_marker("hud");
 		interface_draw_screen();
+		halo_render_marker("screen flash");
 		rasterizer_screen_flash();
 		halo_screen_ui_offset(TRUE);
+		halo_render_marker("ui widgets");
 		render_ui_widgets(local_player_index, &rasterizer_camera->viewport_bounds);
 		halo_screen_ui_offset(FALSE);
 	}
 
+	halo_render_marker("debug and end");
 	bink_playback_render();
 	render_camera_debug_frustum(&render.camera, &render.frustum);
 	render_debug();
@@ -610,6 +646,7 @@ void render_frame(
 	/* continuous between ticks (render_interpolation.c) */
 	parameters.game_time_sec = render_interpolation_game_time_sec(game_time_get());
 	rasterizer_frame_begin(&parameters);
+	halo_render_marker("frame");
 	rasterizer_windows_begin();
 
 	for (window_index = 0; window_index < window_count; window_index++)
@@ -651,6 +688,7 @@ void render_frame(
 	/* port: the pause screen and the settings it opens are the full frame;
 	a pane would show half of them */
 	render_ui_widgets_over_split_screen();
+	halo_render_marker("frame end");
 	rasterizer_windows_end();
 	rasterizer_frame_end();
 

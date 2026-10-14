@@ -41,6 +41,7 @@ enum
 	DK_COMMAND_COMPOSITE,
 	DK_COMMAND_VISIBILITY_BEGIN,
 	DK_COMMAND_VISIBILITY_END,
+	DK_COMMAND_MARKER,
 };
 
 /* a surface's kind, as the host makes its image */
@@ -388,6 +389,17 @@ struct dk_command_visibility_end
 {
 	struct dk_command_header header;
 	uint32_t index;
+};
+
+/* the part of the frame the game is drawing (render.c's steps: the sky,
+the objects' shadows, the fog...), for the host's record of the commands
+it ran (host_dk.c, debug.gpu_trace); it draws nothing */
+#define DK_MARKER_NAME_SIZE 24
+
+struct dk_command_marker
+{
+	struct dk_command_header header;
+	char name[DK_MARKER_NAME_SIZE];
 };
 
 /* the four texture stages' images and samplers, for the draws that follow */

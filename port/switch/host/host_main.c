@@ -737,20 +737,28 @@ static unsigned config_profile_hz(const char *path)
 }
 
 /* a boolean of config.toml's, or 0 */
-static int config_flag(const char *path, const char *name)
+/* a true or false setting of config.toml; otherwise (not there, or not
+true or false) the default */
+static int config_flag_or(const char *path, const char *name, int otherwise)
 {
 	toml_result_t result = toml_parse_file_ex(path);
-	int value = 0;
+	int value = otherwise;
 
 	if (!result.ok)
-		return 0;
+		return otherwise;
 	{
 		toml_datum_t datum = toml_seek(result.toptab, name);
 
-		value = datum.type == TOML_BOOLEAN && datum.u.boolean;
+		if (datum.type == TOML_BOOLEAN)
+			value = datum.u.boolean != 0;
 	}
 	toml_free(result);
 	return value;
+}
+
+static int config_flag(const char *path, const char *name)
+{
+	return config_flag_or(path, name, 0);
 }
 
 /* debug.sample_seconds from config.toml, as text for the sampler, or 0 */
@@ -1012,6 +1020,9 @@ static void *game_main(void *unused)
 		if (host_dk_verify_compressed)
 			host_logf(HOST_LOG_WARN, "deko3d: compressed textures are read back and checked "
 				"(debug.texture_verify_compressed)");
+		host_dk_trace = config_flag_or(path, "debug.gpu_trace", 1);
+		host_logf(HOST_LOG_INFO, "deko3d: the GPU trace is %s (debug.gpu_trace)", host_dk_trace ? "on" : "off");
+		host_dk_fault_test = config_flag(path, "debug.gpu_fault_test");
 	}
 	log_marker("marker: building the guest's boot structure");
 	boot = make_boot(&environment);

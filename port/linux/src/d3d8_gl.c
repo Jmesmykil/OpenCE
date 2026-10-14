@@ -5643,6 +5643,13 @@ void WINAPI D3DDevice_Clear(DWORD count, CONST D3DRECT *rectangles, DWORD flags,
 	clear_state_forget();
 }
 
+/* the part of a frame being drawn: only the Switch's renderer keeps it
+(port/switch/guest/d3d8_dk.c) */
+void halo_render_marker(char const *name)
+{
+	(void)name;
+}
+
 /* ---------- the anti-aliasing passes */
 
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and

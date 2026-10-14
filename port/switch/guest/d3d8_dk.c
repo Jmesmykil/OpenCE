@@ -175,6 +175,24 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1)
 	(void)x0; (void)y0; (void)x1; (void)y1;
 }
 
+static void *stream_command(uint32_t type, unsigned long size);
+
+/* the part of a frame the game is about to draw, for the host's record of
+the commands it ran (DK_COMMAND_MARKER) */
+void halo_render_marker(char const *name)
+{
+	struct dk_command_marker *command = stream_command(DK_COMMAND_MARKER, sizeof(*command));
+	size_t length = 0;
+
+	while (name[length] && length < sizeof(command->name) - 1)
+	{
+		command->name[length] = name[length];
+		length++;
+	}
+	while (length < sizeof(command->name))
+		command->name[length++] = 0;
+}
+
 /* ---------- state the XDK header's inline functions read and write */
 
 DWORD D3D__RenderState[D3DRS_MAX];
