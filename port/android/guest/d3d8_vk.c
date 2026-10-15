@@ -789,6 +789,17 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	(void)high;
 }
 
+/* (only the Switch's renderer draws the zoom's blur small: d3d8_dk.c) */
+unsigned char halo_screen_fast_warp(void)
+{
+	return 0;
+}
+
+void halo_screen_warp_blend(unsigned char on)
+{
+	(void)on;
+}
+
 /* display.anti_aliasing's FXAA over a window's 3D view (render.c calls this before the HUD and menus are drawn over it):
 the rectangle in the game's units, of the back buffer, which the host passes over in place (host_vk_post.c) */
 void halo_screen_anti_alias(short x0, short y0, short x1, short y1)

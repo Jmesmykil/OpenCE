@@ -5658,6 +5658,17 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	(void)high;
 }
 
+/* (only the Switch's renderer draws the zoom's blur small: d3d8_dk.c) */
+unsigned char halo_screen_fast_warp(void)
+{
+	return 0;
+}
+
+void halo_screen_warp_blend(unsigned char on)
+{
+	(void)on;
+}
+
 /* ---------- the anti-aliasing passes */
 
 /* display.anti_aliasing's pass over a window's 3D view, before the HUD and

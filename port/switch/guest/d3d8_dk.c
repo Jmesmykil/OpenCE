@@ -225,6 +225,32 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	texture_clip[2] = clip ? 1.0f : 0.0f;
 }
 
+/* the zoom's blend of its blur over the screen, for the draws that follow
+(rasterizer_xbox_screen_effect.c): the pixel key has NV2A_PIXEL_KEY_WARP_BLEND
+while it is on */
+static unsigned char warp_blend;
+
+/* the zoom's blur drawn on a small copy of the screen and blended over it
+once (rasterizer_xbox_screen_effect.c), instead of its passes over the whole
+screen; debug.original_zoom draws it as the game does */
+unsigned char halo_screen_fast_warp(void)
+{
+	static int on = -1;
+
+	if (on < 0)
+	{
+		on = !config_boolean("debug.original_zoom");
+		if (!on)
+			platform_log("zoom: as the game draws it (debug.original_zoom)");
+	}
+	return (unsigned char)on;
+}
+
+void halo_screen_warp_blend(unsigned char on)
+{
+	warp_blend = on;
+}
+
 /* the part of a frame the game is about to draw, for the host's record of
 the commands it ran (DK_COMMAND_MARKER) */
 void halo_render_marker(char const *name)
@@ -2189,6 +2215,8 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 	key->texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
 	if (texture_clip[2] != 0.0f)
 		key->texture_modes |= NV2A_PIXEL_KEY_CLIP;
+	if (warp_blend)
+		key->texture_modes |= NV2A_PIXEL_KEY_WARP_BLEND;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		D3DBaseTexture *texture = device.textures[stage];
