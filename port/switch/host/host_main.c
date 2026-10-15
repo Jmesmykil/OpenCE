@@ -1037,7 +1037,7 @@ static void *game_main(void *unused)
 		if (host_dk_verify_compressed)
 			host_logf(HOST_LOG_WARN, "deko3d: compressed textures are read back and checked "
 				"(debug.texture_verify_compressed)");
-		host_dk_trace = config_flag_or(path, "debug.gpu_trace", 1);
+		host_dk_trace = config_flag(path, "debug.gpu_trace");
 		host_logf(HOST_LOG_INFO, "deko3d: the GPU trace is %s (debug.gpu_trace)", host_dk_trace ? "on" : "off");
 		host_dk_fault_test = config_flag(path, "debug.gpu_fault_test");
 		host_dk_profile = config_flag(path, "debug.gpu_profile");

@@ -701,7 +701,7 @@ static const struct config_setting config_settings[] =
 		"Read each DXT-compressed texture back out of its image after it is written,\n"
 		"and log where it differs from the game's bytes (port/switch/host/host_dk.c).\n"
 		"Slow: it waits for the GPU each time. Takes effect the next start." },
-	{ "debug.gpu_trace", _config_boolean, "true", "HALO_GPU_TRACE_FAULTS", _environment_value, _platform_android,
+	{ "debug.gpu_trace", _config_boolean, "false", "HALO_GPU_TRACE_FAULTS", _environment_set_is_true, _platform_android,
 		"Keep a record of the GPU's last commands, and after a GPU fault write it and\n"
 		"the console's account of the fault to halo.log (port/switch/host/host_dk.c).\n"
 		"It costs the GPU some time. Takes effect the next start." },

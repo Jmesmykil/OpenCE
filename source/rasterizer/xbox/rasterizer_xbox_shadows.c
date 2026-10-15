@@ -833,21 +833,6 @@ void _rasterizer_environment_shadow_draw(
 				-81,
 				vertex_constants,
 				5);
-			/* port: the first few shadows' texture planes, for the texture
-			clip below (debug.gpu_texture_clip) */
-			{
-				static int said;
-
-				if (said < 3)
-				{
-					said++;
-					error(_error_silent, "shadow: radius %f at %f %f %f; u = p . (%f %f %f) + %f, v = p . (%f %f %f) + %f",
-						local_object_bounding_radius, local_shadow_matrix.position.x, local_shadow_matrix.position.y,
-						local_shadow_matrix.position.z, vertex_constants[0][0], vertex_constants[0][1],
-						vertex_constants[0][2], vertex_constants[0][3], vertex_constants[1][0], vertex_constants[1][1],
-						vertex_constants[1][2], vertex_constants[1][3]);
-				}
-			}
 
 			if (!shadow_restored)
 			{

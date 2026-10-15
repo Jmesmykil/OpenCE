@@ -181,7 +181,7 @@ extern int host_renderer_deko3d;
 /* debug.texture_verify_compressed: each compressed texture read back out
 of its image and compared with the game's bytes, and the differences logged */
 extern int host_dk_verify_compressed;
-/* debug.gpu_trace (on unless set false): the deko3d host keeps a record of
+/* debug.gpu_trace: the deko3d host keeps a record of
 the commands it ran and where the GPU got to, and after a GPU fault writes
 them and the kernel's account of the fault to the log (host_dk.c) */
 extern int host_dk_trace;

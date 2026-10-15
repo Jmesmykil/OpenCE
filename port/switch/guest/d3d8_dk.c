@@ -179,15 +179,17 @@ static void *stream_command(uint32_t type, unsigned long size);
 
 /* texture coordinate 0's clip, for the draws that follow: the lowest and
 highest u and v as the texture is sampled (0 to 1 across it), and whether
-to clip; the vertex parameters' texture_clip has them in the coordinates'
-own units */
+to clip (the pixel parameters' alpha_reference.y to .w) */
 static float texture_clip[3];
 
-/* The draws that follow drawn only where texture coordinate 0's u and v are
-in [low, high] (the vertex shaders' clip distances, nv2a_vsh_dk.c), or
-everywhere: an object's shadow cast on the level (rasterizer_xbox_shadows.c)
-changes nothing outside its map, and was shaded over the whole of every
-triangle it falls on - most of a crowd's GPU time */
+/* The draws that follow shaded only where texture coordinate 0's u and v are
+in [low, high], or everywhere: an object's shadow cast on the level
+(rasterizer_xbox_shadows.c) changes nothing outside its map, and was shaded
+over the whole of every triangle it falls on - most of a crowd's GPU time.
+The pixel key has NV2A_PIXEL_KEY_CLIP while it is on, and that shader lets
+the pixels outside go before it reads a texture (nv2a_psh_dk.c). (The vertex
+shaders' clip distances were tried first: the clipper did not clip by the
+values they were given.) */
 void halo_texture_clip(unsigned char clip, float low, float high)
 {
 	/* debug.gpu_texture_clip: "on", "off" (never clipped), "wide" (clipped

@@ -292,7 +292,7 @@ it is run, and anything wrong said at once (trace_check). The game says
 which part of the frame it is drawing (DK_COMMAND_MARKER), and each record
 has it. */
 
-int host_dk_trace = 1;
+int host_dk_trace;
 /* debug.gpu_fault_test: the GPU made to fault on purpose, a write to memory
 it does not have, at the 1200th frame presented: the record checked */
 int host_dk_fault_test;
