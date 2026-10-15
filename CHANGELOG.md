@@ -1,5 +1,25 @@
 # Changelog
 
+## Build 98
+
+- Switch: crowded games no longer freeze the picture with a GPU fault.
+  deko3d wrote a few words past the end of a piece of command memory, and
+  the next command overwrote them before the GPU read them. (thelinkin3000)
+- Switch: the level is drawn about a quarter faster: the pixel shaders
+  leave out the clamps their values cannot need, with the same picture.
+  (thelinkin3000)
+- Switch: shadows cast on the level cost about half as much on the GPU,
+  each one shaded only over its own map. (thelinkin3000)
+- Switch: drawing into a render target waits for the GPU only when that
+  target was sampled, not after every shadow. (thelinkin3000)
+- Switch: the shader cache drops the shaders of earlier versions, which
+  could fill it and leave the game drawing nothing. (thelinkin3000)
+- Switch: GPU diagnostics for bug reports, all off unless set in
+  config.toml's [debug]: gpu_trace (the last commands before a GPU fault),
+  gpu_profile and gpu_capture (where the GPU's time goes). (thelinkin3000)
+
+Network version 29
+
 ## Build 97
 
 - Custom Edition maps keep their own names; a game names its map's
