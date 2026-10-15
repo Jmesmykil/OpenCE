@@ -454,7 +454,7 @@ static void render_window(
 				rasterizer_camera->viewport_bounds.x1,
 				rasterizer_camera->viewport_bounds.y1);
 		}
-		halo_render_marker("hud");
+		halo_render_marker("screen effect");
 		interface_draw_screen();
 		halo_render_marker("screen flash");
 		rasterizer_screen_flash();

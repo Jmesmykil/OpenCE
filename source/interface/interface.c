@@ -717,6 +717,9 @@ void interface_draw_screen(
 		rasterizer_screen_effect(NULL);
 	}
 
+	/* port: the screen effect (the zoom's convolution) is the step before;
+	the profile tells the two apart (halo_render_marker) */
+	halo_render_marker("hud");
 	hud_draw_screen();
 	game_engine_post_rasterize();
 
