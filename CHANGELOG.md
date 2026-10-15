@@ -1,6 +1,6 @@
 # Changelog
 
-## Build 98
+## Build 99
 
 - Switch: crowded games no longer freeze the picture with a GPU fault.
   deko3d wrote a few words past the end of a piece of command memory, and
