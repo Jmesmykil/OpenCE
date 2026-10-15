@@ -1,5 +1,14 @@
 # Changelog
 
+## Build 100
+
+- Switch: zooming in costs about 3.7 ms less of the GPU's frame at 720p:
+  the zoom's blur is drawn on a small copy of the screen and blended over
+  it once, with the same look. debug.original_zoom in config.toml draws it
+  as before. (thelinkin3000)
+
+Network version 29
+
 ## Build 99
 
 - Switch: crowded games no longer freeze the picture with a GPU fault.
