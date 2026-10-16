@@ -926,17 +926,18 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 	t0 the mask, t1 the small copy blurred by the game's passes, and in
 	texture coordinate 3 the pixel's way from the warp's centre, scaled so
 	that its length times the root of the mask's alpha (how much each pass
-	mixes) is the blur's spread in the small copy's texels. Where the blur is
-	narrower than a texel, the small copy would only lose detail the game
-	keeps, and the screen stays sharp; where it is wider, the blur is drawn,
-	a texel's spread and more wholly. Drawn with the screen's colour times
-	the alpha added (D3DBLEND_ONE, D3DBLEND_SRCALPHA), and all of it darkened
-	by one less the mask's blue, as the game's last pass is (its final alpha,
-	G, reads blue). */
+	mixes) is the blur's spread in the small copy's texels. The screen stays
+	sharp up to a spread of ps_c0[0].r times 4 texels, where the small copy
+	would only lose detail the game keeps and where the player aims, and the
+	blur is drawn wholly from ps_c0[0].g times 4, eased between. Drawn with
+	the screen's colour times the alpha added (D3DBLEND_ONE,
+	D3DBLEND_SRCALPHA), and all of it darkened by one less the mask's blue,
+	as the game's last pass is (its final alpha, G, reads blue). */
 	if (key->texture_modes & NV2A_PIXEL_KEY_WARP_BLEND)
 		xgpu_text_append(&text,
 			"\t{\n"
-			"\t\tfloat warp_blur = clamp(length(xT3.xy) * sqrt(t0.a), 0.0, 1.0);\n"
+			"\t\tfloat warp_spread = length(xT3.xy) * sqrt(t0.a);\n"
+			"\t\tfloat warp_blur = smoothstep(ps_c0[0].r * 4.0, max(ps_c0[0].g * 4.0, ps_c0[0].r * 4.0 + 0.01), warp_spread);\n"
 			"\t\tfloat warp_dark = 1.0 - t0.b;\n"
 			"\t\tresult = vec4(t1.rgb * warp_blur * warp_dark, (1.0 - warp_blur) * warp_dark);\n"
 			"\t}\n");

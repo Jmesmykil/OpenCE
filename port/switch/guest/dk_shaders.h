@@ -35,6 +35,9 @@ alpha_reference. The Xbox leaves the bit 0. */
 /* and this one for the zoom's blend of its blurred small copy of the screen
 over the screen (halo_screen_warp_blend, d3d8_dk.c; nv2a_psh_dk.c) */
 #define NV2A_PIXEL_KEY_WARP_BLEND 0x40000000u
+/* that shader's own version, in its hash beside the generators' (raised by a
+change to what it writes, so the other shaders keep their names) */
+#define DK_WARP_BLEND_VERSION 2
 
 /* the stages, as the host's imports take them */
 #define DK_SHADER_STAGE_VERTEX 0

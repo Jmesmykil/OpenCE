@@ -240,6 +240,12 @@ static uint64_t key_hash(uint32_t stage, const void *data)
 		const struct nv2a_pixel_shader_key *key = data;
 
 		hash = dk_shader_hash_mix(hash, data, DK_PIXEL_KEY_HASHED_BYTES);
+		if (key->texture_modes & NV2A_PIXEL_KEY_WARP_BLEND)
+		{
+			uint32_t warp_version = DK_WARP_BLEND_VERSION;
+
+			hash = dk_shader_hash_mix(hash, &warp_version, sizeof(warp_version));
+		}
 		if (key->per_pixel_lighting || key->alpha_test_samples)
 		{
 			hash = dk_shader_hash_mix(hash, &key->per_pixel_lighting, sizeof(key->per_pixel_lighting));

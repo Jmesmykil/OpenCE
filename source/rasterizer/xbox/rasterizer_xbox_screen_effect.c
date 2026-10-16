@@ -472,15 +472,21 @@ frame's GPU time. Here the screen is copied to a target of about 360 lines,
 the game's own passes (as many as the Xbox drew, with its own spread) blur
 that copy, and one pass over the screen blends the blur over it
 (halo_screen_warp_blend's shader, port/switch/guest/nv2a_psh_dk.c): the
-screen stays sharp where the warp spreads a pixel less than a texel of the
-copy (towards its centre), the blur is drawn where it spreads it more, and
-the whole is darkened by the mask, as the game's last pass does. FALSE for
+screen stays sharp where the warp spreads a pixel little (towards its
+centre, where the player aims), the blur is drawn where it spreads it more,
+and the whole is darkened by the mask, as the game's last pass does. FALSE for
 anything else, drawn as the game draws it. */
 enum
 {
 	RASTERIZER_SCREEN_EFFECT_PORT_WARP_LINES = 360,
 	NUMBER_OF_RASTERIZER_SCREEN_EFFECT_PORT_WARP_TARGETS = 3
 };
+
+/* the warp's spread, in the small copy's texels, the screen stays sharp up
+to, and the spread from which the blur is drawn wholly (eased between): at
+720p the inside of a scope spreads by about half a texel at its rim */
+#define RASTERIZER_SCREEN_EFFECT_PORT_WARP_SHARP 0.5f
+#define RASTERIZER_SCREEN_EFFECT_PORT_WARP_BLURRED 1.5f
 
 static D3DTexture *rasterizer_screen_effect_port_warp_textures[NUMBER_OF_RASTERIZER_SCREEN_EFFECT_PORT_WARP_TARGETS];
 static D3DSurface *rasterizer_screen_effect_port_warp_surfaces[NUMBER_OF_RASTERIZER_SCREEN_EFFECT_PORT_WARP_TARGETS];
@@ -757,6 +763,12 @@ static boolean rasterizer_screen_effect_port_fast_warp(
 	pixel_shader.rgb_inputs[0] = 0x08200000;
 	pixel_shader.rgb_outputs[0] = 0x000000c0;
 	pixel_shader.final_combiner_inputs_abcd = 0x0000000c;
+	/* the spreads, in the small copy's texels over 4, the screen is sharp
+	up to (red) and wholly blurred from (green): sharp past the inside of
+	the sniper rifle's and pistol's scopes, where the player aims */
+	pixel_shader.constant_0[0] =
+		((pixel32)(RASTERIZER_SCREEN_EFFECT_PORT_WARP_SHARP / 4.0f * 255.0f + 0.5f) << 16) |
+		((pixel32)(RASTERIZER_SCREEN_EFFECT_PORT_WARP_BLURRED / 4.0f * 255.0f + 0.5f) << 8);
 	pixel_shader.combiner_count = 1 | 0x00011000;
 	rasterizer_set_pixel_shader(&pixel_shader);
 	rasterizer_set_target(_rasterizer_target_render_primary, FALSE, FALSE, FALSE, FALSE);
