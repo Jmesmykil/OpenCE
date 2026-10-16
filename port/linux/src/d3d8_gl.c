@@ -5666,6 +5666,16 @@ void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float
 	(void)high;
 }
 
+/* (only the Switch's renderer narrows its scissor: d3d8_dk.c) */
+void halo_draw_scissor(unsigned char on, float x0, float y0, float x1, float y1)
+{
+	(void)on;
+	(void)x0;
+	(void)y0;
+	(void)x1;
+	(void)y1;
+}
+
 /* (only the Switch's renderer draws the zoom's blur small: d3d8_dk.c) */
 unsigned char halo_screen_fast_warp(void)
 {

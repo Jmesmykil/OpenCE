@@ -252,6 +252,34 @@ void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float
 	texture_clip_black = FALSE;
 }
 
+/* the rectangle the draws that follow are rasterized in, if on (in the
+target's game pixels), as well as the viewport (halo_draw_scissor) */
+static unsigned char draw_scissor_on;
+static float draw_scissor[4];
+
+/* A draw that changes nothing outside a box of the world - an object's
+shadow cast on the level, a dynamic light's pass - rasterized only inside
+that box's rectangle on the screen (rasterizer_xbox.c): their triangles,
+the level's, are much bigger than what they change, and the pixels outside
+were shaded only to be let go (halo_texture_clip). debug.gpu_draw_scissor =
+false: never. */
+void halo_draw_scissor(unsigned char on, float x0, float y0, float x1, float y1)
+{
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		enabled = config_boolean("debug.gpu_draw_scissor") != 0;
+		if (!enabled)
+			platform_log("draw scissor: off (debug.gpu_draw_scissor)");
+	}
+	draw_scissor_on = on && enabled;
+	draw_scissor[0] = x0;
+	draw_scissor[1] = y0;
+	draw_scissor[2] = x1;
+	draw_scissor[3] = y1;
+}
+
 /* the zoom's blend of its blur over the screen, for the draws that follow
 (rasterizer_xbox_screen_effect.c): the pixel key has NV2A_PIXEL_KEY_WARP_BLEND
 while it is on */
@@ -1954,6 +1982,22 @@ static void draw_state_make(BOOL has_depth, struct dk_draw_state *state)
 	defaults to the viewport, so fragment clipping follows the viewport: this is
 	what keeps a split-screen window's geometry from bleeding across the divider */
 	memcpy(state->scissor, state->viewport, sizeof(state->scissor));
+	/* (narrowed to the rectangle a draw changes anything in, if one is set:
+	halo_draw_scissor) */
+	if (draw_scissor_on)
+	{
+		int x0 = target_pixel(draw_scissor[0], 0), y0 = target_pixel(draw_scissor[1], 1);
+		int x1 = target_pixel(draw_scissor[2], 0), y1 = target_pixel(draw_scissor[3], 1);
+		int left = state->viewport[0] > x0 ? state->viewport[0] : x0;
+		int top = state->viewport[1] > y0 ? state->viewport[1] : y0;
+		int right = state->viewport[0] + state->viewport[2] < x1 ? state->viewport[0] + state->viewport[2] : x1;
+		int bottom = state->viewport[1] + state->viewport[3] < y1 ? state->viewport[1] + state->viewport[3] : y1;
+
+		state->scissor[0] = left;
+		state->scissor[1] = top;
+		state->scissor[2] = right > left ? right - left : 0;
+		state->scissor[3] = bottom > top ? bottom - top : 0;
+	}
 
 	state->depth_test = depth_test;
 	if (depth_test)

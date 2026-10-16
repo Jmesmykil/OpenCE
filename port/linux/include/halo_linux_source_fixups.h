@@ -79,6 +79,12 @@ void halo_texture_clip(unsigned char clip, float low, float high);
 the dynamic lights' passes on the level, which add nothing past their
 distance attenuation's box (source/rasterizer/xbox/rasterizer_xbox_environment.c) */
 void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float low, float high);
+/* the draws that follow rasterized only inside [x0, x1) x [y0, y1) of the
+target, in its game pixels as the viewport is, and the viewport (on FALSE,
+the viewport alone): a draw that changes nothing outside a box of the world
+(source/rasterizer/xbox/rasterizer_xbox.c, rasterizer_port_scissor_points);
+the Switch's renderer only */
+void halo_draw_scissor(unsigned char on, float x0, float y0, float x1, float y1);
 /* whether the zoom's blur is drawn on a small copy of the screen and blended
 over it once (source/rasterizer/xbox/rasterizer_xbox_screen_effect.c), and
 that blend's shader on or off for the draws that follow: the Switch's

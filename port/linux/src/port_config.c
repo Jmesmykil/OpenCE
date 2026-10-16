@@ -741,6 +741,11 @@ static const struct config_setting config_settings[] =
 		"Let a blended draw's pixels go where they would leave the screen as it was\n"
 		"(the empty parts of particles and glows); false blends them all in, as\n"
 		"before, to compare. Takes effect the next start." },
+	{ "debug.gpu_draw_scissor", _config_boolean, "true", "HALO_GPU_DRAW_SCISSOR", _environment_value,
+		_platform_android,
+		"Rasterize an object's shadow and a dynamic light's pass only inside the\n"
+		"rectangle of the screen they can change; false rasterizes their whole\n"
+		"triangles, as before, to compare. Takes effect the next start." },
 	{ "debug.original_blur", _config_boolean, "false", "HALO_ORIGINAL_BLUR", _environment_value, _platform_android,
 		"Draw a blur screen effect (cutscenes) as the game does, in passes over the\n"
 		"whole screen, rather than its passes on a small copy of it. Takes effect\n"

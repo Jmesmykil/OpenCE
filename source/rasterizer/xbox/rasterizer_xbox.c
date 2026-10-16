@@ -1577,6 +1577,63 @@ boolean rasterizer_port_shadow_slot_select(
 	return TRUE;
 }
 
+/* port: a draw that changes nothing outside a box of the world - an object's
+shadow cast on the level, a dynamic light's pass, each of whole level
+triangles much bigger than what they change - is rasterized only inside
+that box's rectangle on the screen (halo_draw_scissor): the pixels outside
+were shaded only to be let go (halo_texture_clip), and starting their
+shaders was most of those draws' time. The rectangle of the box's corners,
+as render_camera_view_to_screen puts them in the window, and a pixel more;
+the whole viewport if a corner is behind the camera. */
+void rasterizer_port_scissor_points(
+	real_point3d const *points,
+	short count)
+{
+	struct render_frustum const *frustum = &global_window_parameters.frustum;
+	struct render_camera const *camera = &global_window_parameters.camera;
+	real x0 = 1.0f, y0 = 1.0f, x1 = -1.0f, y1 = -1.0f;
+	real width, height;
+	short index;
+
+	if (count <= 0 || !frustum->projection_valid)
+	{
+		halo_draw_scissor(FALSE, 0.0f, 0.0f, 0.0f, 0.0f);
+		return;
+	}
+	for (index = 0; index < count; index++)
+	{
+		real_point3d view_point;
+		real inverse_depth, x, y;
+
+		matrix4x3_transform_point(&frustum->world_to_view, &points[index], &view_point);
+		if (view_point.z > -0.01f)
+		{
+			halo_draw_scissor(FALSE, 0.0f, 0.0f, 0.0f, 0.0f);
+			return;
+		}
+		inverse_depth = -1.0f / view_point.z;
+		x = (frustum->projection_matrix[0][0] * view_point.x + frustum->projection_matrix[2][0] * view_point.z) *
+			inverse_depth;
+		y = -(frustum->projection_matrix[1][1] * view_point.y + frustum->projection_matrix[2][1] * view_point.z) *
+			inverse_depth;
+		x0 = MIN(x0, x);
+		x1 = MAX(x1, x);
+		y0 = MIN(y0, y);
+		y1 = MAX(y1, y);
+	}
+	x0 = PIN(x0, -1.0f, 1.0f);
+	x1 = PIN(x1, -1.0f, 1.0f);
+	y0 = PIN(y0, -1.0f, 1.0f);
+	y1 = PIN(y1, -1.0f, 1.0f);
+	width = (real)(camera->viewport_bounds.x1 - camera->viewport_bounds.x0);
+	height = (real)(camera->viewport_bounds.y1 - camera->viewport_bounds.y0);
+	halo_draw_scissor(TRUE,
+		(x0 + 1.0f) * 0.5f * width + camera->viewport_bounds.x0 - 1.0f,
+		(y0 + 1.0f) * 0.5f * height + camera->viewport_bounds.y0 - 1.0f,
+		(x1 + 1.0f) * 0.5f * width + camera->viewport_bounds.x0 + 1.0f,
+		(y1 + 1.0f) * 0.5f * height + camera->viewport_bounds.y0 + 1.0f);
+}
+
 void rasterizer_set_target(
 	short target,
 	short mipmap_index,
