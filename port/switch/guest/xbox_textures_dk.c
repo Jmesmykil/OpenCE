@@ -421,7 +421,10 @@ static void reach_note(const struct xgpu_texture_description *description, unsig
 	float reach = 0.0f;
 	unsigned long level, index;
 
-	for (level = 0; level < description->levels; level++)
+	/* (its two finest levels: a coarser one is sampled only where the whole
+	of the texture is a few pixels on the screen, a light whose pixels are
+	few, and every texel of the coarsest is a margin of the whole box) */
+	for (level = 0; level < description->levels && level < 2; level++)
 	{
 		unsigned long width = level_dimension(description->width, level);
 		unsigned long height = level_dimension(description->height, level);

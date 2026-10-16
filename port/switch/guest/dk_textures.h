@@ -20,8 +20,8 @@ uint32_t dk_texture_get(const DWORD *resource, const D3DCOLOR *palette, int *kin
 	struct xgpu_texture_description *description);
 
 /* How far from its centre a 3D texture lets anything through, in its
-coordinates (0 to 1 across it): the farthest texel not all zero, at any of
-its levels, and a texel's diagonal more for its filtering; -1 if it is not
+coordinates (0 to 1 across it): the farthest texel not all zero, at its two
+finest levels, and a texel's diagonal more for its filtering; -1 if it is not
 known (a texture not a 3D one, compressed, or not yet sent). The texture is
 found by its texels' address. The dynamic lights' distance attenuation is a
 ball in its box: their passes let the pixels past it go (d3d8_dk.c). */

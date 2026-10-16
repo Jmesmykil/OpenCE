@@ -2283,6 +2283,10 @@ static unsigned long blend_discard(void)
 		mode = NV2A_PIXEL_DISCARD_MULTIPLY;
 	else if (operation == D3DBLENDOP_ADD && source == D3DBLEND_ONE && destination == D3DBLEND_INVSRCALPHA)
 		mode = NV2A_PIXEL_DISCARD_PREMULTIPLIED;
+	/* (the destination times one less the source: kept where the source is
+	black, as an added one) */
+	else if (operation == D3DBLENDOP_ADD && source == D3DBLEND_ZERO && destination == D3DBLEND_INVSRCCOLOR)
+		mode = NV2A_PIXEL_DISCARD_ADD;
 	/* (min and max take no factors) */
 	else if (operation == D3DBLENDOP_MAX)
 		mode = NV2A_PIXEL_DISCARD_MAX;
