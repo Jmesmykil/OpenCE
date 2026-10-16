@@ -1204,6 +1204,9 @@ long host_guest_mmap(uint64_t address, uint64_t size, int protection, int flags,
 		fd = host_guest_fd(fd);
 		if (fd < 0)
 			return -EBADF;
+		/* (a map cache file kept in memory, host_memory_files.c, is not mapped) */
+		if (host_memory_file_is(fd))
+			return -ENODEV;
 	}
 	if (flags & (MAP_FIXED | MAP_FIXED_NOREPLACE))
 	{
