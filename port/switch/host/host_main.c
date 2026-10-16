@@ -1042,6 +1042,9 @@ static void *game_main(void *unused)
 		host_dk_fault_test = config_flag(path, "debug.gpu_fault_test");
 		host_dk_profile = config_flag(path, "debug.gpu_profile");
 		host_dk_capture = config_flag(path, "debug.gpu_capture");
+		host_dk_render_thread = config_flag_or(path, "debug.render_thread", 1);
+		if (!host_dk_render_thread)
+			host_logf(HOST_LOG_WARN, "deko3d: the game thread runs the commands (debug.render_thread)");
 		{
 			char experiment[256];
 

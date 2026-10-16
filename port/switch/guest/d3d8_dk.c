@@ -463,13 +463,45 @@ host numbers them: this is the number of the one being written. */
 static unsigned long submission = 1;
 
 /* buffers of the guest's that commands name (a decoded texture's texels): the
-host reads them when it runs the stream, so they are freed once it has */
+host reads them when it runs the stream - on its render thread, after the
+stream is handed over (host_dk.c) - so each is freed once the GPU has
+finished its submission, which the host ran before */
 #define PENDING_FREE_LIMIT 256
 #define PENDING_FREE_BYTES (8 * 1024 * 1024)
+/* the buffers of submissions handed over and not yet finished */
+#define HANDED_FREE_LIMIT 2048
 
 static void *pending_frees[PENDING_FREE_LIMIT];
 static unsigned long pending_free_count;
 static unsigned long pending_free_bytes;
+
+static struct
+{
+	void *buffer;
+	unsigned long submission;
+} handed_frees[HANDED_FREE_LIMIT];
+static unsigned long handed_free_first, handed_free_count;
+
+/* the handed-over buffers whose submissions the GPU has finished, freed;
+with wait, all of them, waiting as long as it takes */
+static void handed_frees_release(BOOL wait)
+{
+	while (handed_free_count)
+	{
+		unsigned long index = handed_free_first;
+
+		if (host_dk_retired() < handed_frees[index].submission)
+		{
+			if (!wait)
+				return;
+			usleep(200);
+			continue;
+		}
+		free(handed_frees[index].buffer);
+		handed_free_first = (handed_free_first + 1) % HANDED_FREE_LIMIT;
+		handed_free_count--;
+	}
+}
 
 static void stream_flush(void)
 {
@@ -477,10 +509,19 @@ static void stream_flush(void)
 		return;
 	host_dk_submit((unsigned int)(uintptr_t)stream, (unsigned int)stream_used);
 	stream_used = 0;
-	submission++;
+	/* (this submission's buffers kept until the GPU has finished it) */
 	while (pending_free_count)
-		free(pending_frees[--pending_free_count]);
+	{
+		if (handed_free_count == HANDED_FREE_LIMIT)
+			handed_frees_release(TRUE);
+		handed_frees[(handed_free_first + handed_free_count) % HANDED_FREE_LIMIT].buffer =
+			pending_frees[--pending_free_count];
+		handed_frees[(handed_free_first + handed_free_count) % HANDED_FREE_LIMIT].submission = submission;
+		handed_free_count++;
+	}
 	pending_free_bytes = 0;
+	submission++;
+	handed_frees_release(FALSE);
 }
 
 /* room for a command of size bytes, its header filled in */
@@ -2997,6 +3038,9 @@ void WINAPI D3DDevice_Present(CONST RECT *source_rectangle, CONST RECT *destinat
 	stream_flush();
 	if (screenshot_pixels)
 	{
+		/* (the host writes the pixels as it runs the present, on its render
+		thread: all of it run, and the GPU done) */
+		host_dk_idle();
 		screenshot_write();
 		free(screenshot_pixels);
 		screenshot_pixels = NULL;

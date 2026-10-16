@@ -215,6 +215,9 @@ extern int host_dk_profile;
 /* debug.gpu_capture: with the profile, one frame of each 300 timed draw by
 draw, and the GPU's time by shader, target and kind of command logged */
 extern int host_dk_capture;
+/* debug.render_thread (host_dk.c): the guest's commands run on a thread of
+their own, not the game's */
+extern int host_dk_render_thread;
 /* debug.gpu_experiment: what-ifs that measure what part of the GPU's time a
 change could take back, comma-separated: "no_compression" (render targets
 without hardware compression), "no_target_barriers" (no wait before a

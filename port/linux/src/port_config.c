@@ -746,6 +746,10 @@ static const struct config_setting config_settings[] =
 		"Let a blended draw's pixels go where they would leave the screen as it was\n"
 		"(the empty parts of particles and glows); false blends them all in, as\n"
 		"before, to compare. Takes effect the next start." },
+	{ "debug.render_thread", _config_boolean, "true", "HALO_RENDER_THREAD", _environment_value, _platform_android,
+		"Turn the game's drawing commands into the GPU's on a thread of their own,\n"
+		"on another core, while the game goes on with its next frame; false runs\n"
+		"them on the game's thread, as before. Takes effect the next start." },
 	{ "debug.gpu_draw_scissor", _config_boolean, "true", "HALO_GPU_DRAW_SCISSOR", _environment_value,
 		_platform_android,
 		"Rasterize an object's shadow and a dynamic light's pass only inside the\n"

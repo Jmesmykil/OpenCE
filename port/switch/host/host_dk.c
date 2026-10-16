@@ -1413,8 +1413,11 @@ uint32_t host_dk_retired(void)
 
 /* the queue drained, before a map's memory goes or the process exits: a
 submission still running reads that memory */
+static void render_queue_drain(void);
+
 void host_dk_idle(void)
 {
+	render_queue_drain();
 	if (dk.ready)
 		queue_wait_idle();
 }
@@ -3821,13 +3824,12 @@ static void draw(const struct dk_command_draw *command)
 
 /* runs size bytes of commands at commands (a guest address): one
 submission, which the guest numbers as this does (host_dk_retired) */
-void host_dk_submit(uint32_t commands, uint32_t size)
+/* one stream of the guest's, run: on the render thread (below), or on the
+game thread with debug.render_thread = false */
+static void submit_run(const unsigned char *at, uint32_t size)
 {
-	const unsigned char *at = (const unsigned char *)(uintptr_t)commands;
 	const unsigned char *end = at + size;
 
-	if (!dk.ready && !initialize())
-		return;
 	trace_dump_if_faulted();
 	dk.serial++;
 	chunks_map();
@@ -3929,6 +3931,144 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 	if (dk.recorded || dk.serial_fenced != dk.serial)
 		commands_submit();
 	trace_dump_if_faulted();
+}
+
+/* ---------- the render thread
+
+The guest hands its stream over at each frame's end (and when it fills, or
+a busy check needs it submitted); running it - turning its commands into
+deko3d's, presenting - took the game thread a sixth of its time in a
+40-player match, while the console's other cores waited. The stream is
+copied into one of RENDER_QUEUE buffers and run by a thread of its own, on
+a helper core, in order; the game goes on with its next frame. It waits
+only when all of them are still to run, so it is never more than a frame
+or so ahead. The guest's checks against the GPU (host_dk_retired) count
+submissions the GPU has finished, which this thread has run before, so
+what the guest keeps for a submission is kept until it is run; the queue
+drains before host_dk_idle waits for the GPU. debug.render_thread = false
+runs each stream on the game thread, as before. */
+int host_dk_render_thread = 1;
+
+#define RENDER_QUEUE 3
+#define RENDER_THREAD_STACK (1024 * 1024)
+
+static struct
+{
+	pthread_mutex_t lock;
+	pthread_cond_t work;
+	pthread_cond_t room;
+	int started;
+	int failed;
+	unsigned head, count;
+	struct
+	{
+		unsigned char *data;
+		uint32_t capacity, size;
+	} streams[RENDER_QUEUE];
+} render_queue = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
+
+static void *render_thread(void *unused)
+{
+	(void)unused;
+	host_thread_place_on_helper_core();
+	for (;;)
+	{
+		unsigned index;
+
+		pthread_mutex_lock(&render_queue.lock);
+		while (!render_queue.count)
+			pthread_cond_wait(&render_queue.work, &render_queue.lock);
+		index = render_queue.head;
+		pthread_mutex_unlock(&render_queue.lock);
+
+		submit_run(render_queue.streams[index].data, render_queue.streams[index].size);
+
+		pthread_mutex_lock(&render_queue.lock);
+		render_queue.head = (render_queue.head + 1) % RENDER_QUEUE;
+		render_queue.count--;
+		pthread_cond_broadcast(&render_queue.room);
+		pthread_mutex_unlock(&render_queue.lock);
+	}
+	return NULL;
+}
+
+/* the queue's buffers and its thread, the first time; FALSE if they cannot
+be made (the stream is then run on the game thread) */
+static int render_thread_start(void)
+{
+	pthread_attr_t attributes;
+	pthread_t thread;
+
+	if (render_queue.started || render_queue.failed)
+		return render_queue.started;
+	pthread_attr_init(&attributes);
+	pthread_attr_setstacksize(&attributes, RENDER_THREAD_STACK);
+	if (pthread_create(&thread, &attributes, render_thread, NULL) != 0)
+	{
+		host_logf(HOST_LOG_ERROR, "deko3d: the render thread could not be made; the game thread runs the commands");
+		render_queue.failed = 1;
+	}
+	else
+	{
+		pthread_detach(thread);
+		render_queue.started = 1;
+		host_logf(HOST_LOG_INFO, "deko3d: a render thread runs the commands (%d streams queued at most)", RENDER_QUEUE);
+	}
+	pthread_attr_destroy(&attributes);
+	return render_queue.started;
+}
+
+/* every stream handed over run (not the GPU's work: queue_wait_idle) */
+static void render_queue_drain(void)
+{
+	if (!render_queue.started)
+		return;
+	pthread_mutex_lock(&render_queue.lock);
+	while (render_queue.count)
+		pthread_cond_wait(&render_queue.room, &render_queue.lock);
+	pthread_mutex_unlock(&render_queue.lock);
+}
+
+void host_dk_submit(uint32_t commands, uint32_t size)
+{
+	const unsigned char *at = (const unsigned char *)(uintptr_t)commands;
+	unsigned index;
+
+	if (!dk.ready && !initialize())
+		return;
+	if (!host_dk_render_thread || !render_thread_start())
+	{
+		submit_run(at, size);
+		return;
+	}
+	pthread_mutex_lock(&render_queue.lock);
+	while (render_queue.count == RENDER_QUEUE)
+		pthread_cond_wait(&render_queue.room, &render_queue.lock);
+	index = (render_queue.head + render_queue.count) % RENDER_QUEUE;
+	pthread_mutex_unlock(&render_queue.lock);
+	/* (the buffer is the game thread's until counted: the render thread
+	takes only those counted) */
+	if (render_queue.streams[index].capacity < size)
+	{
+		unsigned char *grown = realloc(render_queue.streams[index].data, size);
+
+		if (!grown)
+		{
+			host_logf(HOST_LOG_ERROR, "deko3d: no memory to queue a stream of %u bytes; run on the game thread",
+				(unsigned)size);
+			render_queue_drain();
+			submit_run(at, size);
+			return;
+		}
+		render_queue.streams[index].data = grown;
+		render_queue.streams[index].capacity = size;
+	}
+	memcpy(render_queue.streams[index].data, at, size);
+	render_queue.streams[index].size = size;
+	pthread_mutex_lock(&render_queue.lock);
+	render_queue.count++;
+	pthread_cond_signal(&render_queue.work);
+	pthread_mutex_unlock(&render_queue.lock);
 }
 
 /* the deko3d device, on the game thread only: the shader cache's code
