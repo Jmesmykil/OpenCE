@@ -876,6 +876,43 @@ void _rasterizer_screen_effect(
 
 	rasterizer_profile_begin(_rasterizer_profile_screen_effect);
 
+	/* port: the small targets the zoom and a blur are drawn on
+	(rasterizer_screen_effect_port_warp_targets), made and drawn into once
+	the first time the screen is drawn, at the menu: made when the first zoom
+	needed them, the host's images of them were made in its frame, a hitch of
+	a fifth of a second */
+	{
+		static boolean port_targets_made;
+
+		if (!port_targets_made &&
+			global_window_parameters.rasterizer_target == _rasterizer_target_render_primary &&
+			(halo_screen_fast_warp() || halo_screen_fast_blur()) && main_get_window_count() <= 1)
+		{
+			short viewport_width = global_window_parameters.camera.viewport_bounds.x1 -
+				global_window_parameters.camera.viewport_bounds.x0;
+			short viewport_height = global_window_parameters.camera.viewport_bounds.y1 -
+				global_window_parameters.camera.viewport_bounds.y0;
+			real screen_scale = halo_screen_scale();
+			short divisor = (short)(viewport_height * screen_scale / RASTERIZER_SCREEN_EFFECT_PORT_WARP_LINES + 0.5f);
+
+			port_targets_made = TRUE;
+			if (viewport_width > 0 && viewport_height > 0 && divisor >= 2 &&
+				rasterizer_screen_effect_port_warp_targets(
+					(short)(viewport_width * screen_scale / divisor + 0.5f),
+					(short)(viewport_height * screen_scale / divisor + 0.5f)))
+			{
+				short index;
+
+				for (index = 0; index < NUMBER_OF_RASTERIZER_SCREEN_EFFECT_PORT_WARP_TARGETS; index++)
+				{
+					rasterizer_screen_effect_port_warp_target(index);
+					IDirect3DDevice8_Clear(global_d3d_device, 0, NULL, D3DCLEAR_TARGET, 0, 1.0f, 0);
+				}
+				rasterizer_set_target(global_window_parameters.rasterizer_target, FALSE, FALSE, FALSE, TRUE);
+			}
+		}
+	}
+
 	parameters = rasterizer_screen_effect_get_cinematic_parameters(parameters);
 
 	if (parameters &&
