@@ -854,7 +854,15 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 				"\t}\n", clip_stage, clip_stage, clip_stage, clip_stage);
 	}
 	for (stage = 0; stage < 4; stage++)
+	{
 		texture_stage(&text, key, stage);
+		/* (NV2A_PIXEL_KEY_CLIP_BLACK: the clipped stage's texel black, the
+		draw adds nothing there - an object's shadow, outside its shape in
+		its map - and the pixel goes before the stages after it are read) */
+		if ((key->texture_modes & NV2A_PIXEL_KEY_CLIP) && (key->texture_modes & NV2A_PIXEL_KEY_CLIP_BLACK) &&
+			stage == (int)((key->texture_modes & NV2A_PIXEL_KEY_CLIP_STAGE_MASK) >> NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT))
+			xgpu_text_append(&text, "\tif (all(lessThan(t%d.rgb, vec3(0.49 / 255.0))))\n\t\tdiscard;\n", stage);
+	}
 
 	/* the registers' ranges as the combiners start: the constants and the fog
 	colour are 8-bit colours, the vertex colours are clamped by the vertex

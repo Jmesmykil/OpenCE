@@ -183,9 +183,11 @@ static void *stream_command(uint32_t type, unsigned long size);
 highest u and v as the texture is sampled (0 to 1 across it), and whether
 to clip (the pixel parameters' alpha_reference.y to .w) */
 static float texture_clip[3];
-/* the stage clipped, and whether in three coordinates */
+/* the stage clipped, whether in three coordinates, and whether its black
+texels add nothing (the shadows': halo_texture_clip) */
 static int texture_clip_stage;
 static int texture_clip_3d;
+static int texture_clip_black;
 
 /* The draws that follow shaded only where texture coordinate 0's u and v are
 in [low, high], or everywhere: an object's shadow cast on the level
@@ -200,6 +202,10 @@ void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float
 void halo_texture_clip(unsigned char clip, float low, float high)
 {
 	halo_texture_clip_stage(clip ? 0 : -1, FALSE, low, high);
+	/* (an object's shadow cast on the level darkens it by its map times
+	its colour, corner fade and vertex alpha, each no more than 1: where the
+	map is black it darkens nothing - rasterizer_xbox_shadows.c) */
+	texture_clip_black = texture_clip[2] != 0.0f;
 }
 
 /* as halo_texture_clip, for a stage's coordinates (stage -1 for none), in
@@ -243,6 +249,7 @@ void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float
 	texture_clip[2] = clip ? 1.0f : 0.0f;
 	texture_clip_stage = clip ? stage : 0;
 	texture_clip_3d = clip && three_dimensional;
+	texture_clip_black = FALSE;
 }
 
 /* the zoom's blend of its blur over the screen, for the draws that follow
@@ -2332,7 +2339,7 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 	key->texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
 	if (texture_clip[2] != 0.0f)
 		key->texture_modes |= NV2A_PIXEL_KEY_CLIP | ((unsigned long)texture_clip_stage << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT) |
-			(texture_clip_3d ? NV2A_PIXEL_KEY_CLIP_3D : 0);
+			(texture_clip_3d ? NV2A_PIXEL_KEY_CLIP_3D : 0) | (texture_clip_black ? NV2A_PIXEL_KEY_CLIP_BLACK : 0);
 	if (warp_blend)
 		key->texture_modes |= NV2A_PIXEL_KEY_WARP_BLEND;
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
