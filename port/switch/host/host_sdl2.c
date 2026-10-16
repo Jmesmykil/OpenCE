@@ -962,6 +962,9 @@ the top away (looking up) is a negative rotation about +x. A single Joy-Con
 is held on its side with SL and SR up, so those axes are turned to match. */
 
 #define GYRO_NOISE 0.01f
+/* the turn handed to the guest for the controller's: half again the sensor's,
+which turned too little for aiming at every input.gyro_sensitivity_* */
+#define GYRO_SCALE 1.5f
 /* a sample further than this from the one before it is not a turn */
 #define GYRO_LONGEST_GAP_NS 100000000ULL
 #define GYRO_SAMPLE_COUNT 16
@@ -1128,6 +1131,8 @@ void host_sdl_gamepad_gyro(uint32_t gamepad, float *yaw, float *pitch)
 	if (pad < 0 || pad >= RUMBLE_PADS)
 		return;
 	gyro_read((int)pad, yaw, pitch);
+	*yaw *= GYRO_SCALE;
+	*pitch *= GYRO_SCALE;
 }
 
 /* ---------- audio
