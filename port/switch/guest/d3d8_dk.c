@@ -413,6 +413,11 @@ struct dk_device
 	float *immediate_vertices;
 	unsigned long immediate_count;
 	unsigned long immediate_capacity;
+	/* the registers written since Begin, the vertex each was first written
+	at, and the values they had at Begin (for the vertices before that) */
+	unsigned long immediate_mask;
+	unsigned long immediate_first[XGPU_VERTEX_ATTRIBUTE_COUNT];
+	float immediate_begin[XGPU_VERTEX_ATTRIBUTE_COUNT][4];
 
 	BOOL visibility_test_active;
 
@@ -2763,11 +2768,17 @@ void WINAPI D3DDevice_Begin(D3DPRIMITIVETYPE primitive_type)
 	device.immediate_active = TRUE;
 	device.immediate_type = primitive_type;
 	device.immediate_count = 0;
+	device.immediate_mask = 0;
+	memcpy(device.immediate_begin, device.attributes, sizeof(device.immediate_begin));
 }
 
+/* a vertex: the registers written since Begin, each in its own place of
+the vertex's sixteen (the others are the same for every vertex of the draw,
+and go with it as constants) */
 static void immediate_emit(void)
 {
-	unsigned long floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4;
+	unsigned long floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4, mask = device.immediate_mask;
+	float *vertex;
 
 	if (device.immediate_count == device.immediate_capacity)
 	{
@@ -2775,25 +2786,36 @@ static void immediate_emit(void)
 		device.immediate_vertices = realloc(device.immediate_vertices,
 			device.immediate_capacity * floats * sizeof(float));
 	}
-	memcpy(device.immediate_vertices + device.immediate_count * floats, device.attributes, floats * sizeof(float));
+	vertex = device.immediate_vertices + device.immediate_count * floats;
+	while (mask)
+	{
+		unsigned long reg = (unsigned long)__builtin_ctzl(mask);
+
+		memcpy(vertex + reg * 4, device.attributes[reg], 4 * sizeof(float));
+		mask &= mask - 1;
+	}
 	device.immediate_count++;
 }
+
 void WINAPI D3DDevice_End(void)
 {
-	/* every register's four floats, a vertex at a time, as immediate_emit
-	keeps them */
-	unsigned long stride = XGPU_VERTEX_ATTRIBUTE_COUNT * 4 * sizeof(float);
-	unsigned long count = device.immediate_count, index;
+	/* the registers written since Begin, four floats each, a vertex at a
+	time; the rest are the draw's constants, their values throughout */
+	unsigned long floats = XGPU_VERTEX_ATTRIBUTE_COUNT * 4, mask = device.immediate_mask;
+	unsigned long count = device.immediate_count, index, fed = 0, stride, vertex;
 	D3DPRIMITIVETYPE type = device.immediate_type;
 	struct dk_vertex_format format;
 	struct dk_command_draw *command;
+	float *out;
 
 	device.immediate_active = FALSE;
 	device.immediate_count = 0;
+	device.immediate_mask = 0;
 	if (type == D3DPT_QUADLIST)
 		count &= ~3UL;
 	if (!count)
 		return;
+	stride = (unsigned long)__builtin_popcountl(mask) * 4 * sizeof(float);
 	/* the vertices go in the stream with the draw: the next Begin reuses
 	the buffer they are in before the stream is handed over */
 	if (count * stride + 4096 > STREAM_SIZE)
@@ -2806,9 +2828,17 @@ void WINAPI D3DDevice_End(void)
 	memset(&format, 0, sizeof(format));
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
-		format.attributes[index].format = DK_ATTRIBUTE_FLOAT4;
-		format.attributes[index].stream = 0;
-		format.attributes[index].offset = (uint32_t)(index * 4 * sizeof(float));
+		if (mask & (1UL << index))
+		{
+			format.attributes[index].format = DK_ATTRIBUTE_FLOAT4;
+			format.attributes[index].stream = 0;
+			format.attributes[index].offset = (uint32_t)(fed++ * 4 * sizeof(float));
+		}
+		else
+		{
+			format.attributes[index].format = DK_ATTRIBUTE_UNFED;
+			memcpy(format.constants[index], device.attributes[index], sizeof(format.constants[index]));
+		}
 	}
 	format.strides[0] = (uint32_t)stride;
 	format.stream_mask = 1;
@@ -2822,7 +2852,24 @@ void WINAPI D3DDevice_End(void)
 	command->stream_count = 1;
 	command->streams[0][0] = 0;
 	command->streams[0][1] = (uint32_t)(count * stride);
-	memcpy(&command->streams[1], device.immediate_vertices, count * stride);
+	out = (float *)&command->streams[1];
+	for (vertex = 0; vertex < count; vertex++)
+	{
+		const float *in = device.immediate_vertices + vertex * floats;
+		unsigned long left = mask;
+
+		while (left)
+		{
+			unsigned long reg = (unsigned long)__builtin_ctzl(left);
+
+			/* a vertex made before the register was first written has its
+			value from before Begin */
+			memcpy(out, vertex < device.immediate_first[reg] ? device.immediate_begin[reg] : in + reg * 4,
+				4 * sizeof(float));
+			out += 4;
+			left &= left - 1;
+		}
+	}
 	draw_resources_used(FALSE, FALSE);
 }
 
@@ -2837,6 +2884,11 @@ static void set_attribute(INT reg, float a, float b, float c, float d)
 	}
 	if (reg < 0 || reg >= XGPU_VERTEX_ATTRIBUTE_COUNT)
 		return;
+	if (device.immediate_active && !(device.immediate_mask & (1UL << reg)))
+	{
+		device.immediate_mask |= 1UL << reg;
+		device.immediate_first[reg] = device.immediate_count;
+	}
 	device.attributes[reg][0] = a;
 	device.attributes[reg][1] = b;
 	device.attributes[reg][2] = c;
