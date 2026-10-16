@@ -795,10 +795,12 @@ zoom's warp (about 360 lines): the first reads the screen and writes a small
 target, the ones between go from one small target to the other, and the last
 reads the small target and draws over the screen with the game's own last
 pass (its filters and its blend). Only where the blur spreads a pixel over
-1.5 of the small targets' texels or more: a slight blur is drawn as the game
-draws it, as the small targets would lose what it keeps. TRUE with the
+half of the small targets' texels or more: a blur slighter than that is
+drawn as the game draws it, as the small targets would lose what it keeps
+(a cutscene's blur growing from nothing is so for a few frames, which drawn
+as the game draws them, 24 passes of 1080p, were 57 ms each). TRUE with the
 scale from the viewport's game pixels to the small targets' texels. */
-#define RASTERIZER_SCREEN_EFFECT_PORT_BLUR_LEAST_SPREAD 1.5f
+#define RASTERIZER_SCREEN_EFFECT_PORT_BLUR_LEAST_SPREAD 0.5f
 
 /* (the port's, port/linux/src/sdl_platform.c) */
 void platform_log(char const *format, ...);

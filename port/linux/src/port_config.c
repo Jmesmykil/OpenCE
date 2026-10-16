@@ -679,9 +679,10 @@ static const struct config_setting config_settings[] =
 #ifdef HALO_SWITCH
 	{ "display.resolution_limit", _config_string, "\"480\"", "HALO_RESOLUTION_LIMIT", _environment_value,
 		_platform_android,
-		"The lines the game draws at: \"480\" (the game's own), \"720\" or \"1080\",\n"
-		"no more than the console shows (1280x720 in handheld, 1920x1080 docked),\n"
-		"which the picture is scaled up to. Changes at once." },
+		"The lines the game draws at: \"480\" (the game's own), \"720\", \"900\" or\n"
+		"\"1080\" (or any number between), no more than the console shows (1280x720\n"
+		"in handheld, 1920x1080 docked), which the picture is scaled up to. Changes\n"
+		"at once." },
 	{ "performance.cpu_clock", _config_string, "\"1785\"", "HALO_CPU_CLOCK", _environment_value, _platform_android,
 		"The CPU's clock: \"1785\" (1.7 GHz, the most Nintendo's own games use),\n"
 		"\"1020\" (1 GHz, the console's handheld rate: cooler, and the battery\n"

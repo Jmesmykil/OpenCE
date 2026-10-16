@@ -92,11 +92,13 @@ static void screen_mode_choose(long *width, float scale[2])
 	scale[0] = scale[1] = 1.0f;
 #ifdef HALO_SWITCH
 	/* display.resolution_limit: the lines the screen's targets are drawn at,
-	"480" (the game's own), "720" or "1080", no more than the host presents
-	at (1080 docked, 720 in handheld), which the host scales them up to */
+	"480" (the game's own), "720", "900", "1080" or any number of lines
+	between, no more than the host presents at (1080 docked, 720 in handheld),
+	which the host scales them up to: "900" docked is 69% of 1080p's pixels,
+	the GPU's room for 60 a second in a heavy scene */
 	{
-		const char *limit = config_string("display.resolution_limit");
-		unsigned int height = !strcmp(limit, "1080") ? 1080 : !strcmp(limit, "720") ? 720 : SCREEN_HEIGHT;
+		long lines = atol(config_string("display.resolution_limit"));
+		unsigned int height = lines > SCREEN_HEIGHT ? (unsigned int)(lines < 1080 ? lines : 1080) : SCREEN_HEIGHT;
 		unsigned int output = host_dk_output_height();
 
 		if (height > output)
@@ -2236,8 +2238,9 @@ large sprites whose soft edges and empty corners are most of what they
 cover, were up to 11 ms of a 1080p frame, blending each of those pixels in
 for nothing. Their pixel shader lets such a pixel go (nv2a_psh_dk.c); the
 picture is the same, as the blend would have rounded back to what was there.
-Not while depth or stencil is written or the samples are counted (the lens
-flares' visibility tests), which a let-go pixel would change.
+Not while depth or stencil is written (a stencil only tested is not) or the
+samples are counted (the lens flares' visibility tests), which a let-go
+pixel would change.
 debug.gpu_blend_discard = false: never. */
 static unsigned long blend_discard(void)
 {
@@ -2257,8 +2260,13 @@ static unsigned long blend_discard(void)
 	if (!enabled || !D3D__RenderState[D3DRS_ALPHABLENDENABLE] || device.visibility_test_active ||
 		!(writes & D3DCOLORWRITEENABLE_ALL))
 		return 0;
+	/* (a stencil only tested - the game's stencil modes that accept or
+	reject, the most of a frame's - is not written, whatever is let go) */
 	if ((D3D__RenderState[D3DRS_ZENABLE] && D3D__RenderState[D3DRS_ZWRITEENABLE]) ||
-		D3D__RenderState[D3DRS_STENCILENABLE])
+		(D3D__RenderState[D3DRS_STENCILENABLE] && D3D__RenderState[D3DRS_STENCILWRITEMASK] &&
+		(D3D__RenderState[D3DRS_STENCILFAIL] != D3DSTENCILOP_KEEP ||
+		D3D__RenderState[D3DRS_STENCILZFAIL] != D3DSTENCILOP_KEEP ||
+		D3D__RenderState[D3DRS_STENCILPASS] != D3DSTENCILOP_KEEP)))
 	{
 		static int said;
 
