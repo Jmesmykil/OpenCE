@@ -783,7 +783,8 @@ static boolean rasterizer_screen_effect_port_fast_warp(
 	return TRUE;
 }
 
-/* port: a blur (the convolution's blur, as cutscenes draw it) drawn small,
+/* port: a blur (the convolution's blur, or its warp without a mask: the
+"dazed" screens cutscenes draw, the same passes of the same shader) drawn small,
 on the Switch, unless debug.original_blur is set (halo_screen_fast_blur).
 Each of its passes averages four copies of the screen, apart diagonally by
 its radius; the native builds drew several times the passes at the
@@ -820,7 +821,9 @@ static boolean rasterizer_screen_effect_port_small_blur(
 	boolean small;
 
 	if (!halo_screen_fast_blur() ||
-		parameters->convolution_type != _rasterizer_screen_effect_convolution_type_blur ||
+		(parameters->convolution_type != _rasterizer_screen_effect_convolution_type_blur &&
+		(parameters->convolution_type != _rasterizer_screen_effect_convolution_type_warp ||
+		parameters->convolution_mask)) ||
 		parameters->video_on ||
 		main_get_window_count() > 1)
 		return FALSE;
@@ -845,7 +848,8 @@ static boolean rasterizer_screen_effect_port_small_blur(
 	{
 		logged_radius = parameters->convolution_radius;
 		logged_passes = pass_count;
-		platform_log("screen blur: radius %.2f, %d passes, a spread of %.1f texels at %dx%d: %s",
+		platform_log("screen blur: %s, radius %.2f, %d passes, a spread of %.1f texels at %dx%d: %s",
+			parameters->convolution_type == _rasterizer_screen_effect_convolution_type_warp ? "warp" : "blur",
 			parameters->convolution_radius, pass_count, spread, width, height,
 			small ? "drawn small" : "drawn as the game draws it");
 	}
@@ -895,6 +899,35 @@ void _rasterizer_screen_effect(
 		real port_blur_scale_x = 1.0f;
 		real port_blur_scale_y = 1.0f;
 		boolean port_blur;
+
+		/* port: each convolution effect said once, what it is: the log tells
+		which effects the port's small paths take (below) */
+		{
+			static short logged_type = -1;
+			static short logged_extra_passes = -1;
+			static boolean logged_mask = FALSE;
+			static real logged_filters = -1.0f;
+			real filters = parameters->filter_light_enhancement_intensity + parameters->filter_desaturation_intensity * 2.0f;
+
+			if (parameters->convolution_type != _rasterizer_screen_effect_convolution_type_none &&
+				(parameters->convolution_type != logged_type ||
+				parameters->convolution_extra_passes != logged_extra_passes ||
+				(parameters->convolution_mask != NULL) != logged_mask ||
+				(filters > 0.0f) != (logged_filters > 0.0f)))
+			{
+				logged_type = parameters->convolution_type;
+				logged_extra_passes = parameters->convolution_extra_passes;
+				logged_mask = parameters->convolution_mask != NULL;
+				logged_filters = filters;
+				platform_log("screen effect: convolution %s, %s, %d extra passes, radius %.2f, light enhancement %.2f, "
+					"desaturation %.2f, video %s",
+					parameters->convolution_type == _rasterizer_screen_effect_convolution_type_warp ? "warp" :
+					parameters->convolution_type == _rasterizer_screen_effect_convolution_type_blur ? "blur" : "?",
+					parameters->convolution_mask ? "with a mask" : "no mask", parameters->convolution_extra_passes,
+					parameters->convolution_radius, parameters->filter_light_enhancement_intensity,
+					parameters->filter_desaturation_intensity, parameters->video_on ? "on" : "off");
+			}
+		}
 
 		/* port: the zoom drawn small (rasterizer_screen_effect_port_fast_warp): no
 		passes here */
