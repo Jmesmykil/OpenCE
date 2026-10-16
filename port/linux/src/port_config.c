@@ -674,14 +674,8 @@ static const struct config_setting config_settings[] =
 		"Aim with the gyroscope: the phone's on Android; on the Switch the\n"
 		"controller's, each local player from their own (a Pro Controller, the\n"
 		"console held in the hands, or one Joy-Con; of two, the right one).\n"
-		"\"false\" is the stick only, \"true\" adds the turn to the view. \"zoom\" is\n"
-		"the same as \"true\" with input.gyro_zoom_only. Settings > Gamepads >\n"
-		"Gyro Aim, or here." },
-	{ "input.gyro_zoom_only", _config_boolean, "false", "HALO_GYRO_ZOOM_ONLY", _environment_value, _platform_android,
-		"While input.gyro_aim is on, the gyroscope turns the view only while the\n"
-		"player is zoomed in (a scope), for fine aiming. false: it aims all the\n"
-		"time it is on. An older input.gyro_aim of \"zoom\", with this line not yet\n"
-		"in the file, is read as this on." },
+		"\"false\" is the stick only, \"true\" adds the turn to the view, \"zoom\" adds\n"
+		"it only while the player is zoomed in, for fine aiming." },
 	{ "input.gyro_sensitivity_horizontal", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_HORIZONTAL",
 		_environment_value, _platform_android,
 		"How far the view turns left and right for the gyroscope, when\n"
@@ -1433,15 +1427,10 @@ static void config_replace_string(const char *name, const char *text)
 
 /* settings added after an older one that meant both: a file that has
 game.ragdoll and not game.ragdoll_players or game.ragdoll_ai gives that
-value to the one it lacks (a new file has both, at "none"). An older
-input.gyro_aim of "zoom", with input.gyro_zoom_only not yet in the file,
-is that setting on */
+value to the one it lacks (a new file has both, at "none") */
 static void config_apply_older_settings(toml_datum_t table)
 {
 	toml_datum_t legacy = toml_seek(table, "game.ragdoll");
-	toml_datum_t aim = toml_seek(table, "input.gyro_aim");
-	toml_datum_t zoom = toml_seek(table, "input.gyro_zoom_only");
-	long index;
 
 	if (legacy.type == TOML_STRING)
 	{
@@ -1449,12 +1438,6 @@ static void config_apply_older_settings(toml_datum_t table)
 			config_replace_string("game.ragdoll_players", legacy.u.s);
 		if (toml_seek(table, "game.ragdoll_ai").type == TOML_UNKNOWN)
 			config_replace_string("game.ragdoll_ai", legacy.u.s);
-	}
-	if (aim.type == TOML_STRING && !strcmp(aim.u.s, "zoom") && zoom.type == TOML_UNKNOWN)
-	{
-		index = config_setting_index("input.gyro_zoom_only");
-		if (index >= 0 && config_settings[index].type == _config_boolean)
-			config_values[index].boolean = 1;
 	}
 }
 

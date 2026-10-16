@@ -229,10 +229,8 @@ _gamepads["categories"] = [
 SCREENS["gamepad_setup/gyro"] = {
     "screen": "gyro_aim_screen", "header": _gamepads["header"], "spacing": 30,
     "rows": [
-        ("GYRO AIM:", "input.gyro_aim", ON_OFF,
-         "Turn the view with the gyroscope.", None),
-        ("ONLY ON ZOOM:", "input.gyro_zoom_only", YES_NO,
-         "The gyroscope turns the view only while\nzoomed in.", None),
+        ("GYRO AIM:", "input.gyro_aim", ON_OFF + [("ONLY ON ZOOM", "zoom")],
+         "Turn the view with the gyroscope,\nalways, or only while zoomed in.", None),
         ("HORIZONTAL SENSITIVITY:", "input.gyro_sensitivity_horizontal",
          [(f"{value:g}", f"{value:g}") for value in
           (0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10)],
