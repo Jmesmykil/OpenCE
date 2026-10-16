@@ -32,6 +32,12 @@ when texture coordinate 0 is clipped (halo_texture_clip, d3d8_dk.c): the
 shader lets a pixel go first if its u or v is outside the limits in its
 alpha_reference. The Xbox leaves the bit 0. */
 #define NV2A_PIXEL_KEY_CLIP 0x10000000u
+/* and the stage whose coordinates are clipped (0 for the shadows' stage 0,
+so their keys stay as they were), and whether its w is clipped too: a 3D
+texture's (the dynamic lights' distance attenuation) */
+#define NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT 20
+#define NV2A_PIXEL_KEY_CLIP_STAGE_MASK (3u << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT)
+#define NV2A_PIXEL_KEY_CLIP_3D 0x00400000u
 /* and this one for the zoom's blend of its blurred small copy of the screen
 over the screen (halo_screen_warp_blend, d3d8_dk.c; nv2a_psh_dk.c) */
 #define NV2A_PIXEL_KEY_WARP_BLEND 0x40000000u

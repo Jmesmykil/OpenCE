@@ -168,6 +168,14 @@ symbols in this file:
 #include "rasterizer_xbox_draw_primitives.h"
 #include "rasterizer_xbox_internal.h"
 
+
+/* port: the margin past the dynamic lights' distance attenuation's box
+(0 to 1 in its coordinates) inside which their passes on the level are
+still drawn (halo_texture_clip_stage): its texture, filtered linearly, is
+black at its border, and a texel's reach past the edge of a texture of 16
+or more texels keeps whatever its edge lets through */
+#define RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP (1.0f / 16.0f)
+
 /* ---------- constants */
 
 enum
@@ -1318,11 +1326,17 @@ void _rasterizer_environment_diffuse_light_draw(
 				D3DRS_PSFINALCOMBINERCONSTANT0,
 				real_rgb_color_to_pixel32(&shader_environment->environment.diffuse.material_color));
 
+			/* port: drawn only inside the light's box, where its distance
+			attenuation (stage 2, black past its border) lets anything through
+			(halo_texture_clip_stage; RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP) */
+			halo_texture_clip_stage(2, TRUE, -RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP,
+				1.0f + RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP);
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			halo_texture_clip_stage(NONE, FALSE, 0.0f, 0.0f);
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.environment_dynamic_draw_count++;
@@ -2040,11 +2054,18 @@ void _rasterizer_environment_specular_light_draw(
 			}
 			rasterizer_set_pixel_shader(&pixel_shader);
 
+			/* port: a point light (no gel) drawn only inside its box, where its
+			distance attenuation (stage 1, black past its border) lets anything
+			through (halo_texture_clip_stage); a spot light has none */
+			if (specular_light_vertex_shader_permutation_index == 0)
+				halo_texture_clip_stage(1, TRUE, -RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP,
+					1.0f + RASTERIZER_ENVIRONMENT_PORT_LIGHT_CLIP);
 			rasterizer_draw_dynamic_triangles_static_vertices(
 				dynamic_triangle_buffer_index,
 				first_triangle_index,
 				triangle_count,
 				vertex_buffer);
+			halo_texture_clip_stage(NONE, FALSE, 0.0f, 0.0f);
 			if (rasterizer_debug_options.statistics_mode == _rasterizer_statistics_mode_enabled)
 			{
 				rasterizer_frame_statistics.specular_light_dynamic_draw_count++;

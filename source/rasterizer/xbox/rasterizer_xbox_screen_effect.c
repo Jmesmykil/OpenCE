@@ -783,6 +783,79 @@ static boolean rasterizer_screen_effect_port_fast_warp(
 	return TRUE;
 }
 
+/* port: a blur (the convolution's blur, as cutscenes draw it) drawn small,
+on the Switch, unless debug.original_blur is set (halo_screen_fast_blur).
+Each of its passes averages four copies of the screen, apart diagonally by
+its radius; the native builds drew several times the passes at the
+display's resolution (the steps in _rasterizer_screen_effect), up to 24
+passes of 1080p in a cutscene, 39 ms of a frame. Here the game's own passes,
+as many as the Xbox drew with its radius, go through the targets of the
+zoom's warp (about 360 lines): the first reads the screen and writes a small
+target, the ones between go from one small target to the other, and the last
+reads the small target and draws over the screen with the game's own last
+pass (its filters and its blend). Only where the blur spreads a pixel over
+1.5 of the small targets' texels or more: a slight blur is drawn as the game
+draws it, as the small targets would lose what it keeps. TRUE with the
+scale from the viewport's game pixels to the small targets' texels. */
+#define RASTERIZER_SCREEN_EFFECT_PORT_BLUR_LEAST_SPREAD 1.5f
+
+/* (the port's, port/linux/src/sdl_platform.c) */
+void platform_log(char const *format, ...);
+
+static boolean rasterizer_screen_effect_port_small_blur(
+	struct rasterizer_cinematic_screen_effect_parameters const *parameters,
+	real *scale_x,
+	real *scale_y)
+{
+	static real logged_radius = -1.0f;
+	static short logged_passes = -1;
+	real screen_scale;
+	real spread;
+	short viewport_width;
+	short viewport_height;
+	short width;
+	short height;
+	short divisor;
+	short pass_count;
+	boolean small;
+
+	if (!halo_screen_fast_blur() ||
+		parameters->convolution_type != _rasterizer_screen_effect_convolution_type_blur ||
+		parameters->video_on ||
+		main_get_window_count() > 1)
+		return FALSE;
+
+	viewport_width = global_window_parameters.camera.viewport_bounds.x1 -
+		global_window_parameters.camera.viewport_bounds.x0;
+	viewport_height = global_window_parameters.camera.viewport_bounds.y1 -
+		global_window_parameters.camera.viewport_bounds.y0;
+	screen_scale = halo_screen_scale();
+	divisor = (short)(viewport_height * screen_scale / RASTERIZER_SCREEN_EFFECT_PORT_WARP_LINES + 0.5f);
+	if (viewport_width <= 0 || viewport_height <= 0 || divisor < 2)
+		return FALSE;
+	width = (short)(viewport_width * screen_scale / divisor + 0.5f);
+	height = (short)(viewport_height * screen_scale / divisor + 0.5f);
+	pass_count = (parameters->convolution_extra_passes + 1) * 2;
+	/* a pass moves each copy by the radius each way: over the passes the
+	spread is the radius times the root of their count, in game pixels, here
+	in the small targets' texels */
+	spread = parameters->convolution_radius * square_root((real)pass_count) * (real)width / (real)viewport_width;
+	small = spread >= RASTERIZER_SCREEN_EFFECT_PORT_BLUR_LEAST_SPREAD;
+	if (parameters->convolution_radius != logged_radius || pass_count != logged_passes)
+	{
+		logged_radius = parameters->convolution_radius;
+		logged_passes = pass_count;
+		platform_log("screen blur: radius %.2f, %d passes, a spread of %.1f texels at %dx%d: %s",
+			parameters->convolution_radius, pass_count, spread, width, height,
+			small ? "drawn small" : "drawn as the game draws it");
+	}
+	if (!small || !rasterizer_screen_effect_port_warp_targets(width, height))
+		return FALSE;
+	*scale_x = (real)width / (real)viewport_width;
+	*scale_y = (real)height / (real)viewport_height;
+	return TRUE;
+}
+
 /* ---------- public code */
 
 void _rasterizer_screen_effect(
@@ -819,11 +892,18 @@ void _rasterizer_screen_effect(
 		unsigned long light_enhancement_input;
 		unsigned long desaturation_input;
 		struct rasterizer_cinematic_screen_effect_parameters scaled_parameters;
+		real port_blur_scale_x = 1.0f;
+		real port_blur_scale_y = 1.0f;
+		boolean port_blur;
 
 		/* port: the zoom drawn small (rasterizer_screen_effect_port_fast_warp): no
 		passes here */
 		if (rasterizer_screen_effect_port_fast_warp(parameters))
 			pass_count = 0;
+		/* port: a blur drawn small (rasterizer_screen_effect_port_small_blur):
+		its passes go through the small targets, as many as the Xbox's */
+		port_blur = pass_count > 1 &&
+			rasterizer_screen_effect_port_small_blur(parameters, &port_blur_scale_x, &port_blur_scale_y);
 
 		/* port: the native builds draw the screen at several pixels to the
 		Xbox's one (halo_screen_scale): a convolution's few copies of the
@@ -831,7 +911,8 @@ void _rasterizer_screen_effect(
 		at 640x480, and at four times the pixels they stand apart as sharp
 		ghosts (the zoom's warp). The same spread in that many times the
 		passes, each a step of it, blends them again. */
-		if (parameters->convolution_type != _rasterizer_screen_effect_convolution_type_none && !parameters->video_on)
+		if (parameters->convolution_type != _rasterizer_screen_effect_convolution_type_none && !parameters->video_on &&
+			!port_blur)
 		{
 			long steps = (long)(halo_screen_scale() + 0.999f);
 
@@ -1065,9 +1146,39 @@ void _rasterizer_screen_effect(
 				D3DRS_ZBIAS,
 				0);
 
-			rasterizer_screen_effect_set_texture_transforms(parameters, pass, pass_count, NULL);
+			/* port: a blur drawn small reads the small target the pass before
+			wrote, its coordinates in that target's texels, and draws into the
+			other small target, all but its last pass (above) */
+			if (port_blur && pass > 0)
+			{
+				real constants[8][4];
+				short row;
 
-			if (destination_target != NONE)
+				for (stage = 0; stage < 4; stage++)
+					IDirect3DDevice8_SetTexture(global_d3d_device, stage,
+						(IDirect3DBaseTexture8 *)rasterizer_screen_effect_port_warp_textures[1 + ((pass - 1) & 1)]);
+				rasterizer_screen_effect_set_texture_transforms(parameters, pass, pass_count, constants);
+				constants[0][3] -= global_window_parameters.camera.viewport_bounds.x0;
+				constants[1][3] -= global_window_parameters.camera.viewport_bounds.y0;
+				constants[2][3] -= global_window_parameters.camera.viewport_bounds.x0;
+				constants[3][3] -= global_window_parameters.camera.viewport_bounds.y0;
+				for (row = 0; row < 8; row++)
+				{
+					real scale = (row & 1) ? port_blur_scale_y : port_blur_scale_x;
+
+					constants[row][0] *= scale;
+					constants[row][1] *= scale;
+					constants[row][2] *= scale;
+					constants[row][3] *= scale;
+				}
+				IDirect3DDevice8_SetVertexShaderConstant(global_d3d_device, -81, constants, 8);
+			}
+			else
+				rasterizer_screen_effect_set_texture_transforms(parameters, pass, pass_count, NULL);
+
+			if (port_blur && pass < pass_count - 1)
+				rasterizer_screen_effect_port_warp_target(1 + (pass & 1));
+			else if (destination_target != NONE)
 				rasterizer_set_target(destination_target, FALSE, FALSE, FALSE, FALSE);
 
 			if (parameters->video_on)

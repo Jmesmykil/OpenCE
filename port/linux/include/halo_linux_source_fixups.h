@@ -75,12 +75,19 @@ in [low, high], or (clip FALSE) everywhere: a shadow cast on the level
 outside its map; the Switch's renderer clips there (port/switch/guest/
 d3d8_dk.c), the others draw it all */
 void halo_texture_clip(unsigned char clip, float low, float high);
+/* the same for a stage's coordinates, in two or three (stage -1 for none):
+the dynamic lights' passes on the level, which add nothing past their
+distance attenuation's box (source/rasterizer/xbox/rasterizer_xbox_environment.c) */
+void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float low, float high);
 /* whether the zoom's blur is drawn on a small copy of the screen and blended
 over it once (source/rasterizer/xbox/rasterizer_xbox_screen_effect.c), and
 that blend's shader on or off for the draws that follow: the Switch's
 renderer only (port/switch/guest/d3d8_dk.c; debug.original_zoom) */
 unsigned char halo_screen_fast_warp(void);
 void halo_screen_warp_blend(unsigned char on);
+/* whether a blur screen effect is drawn on small targets (the same file;
+the Switch's renderer only, debug.original_blur) */
+unsigned char halo_screen_fast_blur(void);
 /* the mouse in the menus (source/interface/ui_widget.c) */
 #include "halo_ui_pointer.h"
 /* TRUE when B steps out of a custom-map folder or the Map screen's

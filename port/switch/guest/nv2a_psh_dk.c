@@ -820,17 +820,32 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 		"\tvec4 t0 = vec4(0.0), t1 = vec4(0.0), t2 = vec4(0.0), t3 = vec4(0.0);\n"
 		"\tfloat dot0 = 0.0, dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n");
 
-	/* texture coordinate 0's clip (NV2A_PIXEL_KEY_CLIP, halo_texture_clip in
-	d3d8_dk.c): a pixel whose u or v, as stage 0 samples them, is outside
-	[alpha_reference.y, .z] does nothing - a shadow cast on the level, outside
-	its map - and is let go before the stages read their textures */
+	/* a stage's coordinates' clip (NV2A_PIXEL_KEY_CLIP, halo_texture_clip in
+	d3d8_dk.c): a pixel whose u or v (and w, for a 3D texture), as the stage
+	samples them, is outside [alpha_reference.y, .z] does nothing - a shadow
+	cast on the level outside its map, a dynamic light's pass outside its
+	reach - and is let go before the stages read their textures */
 	if (key->texture_modes & NV2A_PIXEL_KEY_CLIP)
-		xgpu_text_append(&text,
-			"\t{\n"
-			"\t\tvec2 clip_uv = xT0.xy / (xT0.w != 0.0 ? xT0.w : 1.0) * texture_scale[0].xy;\n"
-			"\t\tif (any(lessThan(clip_uv, vec2(alpha_reference.y))) || any(greaterThan(clip_uv, vec2(alpha_reference.z))))\n"
-			"\t\t\tdiscard;\n"
-			"\t}\n");
+	{
+		int clip_stage = (int)((key->texture_modes & NV2A_PIXEL_KEY_CLIP_STAGE_MASK) >> NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT);
+
+		/* (the stage's 3D coordinates: a dynamic light's distance
+		attenuation, which is black past its box) */
+		if (key->texture_modes & NV2A_PIXEL_KEY_CLIP_3D)
+			xgpu_text_append(&text,
+				"\t{\n"
+				"\t\tvec3 clip_uvw = xT%d.xyz / (xT%d.w != 0.0 ? xT%d.w : 1.0) * texture_scale[%d].xyz;\n"
+				"\t\tif (any(lessThan(clip_uvw, vec3(alpha_reference.y))) || any(greaterThan(clip_uvw, vec3(alpha_reference.z))))\n"
+				"\t\t\tdiscard;\n"
+				"\t}\n", clip_stage, clip_stage, clip_stage, clip_stage);
+		else
+			xgpu_text_append(&text,
+				"\t{\n"
+				"\t\tvec2 clip_uv = xT%d.xy / (xT%d.w != 0.0 ? xT%d.w : 1.0) * texture_scale[%d].xy;\n"
+				"\t\tif (any(lessThan(clip_uv, vec2(alpha_reference.y))) || any(greaterThan(clip_uv, vec2(alpha_reference.z))))\n"
+				"\t\t\tdiscard;\n"
+				"\t}\n", clip_stage, clip_stage, clip_stage, clip_stage);
+	}
 	for (stage = 0; stage < 4; stage++)
 		texture_stage(&text, key, stage);
 

@@ -789,6 +789,14 @@ void halo_texture_clip(unsigned char clip, float low, float high)
 	(void)high;
 }
 
+void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float low, float high)
+{
+	(void)stage;
+	(void)three_dimensional;
+	(void)low;
+	(void)high;
+}
+
 /* (only the Switch's renderer draws the zoom's blur small: d3d8_dk.c) */
 unsigned char halo_screen_fast_warp(void)
 {
@@ -798,6 +806,11 @@ unsigned char halo_screen_fast_warp(void)
 void halo_screen_warp_blend(unsigned char on)
 {
 	(void)on;
+}
+
+unsigned char halo_screen_fast_blur(void)
+{
+	return 0;
 }
 
 /* display.anti_aliasing's FXAA over a window's 3D view (render.c calls this before the HUD and menus are drawn over it):
