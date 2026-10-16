@@ -2400,6 +2400,20 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 	key->fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key->fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
 	key->texture_modes |= blend_discard();
+	/* a 3D clip (a dynamic light's distance attenuation): the pixels past the
+	texture's reach go too, if it is known (dk_texture_reach) */
+	if (texture_clip[2] != 0.0f && texture_clip_3d)
+	{
+		D3DBaseTexture *texture = device.textures[texture_clip_stage];
+		float reach = texture && texture->Data ?
+			dk_texture_reach((unsigned long)PLATFORM_PHYSICAL_TO_VIRTUAL(texture->Data)) : -1.0f;
+
+		if (reach >= 0.0f)
+		{
+			texture_scale[texture_clip_stage][3] = reach;
+			key->texture_modes |= NV2A_PIXEL_KEY_CLIP_SPHERE;
+		}
+	}
 }
 
 static void draw_textures_send(const struct dk_command_textures *textures)

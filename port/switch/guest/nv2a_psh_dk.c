@@ -832,12 +832,19 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 		/* (the stage's 3D coordinates: a dynamic light's distance
 		attenuation, which is black past its box) */
 		if (key->texture_modes & NV2A_PIXEL_KEY_CLIP_3D)
+		{
 			xgpu_text_append(&text,
 				"\t{\n"
 				"\t\tvec3 clip_uvw = xT%d.xyz / (xT%d.w != 0.0 ? xT%d.w : 1.0) * texture_scale[%d].xyz;\n"
 				"\t\tif (any(lessThan(clip_uvw, vec3(alpha_reference.y))) || any(greaterThan(clip_uvw, vec3(alpha_reference.z))))\n"
-				"\t\t\tdiscard;\n"
-				"\t}\n", clip_stage, clip_stage, clip_stage, clip_stage);
+				"\t\t\tdiscard;\n", clip_stage, clip_stage, clip_stage, clip_stage);
+			/* (past the texture's reach: dk_texture_reach) */
+			if (key->texture_modes & NV2A_PIXEL_KEY_CLIP_SPHERE)
+				xgpu_text_append(&text,
+					"\t\tif (length(clip_uvw - vec3(0.5)) > texture_scale[%d].w)\n"
+					"\t\t\tdiscard;\n", clip_stage);
+			xgpu_text_append(&text, "\t}\n");
+		}
 		else
 			xgpu_text_append(&text,
 				"\t{\n"

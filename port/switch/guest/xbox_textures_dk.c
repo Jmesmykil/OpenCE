@@ -33,6 +33,7 @@ a time, and only the atlas's rows that changed are sent again.
 #include "menu_files.h"
 #include "text_hires.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -401,6 +402,79 @@ static void decode_level(const struct xgpu_texture_description *description, uns
 		free(x_offsets);
 	}
 }
+/* ---------- the 3D textures' reach (dk_texture_reach) */
+
+#define REACH_LIMIT 16
+
+static unsigned long decoded_bytes(const struct xgpu_texture_description *description, unsigned long level);
+
+static struct
+{
+	unsigned long address;
+	float reach;
+} reaches[REACH_LIMIT];
+static unsigned long reach_count, reach_next;
+
+static void reach_note(const struct xgpu_texture_description *description, unsigned long address,
+	const unsigned char *decoded)
+{
+	float reach = 0.0f;
+	unsigned long level, index;
+
+	for (level = 0; level < description->levels; level++)
+	{
+		unsigned long width = level_dimension(description->width, level);
+		unsigned long height = level_dimension(description->height, level);
+		unsigned long depth = level_dimension(description->depth, level);
+		const unsigned long *texels = (const unsigned long *)decoded;
+		float margin = sqrtf(1.0f / (float)(width * width) + 1.0f / (float)(height * height) +
+			1.0f / (float)(depth * depth));
+		unsigned long x, y, z;
+
+		for (z = 0; z < depth; z++)
+			for (y = 0; y < height; y++)
+				for (x = 0; x < width; x++)
+				{
+					float u, v, w, distance;
+
+					if (!texels[(z * height + y) * width + x])
+						continue;
+					u = ((float)x + 0.5f) / (float)width - 0.5f;
+					v = ((float)y + 0.5f) / (float)height - 0.5f;
+					w = ((float)z + 0.5f) / (float)depth - 0.5f;
+					distance = sqrtf(u * u + v * v + w * w) + margin;
+					if (distance > reach)
+						reach = distance;
+				}
+		decoded += decoded_bytes(description, level);
+	}
+	for (index = 0; index < reach_count && reaches[index].address != address; index++)
+		;
+	if (index == reach_count)
+	{
+		if (reach_count < REACH_LIMIT)
+			reach_count++;
+		else
+			index = reach_next++ % REACH_LIMIT;
+	}
+	reaches[index].address = address;
+	reaches[index].reach = reach;
+	platform_log("3D texture %lux%lux%lu at %08lx: reaches %.3f of its box's 0.866 from its centre", description->width,
+		description->height, description->depth, address, reach);
+}
+
+float dk_texture_reach(unsigned long address)
+{
+	unsigned long index;
+
+	for (index = 0; index < reach_count; index++)
+	{
+		if (reaches[index].address == address)
+			return reaches[index].reach;
+	}
+	return -1.0f;
+}
+
 /* ---------- upload */
 
 /* the bytes of a decoded level: 32 bits a texel, whatever the format was */
@@ -463,6 +537,8 @@ static void upload(uint32_t id, uint32_t kind, const struct xgpu_texture_descrip
 				at += decoded_bytes(description, level);
 			}
 		}
+		if (description->depth > 1 && !description->cube_map)
+			reach_note(description, (unsigned long)base, decoded);
 		command = dk_stream_command(DK_COMMAND_TEXTURE, sizeof(*command));
 		command->format = DK_TEXTURE_BGRA;
 		command->source = (uint32_t)(uintptr_t)decoded;

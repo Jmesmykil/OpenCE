@@ -38,6 +38,9 @@ texture's (the dynamic lights' distance attenuation) */
 #define NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT 20
 #define NV2A_PIXEL_KEY_CLIP_STAGE_MASK (3u << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT)
 #define NV2A_PIXEL_KEY_CLIP_3D 0x00400000u
+/* and, with it, the pixels past the texture's reach let go too (a ball in
+its box: dk_texture_reach), the reach in texture_scale[stage].w */
+#define NV2A_PIXEL_KEY_CLIP_SPHERE 0x20000000u
 /* A blended draw's pixels that would leave the target as it was, let go
 (blend_discard, d3d8_dk.c; nv2a_psh_dk.c): how the blend leaves it, and
 whether alpha is written too. 0 for a draw it is not for, so its key stays
