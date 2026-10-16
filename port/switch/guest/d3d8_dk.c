@@ -2230,6 +2230,47 @@ static void sampler_make(int stage, BOOL mipmapped, BOOL hires, struct dk_sample
 	color_to_vec4(state[D3DTSS_BORDERCOLOR], sampler->border);
 }
 
+/* A blended draw whose pixels leave the target as it was wherever the
+source adds nothing: particles and glows near the camera, many layers of
+large sprites whose soft edges and empty corners are most of what they
+cover, were up to 11 ms of a 1080p frame, blending each of those pixels in
+for nothing. Their pixel shader lets such a pixel go (nv2a_psh_dk.c); the
+picture is the same, as the blend would have rounded back to what was there.
+Not while depth or stencil is written or the samples are counted (the lens
+flares' visibility tests), which a let-go pixel would change.
+debug.gpu_blend_discard = false: never. */
+static unsigned long blend_discard(void)
+{
+	static int enabled = -1;
+	DWORD source = D3D__RenderState[D3DRS_SRCBLEND];
+	DWORD destination = D3D__RenderState[D3DRS_DESTBLEND];
+	DWORD operation = D3D__RenderState[D3DRS_BLENDOP];
+	DWORD writes = D3D__RenderState[D3DRS_COLORWRITEENABLE];
+	unsigned long mode = 0;
+
+	if (enabled < 0)
+	{
+		enabled = config_boolean("debug.gpu_blend_discard") != 0;
+		if (!enabled)
+			platform_log("blend discard: off (debug.gpu_blend_discard)");
+	}
+	if (!enabled || !D3D__RenderState[D3DRS_ALPHABLENDENABLE] || device.visibility_test_active ||
+		(D3D__RenderState[D3DRS_ZENABLE] && D3D__RenderState[D3DRS_ZWRITEENABLE]) ||
+		D3D__RenderState[D3DRS_STENCILENABLE] || !(writes & D3DCOLORWRITEENABLE_ALL))
+		return 0;
+	if (destination == D3DBLEND_ONE && (operation == D3DBLENDOP_ADD || operation == D3DBLENDOP_REVSUBTRACT))
+		mode = source == D3DBLEND_SRCALPHA ? NV2A_PIXEL_DISCARD_ADD_ALPHA : NV2A_PIXEL_DISCARD_ADD;
+	else if (operation == D3DBLENDOP_ADD && source == D3DBLEND_SRCALPHA && destination == D3DBLEND_INVSRCALPHA)
+		mode = NV2A_PIXEL_DISCARD_OVER;
+	else if (operation == D3DBLENDOP_ADD && ((source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR) ||
+		(source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO)))
+		mode = NV2A_PIXEL_DISCARD_MULTIPLY;
+	if (!mode)
+		return 0;
+	return (mode << NV2A_PIXEL_KEY_DISCARD_SHIFT) |
+		((writes & D3DCOLORWRITEENABLE_ALPHA) ? NV2A_PIXEL_KEY_DISCARD_ALPHA_WRITTEN : 0);
+}
+
 /* The pixel shader's key as prepare_draw builds it, and with it what the
 stages sample: every stage's texture is found here (finding one may send its
 texels to the host), as bind_textures does. */
@@ -2319,6 +2360,7 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key, float texture_scal
 	key->alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
 	key->fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
 	key->fog_table_mode = (unsigned char)D3D__RenderState[D3DRS_FOGTABLEMODE];
+	key->texture_modes |= blend_discard();
 }
 
 static void draw_textures_send(const struct dk_command_textures *textures)

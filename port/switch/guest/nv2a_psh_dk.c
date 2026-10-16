@@ -968,6 +968,27 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 			xgpu_text_append(&text, "\tif (!(floor(clamp(result.a, 0.0, 1.0) * 255.0 + 0.5) %s alpha_reference.x)) discard;\n",
 				comparison);
 	}
+	/* a blended draw's pixel that would leave the target as it was
+	(NV2A_PIXEL_KEY_DISCARD_*, blend_discard in d3d8_dk.c): let go. What the
+	blend adds is under half a step of an 8-bit channel there, so the target
+	rounds back to what it held */
+	if (key->texture_modes & NV2A_PIXEL_KEY_DISCARD_MASK)
+	{
+		unsigned long discard = (key->texture_modes & NV2A_PIXEL_KEY_DISCARD_MASK) >> NV2A_PIXEL_KEY_DISCARD_SHIFT;
+		int alpha = (key->texture_modes & NV2A_PIXEL_KEY_DISCARD_ALPHA_WRITTEN) != 0;
+
+		xgpu_text_append(&text, "\t{\n\t\tvec4 blended = clamp(result, 0.0, 1.0);\n\t\tconst float nothing = 0.49 / 255.0;\n");
+		if (discard == NV2A_PIXEL_DISCARD_ADD || discard == NV2A_PIXEL_DISCARD_ADD_ALPHA)
+			xgpu_text_append(&text, "\t\tif (%s(all(lessThan(blended.rgb, vec3(nothing)))%s))\n\t\t\tdiscard;\n",
+				discard == NV2A_PIXEL_DISCARD_ADD_ALPHA ? "blended.a < nothing || " : "",
+				alpha ? " && blended.a < nothing" : "");
+		else if (discard == NV2A_PIXEL_DISCARD_OVER)
+			xgpu_text_append(&text, "\t\tif (blended.a < nothing)\n\t\t\tdiscard;\n");
+		else if (discard == NV2A_PIXEL_DISCARD_MULTIPLY)
+			xgpu_text_append(&text, "\t\tif (all(greaterThan(blended.rgb, vec3(1.0 - nothing)))%s)\n\t\t\tdiscard;\n",
+				alpha ? " && blended.a > 1.0 - nothing" : "");
+		xgpu_text_append(&text, "\t}\n");
+	}
 	if (*config_string("debug.gpu_debug_expression"))
 		xgpu_text_append(&text, "\tresult = vec4(vec3(%s), 1.0);\n", config_string("debug.gpu_debug_expression"));
 	if (config_boolean("debug.gpu_debug_texture0"))

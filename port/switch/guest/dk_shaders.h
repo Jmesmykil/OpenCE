@@ -38,6 +38,22 @@ texture's (the dynamic lights' distance attenuation) */
 #define NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT 20
 #define NV2A_PIXEL_KEY_CLIP_STAGE_MASK (3u << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT)
 #define NV2A_PIXEL_KEY_CLIP_3D 0x00400000u
+/* A blended draw's pixels that would leave the target as it was, let go
+(blend_discard, d3d8_dk.c; nv2a_psh_dk.c): how the blend leaves it, and
+whether alpha is written too. 0 for a draw it is not for, so its key stays
+as it was. */
+#define NV2A_PIXEL_KEY_DISCARD_SHIFT 25
+#define NV2A_PIXEL_KEY_DISCARD_MASK (7u << NV2A_PIXEL_KEY_DISCARD_SHIFT)
+/* the destination kept whole and the source added (or taken away) in some
+proportion: kept where the source's colour is black */
+#define NV2A_PIXEL_DISCARD_ADD 1u
+/* the same, the proportion the source's alpha: kept also where that is 0 */
+#define NV2A_PIXEL_DISCARD_ADD_ALPHA 2u
+/* the source over the destination by its alpha: kept where that is 0 */
+#define NV2A_PIXEL_DISCARD_OVER 3u
+/* the destination times the source: kept where the source is white */
+#define NV2A_PIXEL_DISCARD_MULTIPLY 4u
+#define NV2A_PIXEL_KEY_DISCARD_ALPHA_WRITTEN 0x00800000u
 /* and this one for the zoom's blend of its blurred small copy of the screen
 over the screen (halo_screen_warp_blend, d3d8_dk.c; nv2a_psh_dk.c) */
 #define NV2A_PIXEL_KEY_WARP_BLEND 0x40000000u
