@@ -1,5 +1,19 @@
 # Changelog
 
+## Build 101
+
+- Switch: the maps the game plays are kept unpacked in memory instead of
+  in cache files on the SD card: maps load in a second or two, the game no
+  longer writes some 730 MB of cache files to the card, or a map to it each
+  time a cache file takes a new one, and the old cache files are deleted.
+  (thelinkin3000)
+- Switch: zooming in keeps the middle of the view sharp, where you aim; the
+  blur stays at the edges. (thelinkin3000)
+- Switch: gyroscope aiming turns 50% further at every sensitivity.
+  (thelinkin3000)
+
+Network version 29
+
 ## Build 100
 
 - Switch: zooming in costs about 3.7 ms less of the GPU's frame at 720p:
