@@ -984,9 +984,14 @@ char *nv2a_dk_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 				alpha ? " && blended.a < nothing" : "");
 		else if (discard == NV2A_PIXEL_DISCARD_OVER)
 			xgpu_text_append(&text, "\t\tif (blended.a < nothing)\n\t\t\tdiscard;\n");
-		else if (discard == NV2A_PIXEL_DISCARD_MULTIPLY)
+		else if (discard == NV2A_PIXEL_DISCARD_MULTIPLY || discard == NV2A_PIXEL_DISCARD_MIN)
 			xgpu_text_append(&text, "\t\tif (all(greaterThan(blended.rgb, vec3(1.0 - nothing)))%s)\n\t\t\tdiscard;\n",
 				alpha ? " && blended.a > 1.0 - nothing" : "");
+		else if (discard == NV2A_PIXEL_DISCARD_PREMULTIPLIED)
+			xgpu_text_append(&text, "\t\tif (all(lessThan(blended, vec4(nothing))))\n\t\t\tdiscard;\n");
+		else if (discard == NV2A_PIXEL_DISCARD_MAX)
+			xgpu_text_append(&text, "\t\tif (all(lessThan(blended.rgb, vec3(nothing)))%s)\n\t\t\tdiscard;\n",
+				alpha ? " && blended.a < nothing" : "");
 		xgpu_text_append(&text, "\t}\n");
 	}
 	if (*config_string("debug.gpu_debug_expression"))

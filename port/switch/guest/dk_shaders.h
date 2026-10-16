@@ -53,6 +53,13 @@ proportion: kept where the source's colour is black */
 #define NV2A_PIXEL_DISCARD_OVER 3u
 /* the destination times the source: kept where the source is white */
 #define NV2A_PIXEL_DISCARD_MULTIPLY 4u
+/* the source (its alpha already in its colour) over the destination by its
+alpha: kept where both are 0 */
+#define NV2A_PIXEL_DISCARD_PREMULTIPLIED 5u
+/* the larger of the two: kept where the source is black */
+#define NV2A_PIXEL_DISCARD_MAX 6u
+/* the smaller of the two: kept where the source is white */
+#define NV2A_PIXEL_DISCARD_MIN 7u
 #define NV2A_PIXEL_KEY_DISCARD_ALPHA_WRITTEN 0x00800000u
 /* and this one for the zoom's blend of its blurred small copy of the screen
 over the screen (halo_screen_warp_blend, d3d8_dk.c; nv2a_psh_dk.c) */

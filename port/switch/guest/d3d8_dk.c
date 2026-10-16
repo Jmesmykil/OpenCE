@@ -2255,9 +2255,17 @@ static unsigned long blend_discard(void)
 			platform_log("blend discard: off (debug.gpu_blend_discard)");
 	}
 	if (!enabled || !D3D__RenderState[D3DRS_ALPHABLENDENABLE] || device.visibility_test_active ||
-		(D3D__RenderState[D3DRS_ZENABLE] && D3D__RenderState[D3DRS_ZWRITEENABLE]) ||
-		D3D__RenderState[D3DRS_STENCILENABLE] || !(writes & D3DCOLORWRITEENABLE_ALL))
+		!(writes & D3DCOLORWRITEENABLE_ALL))
 		return 0;
+	if ((D3D__RenderState[D3DRS_ZENABLE] && D3D__RenderState[D3DRS_ZWRITEENABLE]) ||
+		D3D__RenderState[D3DRS_STENCILENABLE])
+	{
+		static int said;
+
+		if (!said++)
+			platform_log("blend discard: not for blended draws that write depth or stencil");
+		return 0;
+	}
 	if (destination == D3DBLEND_ONE && (operation == D3DBLENDOP_ADD || operation == D3DBLENDOP_REVSUBTRACT))
 		mode = source == D3DBLEND_SRCALPHA ? NV2A_PIXEL_DISCARD_ADD_ALPHA : NV2A_PIXEL_DISCARD_ADD;
 	else if (operation == D3DBLENDOP_ADD && source == D3DBLEND_SRCALPHA && destination == D3DBLEND_INVSRCALPHA)
@@ -2265,8 +2273,31 @@ static unsigned long blend_discard(void)
 	else if (operation == D3DBLENDOP_ADD && ((source == D3DBLEND_ZERO && destination == D3DBLEND_SRCCOLOR) ||
 		(source == D3DBLEND_DESTCOLOR && destination == D3DBLEND_ZERO)))
 		mode = NV2A_PIXEL_DISCARD_MULTIPLY;
+	else if (operation == D3DBLENDOP_ADD && source == D3DBLEND_ONE && destination == D3DBLEND_INVSRCALPHA)
+		mode = NV2A_PIXEL_DISCARD_PREMULTIPLIED;
+	/* (min and max take no factors) */
+	else if (operation == D3DBLENDOP_MAX)
+		mode = NV2A_PIXEL_DISCARD_MAX;
+	else if (operation == D3DBLENDOP_MIN)
+		mode = NV2A_PIXEL_DISCARD_MIN;
 	if (!mode)
+	{
+		/* (each blend no pixel is let go for, said once: what is left) */
+		static DWORD said[16];
+		static int said_count;
+		DWORD blend = (source & 0xff) | (destination & 0xff) << 8 | (operation & 0xffff) << 16;
+		int index;
+
+		for (index = 0; index < said_count && said[index] != blend; index++)
+			;
+		if (index == said_count && said_count < 16)
+		{
+			said[said_count++] = blend;
+			platform_log("blend discard: not for a blend of source %lu, destination %lu, operation %lu",
+				(unsigned long)source, (unsigned long)destination, (unsigned long)operation);
+		}
 		return 0;
+	}
 	return (mode << NV2A_PIXEL_KEY_DISCARD_SHIFT) |
 		((writes & D3DCOLORWRITEENABLE_ALPHA) ? NV2A_PIXEL_KEY_DISCARD_ALPHA_WRITTEN : 0);
 }
