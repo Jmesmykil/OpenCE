@@ -350,6 +350,11 @@ static const struct config_setting config_settings[] =
 	{ "game.ragdoll_ai", _config_string, "\"none\"", "HALO_RAGDOLL_AI", _environment_value, _platform_all,
 		"How an AI's body falls, the same choices as game.ragdoll_players.\n"
 		"Settings > Gameplay, or here. A cinematic keeps its own." },
+	{ "game.terminal_output", _config_string, "\"menus\"", "HALO_TERMINAL_OUTPUT", _environment_value, _platform_all,
+		"The game's messages at the bottom left of the screen (\"Shaders\n"
+		"preloaded.\", what the console's commands print): \"none\", \"menus\" (in\n"
+		"the main menu, not in a campaign or multiplayer game) or \"always\".\n"
+		"While the console is open they are shown. Settings > Gameplay, or here." },
 	{ "game.custom_edition", _config_boolean, "true", "HALO_CUSTOM_EDITION", _environment_value, _platform_all,
 		"Load and run Halo Custom Edition maps (not those that need OpenSauce):\n"
 		"put them and Custom Edition's bitmaps.map, sounds.map and loc.map in\n"

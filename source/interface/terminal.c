@@ -203,6 +203,24 @@ void terminal_gets_end(
 	return;
 }
 
+/* port: where the output lines are drawn (game.terminal_output: "none",
+"menus", the main menu's only, or "always"); while the console is open,
+always (port/linux/src/port_config.c) */
+const char *config_string(const char *name);
+boolean main_menu_is_active(void);
+
+static boolean terminal_output_shown(
+	void)
+{
+	const char *setting = config_string("game.terminal_output");
+
+	if (terminal_globals.input_state || !strcmp(setting, "always"))
+		return TRUE;
+	if (!strcmp(setting, "none"))
+		return FALSE;
+	return main_menu_is_active();
+}
+
 void terminal_draw(
 	void)
 {
@@ -250,7 +268,7 @@ void terminal_draw(
 			rasterizer_draw_string(&terminal_gets_bounds, NULL, NULL, 0, buffer);
 		}
 
-		if (terminal_render_enable)
+		if (terminal_render_enable && terminal_output_shown()) /* port: (terminal_output_shown) */
 		{
 			struct output_line_datum *line;
 			long line_index;

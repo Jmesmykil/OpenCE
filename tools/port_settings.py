@@ -368,6 +368,10 @@ SCREENS["gameplay"] = {
          [("NONE", "none"), ("WOODY", "woody"), ("HALO 2", "halo2")],
          "How an AI's body falls:\nthe animation, a loose ragdoll, or Halo 2's.",
          None),
+        ("TERMINAL OUTPUT:", "game.terminal_output",
+         [("NONE", "none"), ("MENUS ONLY", "menus"), ("ALWAYS", "always")],
+         "The game's messages at the bottom left: never,\nin the menus only, or in games too.",
+         None),
     ],
 }
 
