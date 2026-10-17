@@ -24,6 +24,31 @@ MODS = "main_menu/mods"
 MOD_ROWS = 11
 MODS_ITEM_PLACE = (192, 391)
 QUIT_ITEM_PLACE = (192, 427)
+# the profile settings' rows, in order: the PC version's nine and Gameplay,
+# second to last, all in the nine's room (78 to About's top, 342) so the
+# last one's 32-unit highlight stays beside the description panel. Each is
+# moved from its tag's top (the second number; Gameplay's is ours) by its
+# list's child offset (tools/ce_menus.py's CHILD_OFFSETS)
+PROFILE_ROWS = [("name_profile_item", 78), ("controller_setup_profile_item", 111),
+                ("gamepads_profile_item", 144), ("mouse_settings_profile_item", 177),
+                ("audio_settings_profile_item", 210), ("video_settings_profile_item", 243),
+                ("network_settings_profile_item", 277), ("color_profile_item", 277),
+                ("gameplay_profile_item", None), ("about_item", 310)]
+PROFILE_ROWS_TOP = 78
+PROFILE_ROWS_LAST_TOP = 342
+
+
+def profile_row_top(row: str) -> int:
+    """where a profile settings row is: the rows evenly spaced"""
+    index = [name for name, _ in PROFILE_ROWS].index(row)
+    return PROFILE_ROWS_TOP + round(index * (PROFILE_ROWS_LAST_TOP - PROFILE_ROWS_TOP) / (len(PROFILE_ROWS) - 1))
+
+
+def profile_row_offset(row: str) -> int:
+    """a PC row's child offset in the list, to its place"""
+    return profile_row_top(row) - dict(PROFILE_ROWS)[row]
+
+
 YES_NO = [("YES", "true"), ("NO", "false")]
 ON_OFF = [("ON", "true"), ("OFF", "false")]
 # the multiplayer armor colors, in the profile's order (player_profile.c)
@@ -394,8 +419,8 @@ STRING_OVERRIDES = {
         "Choose a window or the full\\nscreen, the frame rate and more.\\n\\nProfile:",
         "Internet play, updates and the\\nmultiplayer HUD.\\n\\nProfile:",
         "Change the current profile's\\nfree-for-all multiplayer color.\\n\\nProfile:",
-        "Halo: Combat Evolved, the Xbox\\ngame, on this computer.\\n\\nProfile:",
         "How players and the AI fall:\\nthe animation, or a ragdoll.\\n\\nProfile:",
+        "Halo: Combat Evolved, the Xbox\\ngame, on this computer.\\n\\nProfile:",
     ],
 }
 
@@ -615,9 +640,9 @@ def _controls_screen() -> list:
 
 
 def _gameplay_profile_item() -> list:
-    """Settings' Gameplay row, after About: the screen is this folder's"""
+    """Settings' Gameplay row, before About: the screen is this folder's"""
     name = f"{PE}/gameplay_profile_item"
-    return _widget(name, [("type", "text"), ("left", 51), ("top", 342), ("width", 232), ("height", 32),
+    return _widget(name, [("type", "text"), ("left", 51), ("top", profile_row_top("gameplay_profile_item")), ("width", 232), ("height", 32),
                           ("bitmap", "bitmaps/list_item_bkd"), ("text", "GAMEPLAY"), ("font", "ui\\large_ui"),
                           ("color", "#FF2896FF"), ("text_x", 13), ("text_y", 5)],
                    [f'<on event="a" open="{PE}/gameplay/gameplay_settings_screen"/>',
@@ -756,9 +781,10 @@ WIDGET_PATCHES = {
     # button settings, BITMAP_FRAMES; menu_functions.c's
     # profile_gamepad_layout)
     f"{PE}/profile_edit_extended_desc_pic": {"inputs": ["port gamepad layout preview"]},
-    # (Gameplay, after About: its screen is the gameplay file's)
+    # (Gameplay, before About: its screen is the gameplay file's; the rows'
+    # places, PROFILE_ROWS)
     f"{PE}/profile_edit_select_list": {"insert_before": {
-        f"{PE}/profile_edit_button_bar": [f'<child widget="{PE}/gameplay_profile_item" y="33"/>'],
+        f"{PE}/about_item": [f'<child widget="{PE}/gameplay_profile_item"/>'],
     }},
     # (straight to their screens: no "checking for updates" dialog, which
     # asked the PC version's servers)

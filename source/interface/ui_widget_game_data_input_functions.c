@@ -2266,10 +2266,12 @@ static void player_profile_edit_select_menu_update_extended_description(
 
 		description_child = list_widget->parameters.list.extended_description->child;
 		description_child->parameters.text_box.string_list_index = index;
-		/* port: Gameplay is the row after About. The picture's frames are
-		one for each of the nine rows the PC version had, then the
-		controller layouts, so Gameplay shows About's picture */
-		picture_index = child && child->name && !strcmp(child->name, "gameplay_profile_item") ? 8 : index;
+		/* port: Gameplay is the row before About (tools/port_settings.py's
+		PROFILE_ROWS). The picture's frames are one for each of the nine
+		rows the PC version had, then the controller layouts, so Gameplay
+		shows About's picture, and About, the row after it, its own */
+		picture_index = child && child->name && !strcmp(child->name, "gameplay_profile_item") ? 8 :
+			index > 8 ? index - 1 : index;
 		description_child->next->animation.current_frame_index = picture_index;
 	}
 	return;

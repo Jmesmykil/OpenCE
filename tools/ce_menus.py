@@ -80,6 +80,12 @@ CHILD_OFFSETS = {
      "ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_gametypes_item"): (0, 358),
     ("ui\\shell\\main_menu\\multiplayer_type_select\\multiplayer_type_select_screen",
      "ui\\shell\\main_menu\\blueline"): (64, 349),
+    # the profile settings' rows, ten in the nine's room
+    # (port_settings.PROFILE_ROWS)
+    **{("ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_edit\\profile_edit_select_list",
+        f"ui\\shell\\main_menu\\settings_select\\player_setup\\player_profile_edit\\{row}"):
+       (0, port_settings.profile_row_offset(row))
+       for row, top in port_settings.PROFILE_ROWS if top is not None},
     # the browser's rows up under the column titles, into the place of the
     # scroll up button (hidden: the list does not scroll)
     **{("ui\\shell\\main_menu\\multiplayer_type_select\\join_game\\join_game_items_list",
