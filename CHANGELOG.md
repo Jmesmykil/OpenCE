@@ -1,5 +1,53 @@
 # Changelog
 
+## Build 102
+
+- Switch: the game's GPU commands are handed to the GPU on a thread of
+  their own, so the game goes on with the next frame meanwhile; a full
+  40-player match ran without a fault. debug.render_thread in config.toml
+  turns it off. (thelinkin3000)
+- Switch: cutscene blurs (Pillar of Autumn, Two Betrayals) are drawn on a
+  small copy of the screen, as the zoom's are: from 18-39 ms of the GPU's
+  frame to about 2.6 ms. (thelinkin3000)
+- Switch: dynamic lights (the flashlight, explosions, plasma) are drawn
+  only within their reach, and object shadows only within their box on
+  the screen: shadows cost about half as much, lights about a tenth less.
+  (thelinkin3000)
+- Switch: transparent draws (particles, decals, glass) skip the pixels
+  their blend leaves as they were. (thelinkin3000)
+- Object shadows are limited to the largest 16 on screen
+  (display.shadow_limit), the others fading out, for crowded games.
+  (thelinkin3000)
+- Crowded games spend less time on bodies settling onto the ground: their
+  collision tests pass by objects they cannot hit before looking them up.
+  (thelinkin3000)
+- Switch: draws given a vertex at a time send only what each vertex sets:
+  a decal's vertices are a fifth of the data they were. (thelinkin3000)
+- Switch: 900p is a choice of Video Setup's resolution. (thelinkin3000)
+- New Game starts the level from its beginning, not from the profile's
+  last checkpoint. (thelinkin3000)
+- Settings > Gameplay: how players' and the AI's bodies fall (the death
+  animations, or a ragdoll), and the main menu's background keeps playing
+  on the settings screens. (WataNoge)
+- Settings > Gameplay > Terminal output: the game's messages at the bottom
+  left are shown in the main menu only by default, or never, or always
+  (game.terminal_output). (thelinkin3000)
+- From OpenCE: client-side mods, with a Mods menu, load order and checks
+  for mods that cannot be played together (MrBruh); the complete
+  high-resolution Xbox HUD, with Classic, Gems and Menu Gems button
+  styles, the pause menu's artwork and timer digits restored, and HUD and
+  text settings applied without reloading the map (chestahh); a vehicle
+  nobody drives follows the host's positions, and screen fog stays on the
+  canopy at a wider field of view (justinfilip); voice chat drops damaged
+  packets (Paul Hontz).
+
+Thanks to puginatux for testing the performance work so thoroughly: the
+profiles of cutscenes, flashlights, snow, explosions and crowded matches
+they recorded showed where each of these improvements was needed, and
+proved each one.
+
+Network version 29
+
 ## Build 101
 
 - Switch: the maps the game plays are kept unpacked in memory instead of
