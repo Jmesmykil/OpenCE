@@ -1402,6 +1402,20 @@ int host_sdl_show_simple_message_box(uint32_t flags, const char *title, const ch
 	return 1;
 }
 
+/* a question (the mods at startup: port_mods.c): the log, and no answer,
+which the guest takes as not able to ask */
+int host_sdl_show_message_box(uint32_t flags, const char *title, const char *message, int default_index,
+	const char *button0, const char *button1, const char *button2)
+{
+	(void)flags;
+	(void)default_index;
+	(void)button0;
+	(void)button1;
+	(void)button2;
+	host_logf(HOST_LOG_WARN, "%s: %s", title, message);
+	return -1;
+}
+
 /* ---------- Android's on-screen touch controls (port/android/host/host_touch.c)
 
 The guest's touch input asks for them through the import list the Switch

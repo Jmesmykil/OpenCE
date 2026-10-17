@@ -15,7 +15,13 @@ Usage: android_asm_convert.py input.s output.s
 import re
 import sys
 
-IDENT = re.compile(r'"[^"]*"|[A-Za-z_.$][\w.$]*')
+# a quoted name (its escapes kept: \" does not end it) or a plain one
+IDENT = re.compile(r'"(?:[^"\\]|\\.)*"|[A-Za-z_.$][\w.$]*')
+
+# directives whose operands are string literals, the same in both
+# syntaxes: they go through as they are, never renamed as symbols (data
+# starting with "_" would lose that byte)
+STRING_DIRECTIVES = {".ascii", ".asciz", ".string"}
 
 # Names the ELF assembler parses as registers. A Mach-O symbol is written with
 # a leading underscore (_x16 is Monocypher's static x16); stripping it leaves
@@ -27,9 +33,6 @@ REGISTERS = frozenset(
     + [f"{prefix}{index}" for prefix in ("x", "w") for index in range(31)]
     + [f"{prefix}{index}" for prefix in ("v", "q", "d", "s", "h", "b") for index in range(32)]
 )
-
-# directives whose quoted operands are text, not symbols' names
-STRING_DIRECTIVES = {".ascii", ".asciz", ".string"}
 
 DROP_DIRECTIVES = {
     ".subsections_via_symbols", ".build_version", ".watchos_version_min",
