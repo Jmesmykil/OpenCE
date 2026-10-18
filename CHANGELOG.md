@@ -1,5 +1,22 @@
 # Changelog
 
+## Build 104
+
+- Switch and Android (Vulkan): Custom Edition maps and mods draw their
+  armor, visors and HUD meters as on PC. Halo PC keeps a multipurpose
+  map's masks in other channels than the Xbox, and these renderers read
+  them in the Xbox's order: a modded cyborg's visor did not reflect, and
+  team colors and glow came out wrong. (thelinkin3000)
+- From OpenCE: a text chat for network games: T to everyone and Y to the
+  team on a keyboard, D-pad Up opens an on-screen keyboard for a
+  controller, Tab sends to everyone, the team or the vehicle; the host can
+  turn it off and mute players, players can mute one another from the
+  scoreboard, and Network Setup's new MULTIPLAYER HUD page holds its
+  settings (Jonas Volman, MrBruh). Streamer mode, on Network Setup's
+  STREAMER MODE page, hides slurs, swearing and insults in other players'
+  names and text, and in maps and mods (MrBruh). A host shares maps at up
+  to 20 MB/s, and a player helping it at up to 10 MB/s (MrBruh).
+
 ## Build 103
 
 - A level no longer shows a frame of itself before its intro's fade and
