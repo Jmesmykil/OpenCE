@@ -215,7 +215,7 @@ extern struct host_vk_backend host_vkb;
 /* host_vk_texture.c (phase 6): the guest's textures as images */
 struct host_vk_image
 {
-	uint32_t id, kind, format, width, height, depth, levels, layers;
+	uint32_t id, kind, format, width, height, depth, levels, layers, swizzle;
 	VkImage image;
 	VkImageView view;
 	VkImageLayout layout;

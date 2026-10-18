@@ -277,7 +277,11 @@ level of a compressed format is its 4x4 blocks, of BGRA its texels, depth
 slices after one another - the next face face_bytes on from the last. The
 host reads source_bytes from source when it runs the command. With
 source_bytes 0 the image is only made (its texels undefined), for
-DK_COMMAND_TEXTURE_ROWS to fill. */
+DK_COMMAND_TEXTURE_ROWS to fill. swizzle is where each channel the shaders
+sample (red, green, blue, alpha, a byte each from the lowest) is taken from
+in the image (0 to 3, the same four), or 0 for each from its own: Halo PC's
+multipurpose maps and HUD meters in a mod (xbox_textures_dk.c). A texture
+whose swizzle changes is made again. */
 struct dk_command_texture
 {
 	struct dk_command_header header;
@@ -291,6 +295,7 @@ struct dk_command_texture
 	uint32_t source;
 	uint32_t face_bytes;
 	uint32_t source_bytes;
+	uint32_t swizzle;
 };
 
 /* writes rows [top, top + rows) of one level of 2D BGRA image id (made by

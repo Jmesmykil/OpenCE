@@ -1878,7 +1878,7 @@ struct texture
 	DkImage image;
 	uint32_t slot;
 	uint32_t block, offset, size;
-	uint32_t kind, format, width, height, depth, levels;
+	uint32_t kind, format, width, height, depth, levels, swizzle;
 };
 
 /* what is waiting for the GPU to be done with a submission */
@@ -2354,7 +2354,15 @@ static int texture_make(struct texture *texture, const struct dk_command_texture
 	}
 	dkImageInitialize(&texture->image, &layout, tex.blocks[texture->block].memory, texture->offset);
 	dkImageViewDefaults(&view, &texture->image);
+	if (command->swizzle)
+	{
+		uint32_t channel;
+
+		for (channel = 0; channel < 4; channel++)
+			view.swizzle[channel] = (DkImageSwizzle)(DkImageSwizzle_Red + ((command->swizzle >> (8 * channel)) & 3));
+	}
 	dkImageDescriptorInitialize(&descriptors[texture->slot], &view, false, false);
+	texture->swizzle = command->swizzle;
 	texture->kind = command->kind;
 	texture->format = command->format;
 	texture->width = command->width;
@@ -2610,10 +2618,10 @@ static void texture_receive(const struct dk_command_texture *command)
 	event->a[5] = command->source;
 	event->a[6] = command->source_bytes;
 	event->a[11] = texture->present;
-	/* the same shape: written in place; else remade */
+	/* the same shape (and channels): written in place; else remade */
 	if (texture->present && (texture->kind != command->kind || texture->format != command->format ||
 		texture->width != command->width || texture->height != command->height || texture->depth != command->depth ||
-		texture->levels != command->levels))
+		texture->levels != command->levels || texture->swizzle != command->swizzle))
 		texture_release(texture);
 	if (!texture->present && !texture_make(texture, command))
 		return;
