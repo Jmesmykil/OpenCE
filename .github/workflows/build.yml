@@ -27,13 +27,18 @@ name: Build
 # installed look for (their updaters: port/switch/host/host_update.c,
 # port/linux/src/updater.c, the Android app's Updater.java), and the number
 # has to be higher than the last release's, which they compare it with (and
-# Android's version code is). Pushes to branches build without a release.
+# Android's version code is). Pushes to other branches build without a
+# release; a push to main builds nothing, as its commits are built by their
+# tag's run (two runs at once, the branch's and the tag's, otherwise), or
+# by hand (workflow_dispatch).
 # Its web build is then the site on GitHub Pages
 # (https://halocombatevolved.com/, port/web/README.md).
 on:
   push:
     branches:
       - "**"
+      # (built by its tags: see the top)
+      - "!main"
     tags:
       - "v*"
     # (not checked for a tag's push, which always builds)
