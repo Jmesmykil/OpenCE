@@ -44,9 +44,6 @@ static void tag_index_error(
 	return;
 }
 #include "halo_port_window.h"
-#ifdef HALO_ANDROID
-#include "platform.h"
-#endif
 
 /* ---------- public code */
 

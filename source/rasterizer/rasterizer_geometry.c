@@ -101,9 +101,6 @@ symbols in this file:
 #include "rasterizer_geometry.h"
 #include "rasterizer_geometry_compression.h"
 #include "halo_port_window.h"
-#ifdef HALO_ANDROID
-#include "platform.h"
-#endif
 
 /* ---------- constants */
 

@@ -132,11 +132,6 @@ symbols in this file:
 #include "tag_files/files.h"
 #include "cache_files.h"
 #include "physical_memory_map.h"
-#ifdef HALO_ANDROID
-/* (the window's address, and the moving of the data with it) */
-#include "platform.h"
-#include "halo_port_window.h"
-#endif
 #include "sound_cache.h"
 #include "texture_cache.h"
 #include "interface/ui_widget.h"
