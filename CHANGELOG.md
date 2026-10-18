@@ -1,5 +1,20 @@
 # Changelog
 
+## Build 103
+
+- A level no longer shows a frame of itself before its intro's fade and
+  cinematic: with interpolation, no frame of a map is drawn before its
+  first tick. (thelinkin3000)
+- Switch: a level started in the first seconds after launch waits under
+  the loading screen for its shaders, as later ones do, instead of starting
+  with draws missing for a second or two (the intro's fade and letterbox
+  bars among them). (thelinkin3000)
+- From OpenCE: mods can replace a map's models whose nodes, markers and
+  regions match (MrBruh); Audio Setup's new SOUND PROCESSING screen holds
+  Reverb and the resampler, SINC (the default) or LINEAR, which is brighter
+  (audio.resampler), and turning reverb off no longer muffles every sound
+  (WhiteBulL, MrBruh).
+
 ## Build 102
 
 - Switch: the game's GPU commands are handed to the GPU on a thread of
