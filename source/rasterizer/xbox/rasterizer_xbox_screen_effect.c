@@ -1030,11 +1030,14 @@ void _rasterizer_screen_effect(
 		ghosts (the zoom's warp). The Xbox's passes are drawn as they were,
 		and a few more, each a third of the last one's radius, fill the gaps
 		between the copies (rasterizer_screen_effect_refinement_passes); not
-		for a blur drawn small, whose passes are the Xbox's. */
+		for a blur drawn small, whose passes are the Xbox's, nor for the zoom
+		drawn small, which drew them all above (pass_count 0: refinement
+		passes added to none were two full-screen passes of the warp, 2.6 ms
+		of a Switch's zoomed frame at 720p). */
 		stock_pass_count = pass_count;
 		original_parameters = parameters;
 		if (parameters->convolution_type != _rasterizer_screen_effect_convolution_type_none && !parameters->video_on &&
-			!port_blur)
+			!port_blur && pass_count > 0)
 		{
 			short refinement_passes = rasterizer_screen_effect_refinement_passes(halo_screen_scale());
 
