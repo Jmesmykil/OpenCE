@@ -232,6 +232,26 @@ extern int host_dk_capture;
 /* debug.render_thread (host_dk.c): the guest's commands run on a thread of
 their own, not the game's */
 extern int host_dk_render_thread;
+/* the high-res HUD's sheets, decoded on a thread of the host's own
+(host_dk_hud.c, dk_commands.h's DK_COMMAND_HUD_PREPARE) */
+struct dk_hud_sheet;
+struct host_dk_hud_levels
+{
+	/* every level, blue first, the largest first, one after another; aligned
+	and rounded (bytes) to DK_MEMBLOCK_ALIGNMENT, out of the CPU's cache */
+	unsigned char *texels;
+	uint32_t bytes;
+	uint32_t width, height, levels;
+};
+extern int host_dk_hud_log;
+void host_dk_hud_prepare(const struct dk_hud_sheet *list, uint32_t count);
+void host_dk_hud_forget(void);
+/* the guest's (host_imports.list): 1 the sheet decoded, 0 not yet (queued if
+it was not), -1 never */
+int host_dk_hud_ready(unsigned int asset, unsigned int png, unsigned int png_size, unsigned int tag);
+/* the render thread's: the decoded levels, now its own; 0 if there are none */
+int host_dk_hud_take(uint32_t asset, struct host_dk_hud_levels *levels);
+int host_dk_hud_decode(const unsigned char *data, uint32_t size, struct host_dk_hud_levels *levels);
 /* debug.frame_pacing: the game thread waits, as it hands a frame over, for
 the present of the frame before it (host_dk_pace, from the stand-in
 window's swap) */

@@ -80,6 +80,12 @@ what was decoded and not drawn let go. The desktop builds' alone: Android
 and the web decode each when it is first drawn */
 void hud_hires_map_loaded(const long *assets, long count);
 void hud_hires_map_unloaded(void);
+#ifdef HALO_SWITCH
+/* the deko3d renderer's (xbox_textures_dk.c): a map's sheets, for the host
+to decode now; and those decoded and not drawn let go */
+void dk_hud_prepare(const long *assets, long count);
+void dk_hud_forget(void);
+#endif
 /* whether its green is its coverage (d3d8_gl.c, nv2a_psh.c: coverage_alpha) */
 int hud_hires_override_coverage(long asset);
 /* the GL texture of the texture drawn for some of a bitmap's sprites whose

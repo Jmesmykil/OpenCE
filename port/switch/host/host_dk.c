@@ -2812,6 +2812,154 @@ static void texture_free_receive(const struct dk_command_texture_free *command)
 	}
 }
 
+/* ---------- the high-res HUD's sheets (host_dk_hud.c)
+
+An image made from a sheet's decoded levels: the buffer they are in is the
+storage of a memory block of its own, which the GPU copies them from, so
+nothing is copied by a CPU; the block and its buffer are let go once the
+GPU has run the copy (its submission retired). */
+
+#define HUD_SOURCES 64
+
+static struct
+{
+	uint32_t serial;
+	DkMemBlock memory;
+	unsigned char *texels;
+} hud_sources[HUD_SOURCES];
+static uint32_t hud_source_count;
+
+static void hud_sources_collect(int all)
+{
+	uint32_t retired = host_dk_retired(), index, kept = 0;
+
+	/* (every one: what is recorded submitted, and the GPU waited for) */
+	if (all && hud_source_count)
+	{
+		if (dk.recorded)
+			commands_submit_partial();
+		queue_wait_idle();
+	}
+	for (index = 0; index < hud_source_count; index++)
+	{
+		if (!all && hud_sources[index].serial > retired)
+		{
+			hud_sources[kept++] = hud_sources[index];
+			continue;
+		}
+		dkMemBlockDestroy(hud_sources[index].memory);
+		free(hud_sources[index].texels);
+	}
+	hud_source_count = kept;
+}
+
+static void hud_prepare_receive(const struct dk_command_hud_prepare *command)
+{
+	if (command->header.size < sizeof(*command) ||
+		command->count > (command->header.size - sizeof(*command)) / sizeof(command->sheets[0]))
+	{
+		host_logf(HOST_LOG_ERROR, "deko3d: a bad HUD prepare command (%u sheets in %u bytes)",
+			(unsigned)command->count, (unsigned)command->header.size);
+		return;
+	}
+	host_dk_hud_prepare(command->sheets, command->count);
+}
+
+static void hud_image_receive(const struct dk_command_hud_image *command)
+{
+	struct dk_command_texture made;
+	struct host_dk_hud_levels levels;
+	struct texture *texture;
+	DkMemBlock memory;
+	DkGpuAddr source;
+	uint64_t start = armGetSystemTick();
+	uint32_t level, offset = 0;
+	int late = 0;
+
+	if (!dk.ready || !tex.image_descriptors || !command->id || command->id >= DK_TEXTURE_LIMIT)
+		return;
+	hud_sources_collect(0);
+	if (!host_dk_hud_take(command->sheet.asset, &levels))
+	{
+		/* (let go since the guest was told it was ready: a map's change) */
+		late = 1;
+		if (!host_dk_hud_decode((const unsigned char *)(uintptr_t)command->sheet.png, command->sheet.png_size,
+			&levels))
+		{
+			texture_problem("high-res hud sheet %u could not be decoded for image %u", (unsigned)command->sheet.asset,
+				(unsigned)command->id);
+			return;
+		}
+	}
+	if (hud_source_count == HUD_SOURCES)
+		hud_sources_collect(1);
+	memset(&made, 0, sizeof(made));
+	made.id = command->id;
+	made.kind = DK_TEXTURE_2D;
+	made.format = DK_TEXTURE_BGRA;
+	made.width = levels.width;
+	made.height = levels.height;
+	made.depth = 1;
+	made.levels = levels.levels;
+	texture = &tex.table[command->id];
+	if (!texture_command_valid(&made))
+	{
+		texture_problem("high-res hud sheet %u is %ux%u, %u levels: no image", (unsigned)command->sheet.asset,
+			(unsigned)levels.width, (unsigned)levels.height, (unsigned)levels.levels);
+		free(levels.texels);
+		return;
+	}
+	if (texture->present && (texture->kind != made.kind || texture->format != made.format ||
+		texture->width != made.width || texture->height != made.height || texture->depth != 1 ||
+		texture->levels != made.levels || texture->swizzle != 0))
+		texture_release(texture);
+	memory = memory_block(levels.bytes, DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuCached, levels.texels);
+	if (!memory || (!texture->present && !texture_make(texture, &made)))
+	{
+		texture_problem("no memory for high-res hud sheet %u's image %u", (unsigned)command->sheet.asset,
+			(unsigned)command->id);
+		if (memory)
+			dkMemBlockDestroy(memory);
+		free(levels.texels);
+		return;
+	}
+	source = dkMemBlockGetGpuAddr(memory);
+	textures_fence(1);
+	for (level = 0; level < levels.levels; level++)
+	{
+		DkImageView view;
+		DkImageRect rectangle;
+		DkCopyBuf copy;
+
+		dkImageViewDefaults(&view, &texture->image);
+		view.mipLevelOffset = (uint8_t)level;
+		view.mipLevelCount = 1;
+		rectangle.x = rectangle.y = rectangle.z = 0;
+		rectangle.width = level_size(levels.width, level);
+		rectangle.height = level_size(levels.height, level);
+		rectangle.depth = 1;
+		copy.addr = source + offset;
+		copy.rowLength = 0;
+		copy.imageHeight = 0;
+		dkCmdBufCopyBufferToImage(dk.commands, &copy, &view, &rectangle, 0);
+		offset += rectangle.width * rectangle.height * 4;
+	}
+	tex.written_unfenced = 1;
+	tex.stages_dirty = 1;
+	dk.recorded = 1;
+	profile.frame.texture_writes++;
+	profile.frame.texture_bytes += offset;
+	hud_sources[hud_source_count].serial = dk.serial;
+	hud_sources[hud_source_count].memory = memory;
+	hud_sources[hud_source_count].texels = levels.texels;
+	hud_source_count++;
+	if (host_dk_hud_log)
+		host_logf(HOST_LOG_INFO, "deko3d: high-res hud: %s made image %u (%ux%u) in %.2f ms%s",
+			command->sheet.tag ? (const char *)(uintptr_t)command->sheet.tag : "?", (unsigned)command->id,
+			(unsigned)levels.width, (unsigned)levels.height, armTicksToNs(armGetSystemTick() - start) / 1e6,
+			late ? " (decoded here: let go before it was drawn)" : "");
+}
+
 /* ---------- the dummy a stage with no image samples: opaque black, as OpenGL's
 unbound texture is */
 
@@ -4014,6 +4162,16 @@ static void submit_run(const unsigned char *at, uint32_t size)
 		case DK_COMMAND_MARKER:
 			if (header->size >= sizeof(struct dk_command_marker))
 				marker_receive((const struct dk_command_marker *)header);
+			break;
+		case DK_COMMAND_HUD_PREPARE:
+			hud_prepare_receive((const struct dk_command_hud_prepare *)header);
+			break;
+		case DK_COMMAND_HUD_IMAGE:
+			if (header->size >= sizeof(struct dk_command_hud_image))
+				hud_image_receive((const struct dk_command_hud_image *)header);
+			break;
+		case DK_COMMAND_HUD_FORGET:
+			host_dk_hud_forget();
 			break;
 		default:
 			host_logf(HOST_LOG_ERROR, "deko3d: unknown command %u", (unsigned)header->type);

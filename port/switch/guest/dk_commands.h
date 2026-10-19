@@ -42,6 +42,9 @@ enum
 	DK_COMMAND_VISIBILITY_BEGIN,
 	DK_COMMAND_VISIBILITY_END,
 	DK_COMMAND_MARKER,
+	DK_COMMAND_HUD_PREPARE,
+	DK_COMMAND_HUD_IMAGE,
+	DK_COMMAND_HUD_FORGET,
 };
 
 /* a surface's kind, as the host makes its image */
@@ -296,6 +299,52 @@ struct dk_command_texture
 	uint32_t face_bytes;
 	uint32_t source_bytes;
 	uint32_t swizzle;
+};
+
+/* The high-res HUD's PNGs (port/linux/src/hud_hires.c's embedded ones, in
+the guest image) are decoded by the host, on a thread of its own, with
+their mip levels, into the host's memory: made on the game thread, at the
+first frame to draw it, a 2048 by 2048 sheet held that frame 135 to 180 ms,
+and the guest's heap has no room to hold a map's sheets ahead. */
+
+/* a map's sheets, to decode now, in this order (what was decoded and not
+drawn for the map before is let go first: DK_COMMAND_HUD_FORGET) */
+struct dk_hud_sheet
+{
+	uint32_t asset;
+	/* guest addresses: the PNG, and the bitmap's tag name (for the log) */
+	uint32_t png;
+	uint32_t png_size;
+	uint32_t tag;
+};
+
+struct dk_command_hud_prepare
+{
+	struct dk_command_header header;
+	uint32_t count;
+	struct dk_hud_sheet sheets[];
+};
+
+/* image id made from the sheet's decoded levels, which the host lets go:
+sent once host_dk_hud_ready says they are */
+struct dk_command_hud_image
+{
+	struct dk_command_header header;
+	uint32_t id;
+	/* (the sheet again, should the host have let it go since: decoded then) */
+	struct dk_hud_sheet sheet;
+};
+
+/* the host's (host_imports.list): 1 the sheet decoded, and an image of it
+may be asked for; 0 not yet (queued if it was not); -1 never. png and tag
+are the sheet's, as struct dk_hud_sheet's */
+int host_dk_hud_ready(unsigned int asset, unsigned int png, unsigned int png_size, unsigned int tag);
+
+/* the sheets decoded and not drawn let go, those still to decode dropped
+(the map is unloaded) */
+struct dk_command_hud_forget
+{
+	struct dk_command_header header;
 };
 
 /* writes rows [top, top + rows) of one level of 2D BGRA image id (made by

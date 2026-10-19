@@ -687,6 +687,10 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
         LINUX_DIR / "src" / "posix_files.c",
         TOML_DIR / "tomlc17.c",
     ]
+    # the port's zlib (inflate only, its names z_), for the high-res HUD's
+    # PNGs, which the host decodes as a map loads (host_dk_hud.c)
+    zlib_sources = [ZLIB_DIR / name for name in ZLIB_SOURCES]
+    host_sources += zlib_sources
     # the disc image reader, so a retail .iso on the card can be unpacked into
     # the maps folder by the port itself rather than copied there by hand. It is
     # the same source the desktop port and the guest use, built here without
@@ -706,6 +710,10 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
         # known even in a stub build, whose folder is then the same one)
         if source.name == "host_dk_shaders.c":
             cflags = f'{host_cflags} -DHOST_DK_UAM_COMMIT=\\"{UAM_COMMIT[:12]}\\"'
+        if source in zlib_sources:
+            cflags = " ".join([host_cflags, f"-I{ZLIB_DIR}", *ZLIB_DEFINES])
+        if source.name == "host_dk_hud.c":
+            cflags = f"{host_cflags} -I{ZLIB_DIR}"
         n.build(outputs=obj, rule="switch_host_cc", inputs=source, variables={"cflags": cflags},
                 implicit=[syscall_h])
         host_objects.append(obj)

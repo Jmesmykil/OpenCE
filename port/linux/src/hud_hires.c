@@ -240,6 +240,12 @@ int hud_hires_sprites_drawable(long asset, unsigned long address, unsigned long 
 	PNG need only decode. A GL texture asked for in deko3d's image, which
 	has no GL, was none, and the sprites were drawn as they are) */
 	(void)levels;
+#ifdef HALO_SWITCH
+	/* (the host decodes it, on a thread of its own: should it not, the
+	sprites' own texture is drawn, xbox_textures_dk.c's hud_image) */
+	if (!textures[asset].decodes)
+		textures[asset].decodes = 1;
+#endif
 	if (!textures[asset].decodes)
 	{
 		unsigned long width, height;
@@ -702,6 +708,10 @@ static void *decode_thread_main(void *unused)
 
 void hud_hires_map_unloaded(void)
 {
+#ifdef HALO_SWITCH
+	/* (the host's sheets decoded for the map and not drawn) */
+	dk_hud_forget();
+#endif
 #ifdef HUD_HIRES_DECODE_AHEAD
 	long asset;
 
@@ -718,6 +728,10 @@ void hud_hires_map_unloaded(void)
 	}
 #endif
 }
+
+#if defined(HALO_SWITCH) && !defined(HUD_HIRES_DECODE_AHEAD)
+static long assets_queued[MAXIMUM_TEXTURES];
+#endif
 
 void hud_hires_map_loaded(const long *assets, long count)
 {
@@ -755,6 +769,21 @@ void hud_hires_map_loaded(const long *assets, long count)
 		for (index = 0; index < MAXIMUM_TEXTURES; index++)
 			textures[index].decode_state = _decode_none;
 	}
+#elif defined(HALO_SWITCH)
+	/* (decoded by the host, on a thread of its own, into its own memory:
+	host_dk_hud.c. The titles' are decoded when first drawn) */
+	long index, queued = 0;
+
+	dk_hud_forget();
+	if (!config_boolean("display.high_res_hud"))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (assets[index] >= 0 && assets[index] < hud_hires_asset_count() &&
+			!hud_hires_embedded[assets[index]].title)
+			assets_queued[queued++] = assets[index];
+	}
+	dk_hud_prepare(assets_queued, queued);
 #else
 	(void)assets;
 	(void)count;

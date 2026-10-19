@@ -860,36 +860,107 @@ static uint32_t menu_image(unsigned long data, unsigned long *levels)
 	return menu_images[menu_image_count++].id;
 }
 
-/* a high-res HUD bitmap (hud_hires.h): made on first use, and kept */
+/* a high-res HUD bitmap (hud_hires.h): its image made by the host from the
+sheet it decoded, on a thread of its own, as the map loaded or when first
+asked for (host_dk_hud.c), and kept. Till the host has it the original
+bitmap is drawn: made here, at the first frame to draw it, a 2048 by 2048
+sheet held that frame 135 to 180 ms. */
 static struct
 {
 	uint32_t id;
 	unsigned long levels;
 	BOOL tried;
+	/* (the host asked once a frame at most) */
+	unsigned long asked_frame;
 } *hud_images;
 
+static BOOL hud_images_made(void)
+{
+	if (!hud_images)
+		hud_images = calloc(hud_hires_embedded_count, sizeof(*hud_images));
+	return hud_images != NULL;
+}
+
+static void hud_sheet_fill(long asset, struct dk_hud_sheet *sheet)
+{
+	const struct hud_hires_embedded *embedded = &hud_hires_embedded[asset];
+
+	sheet->asset = (uint32_t)asset;
+	sheet->png = (uint32_t)(uintptr_t)embedded->png;
+	sheet->png_size = embedded->png_size;
+	sheet->tag = (uint32_t)(uintptr_t)embedded->tag;
+}
+
+void dk_hud_prepare(const long *assets, long count)
+{
+	struct dk_command_hud_prepare *command;
+	long index, queued = 0;
+
+	if (!hud_images_made() || count <= 0)
+		return;
+	command = dk_stream_command(DK_COMMAND_HUD_PREPARE, sizeof(*command) + (unsigned long)count * sizeof(command->sheets[0]));
+	for (index = 0; index < count; index++)
+	{
+		/* (not one already made) */
+		if (assets[index] >= 0 && assets[index] < (long)hud_hires_embedded_count && !hud_images[assets[index]].tried)
+			hud_sheet_fill(assets[index], &command->sheets[queued++]);
+	}
+	command->count = (uint32_t)queued;
+}
+
+void dk_hud_forget(void)
+{
+	dk_stream_command(DK_COMMAND_HUD_FORGET, sizeof(struct dk_command_hud_forget));
+}
+
+/* its image, or 0: the host's not decoded yet (the original drawn
+meanwhile), or never */
 static uint32_t hud_image(long asset, unsigned long *levels)
 {
-	if (asset < 0 || asset >= (long)hud_hires_embedded_count)
+	*levels = 1;
+	if (asset < 0 || asset >= (long)hud_hires_embedded_count || !hud_images_made())
 		return 0;
-	if (!hud_images)
-	{
-		hud_images = calloc(hud_hires_embedded_count, sizeof(*hud_images));
-		if (!hud_images)
-			return 0;
-	}
 	if (!hud_images[asset].tried)
 	{
 		const struct hud_hires_embedded *embedded = &hud_hires_embedded[asset];
+		const unsigned char *png = (const unsigned char *)embedded->png;
+		int answer;
 
+		if (hud_images[asset].asked_frame == texture_frame + 1)
+			return 0;
+		hud_images[asset].asked_frame = texture_frame + 1;
+		answer = host_dk_hud_ready((unsigned int)asset, (unsigned int)(uintptr_t)embedded->png, embedded->png_size,
+			(unsigned int)(uintptr_t)embedded->tag);
+		if (!answer)
+			return 0;
 		hud_images[asset].tried = TRUE;
-		hud_images[asset].id = png_image(embedded->png, embedded->png_size, &hud_images[asset].levels);
-		if (!hud_images[asset].id)
+		if (answer > 0 && embedded->png_size >= 24 && (hud_images[asset].id = id_take()) != 0)
+		{
+			struct dk_command_hud_image *command = dk_stream_command(DK_COMMAND_HUD_IMAGE, sizeof(*command));
+			unsigned long width = (unsigned long)png[16] << 24 | png[17] << 16 | png[18] << 8 | png[19];
+			unsigned long height = (unsigned long)png[20] << 24 | png[21] << 16 | png[22] << 8 | png[23];
+			unsigned long largest = width > height ? width : height;
+
+			command->id = hud_images[asset].id;
+			hud_sheet_fill(asset, &command->sheet);
+			/* (the host's levels: every one down to 1 by 1) */
+			hud_images[asset].levels = 1;
+			while (largest >> hud_images[asset].levels)
+				hud_images[asset].levels++;
+		}
+		else
 			platform_log("high-res hud: could not decode the texture for %s bitmap %d", embedded->tag,
 				embedded->bitmap);
 	}
 	*levels = hud_images[asset].levels;
 	return hud_images[asset].id;
+}
+
+/* whether it never will have one (not decoded): the original is drawn */
+static BOOL hud_image_failed(long asset)
+{
+	return asset < 0 || asset >= (long)hud_hires_embedded_count ||
+		(hud_images && hud_images[asset].tried && !hud_images[asset].id);
 }
 
 /* an entry's image and description: its replacement's, if it has one (as
@@ -1026,19 +1097,22 @@ uint32_t dk_texture_get(const DWORD *resource, const D3DCOLOR *palette, int *kin
 		entry->generation = memory_watch_generation(entry->address, entry->size);
 		if (!entry->generation)
 			entry->generation = 1;
+		unsigned long levels;
+
 		/* (which bitmap is here may have changed with the pixels) */
 		entry->override = -1;
 		if (!palettized && !entry->description.cube_map && entry->description.depth == 1)
 		{
-			unsigned long levels;
-
 			entry->override = hud_hires_override_find(entry->address, entry->description.width,
 				entry->description.height, entry->description.levels > 1 ?
 				xgpu_texture_level_offset(&entry->description, 1) : xgpu_texture_face_size(&entry->description));
-			if (entry->override >= 0 && !hud_image(entry->override, &levels))
+			/* (the original uploaded too while the host decodes the sheet: drawn
+			till then) */
+			if (entry->override >= 0 && !hud_image(entry->override, &levels) && hud_image_failed(entry->override))
 				entry->override = -1;
 		}
-		if (entry->override < 0 && platform_is_contiguous((void *)entry->address) &&
+		if ((entry->override < 0 || !hud_image(entry->override, &levels)) &&
+			platform_is_contiguous((void *)entry->address) &&
 			platform_is_contiguous((void *)(entry->address + entry->size - 1)))
 		{
 			if (config_boolean("debug.texture_log"))
