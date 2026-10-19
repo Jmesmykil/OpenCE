@@ -138,6 +138,9 @@ SCREENS = {
             ("RESOLUTION LIMIT:", "display.resolution_limit",
              [("480P", "480"), ("720P", "720"), ("900P", "900"), ("1080P", "1080")],
              "What the game draws at. Shown at 720p in handheld\nand 1080p docked; handheld draws 720p at most.", "switch"),
+            # (port/switch/guest/d3d8_dk.c's dynamic_resolution)
+            ("DYNAMIC RESOLUTION:", "display.dynamic_resolution", ON_OFF,
+             "Draw one step lower while the frame rate would\nfall under 55, and back up once it fits again.", "switch"),
             ("HIGH-RES HUD:", "display.high_res_hud", ON_OFF,
              "Draw the HUD from the high-res redraws; off\ndraws the game's own pictures.", None),
             ("BUTTON STYLE:", "display.hud_button_style",

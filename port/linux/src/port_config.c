@@ -225,6 +225,10 @@ static const struct config_setting config_settings[] =
 		"cover more than half the view; the others are left out. 11 as on the\n"
 		"Xbox; fewer for less overdraw where effects pile up close (the Switch's\n"
 		"8: the falls of the Halo level). Changes at once." },
+	{ "debug.show_resolution", _config_boolean, "false", "HALO_SHOW_RESOLUTION", _environment_value, _platform_all,
+		"Show the frames a second and the resolution the game draws at, in the\n"
+		"bottom right corner (\"(dynamic)\" while display.dynamic_resolution has\n"
+		"dropped a step). Changes at once." },
 	{ "display.shadow_limit", _config_integer, "16", "HALO_SHADOW_LIMIT", _environment_value, _platform_all,
 		"The most objects' shadows drawn at once: the biggest on the screen keep\n"
 		"theirs, and the rest fade out as the crowd moves. 0 for no limit, as on\n"
@@ -951,6 +955,18 @@ static const struct config_setting config_settings[] =
 		"\"1080\" (or any number between), no more than the console shows (1280x720\n"
 		"in handheld, 1920x1080 docked), which the picture is scaled up to. Changes\n"
 		"at once." },
+	{ "display.dynamic_resolution", _config_boolean, "false", "HALO_DYNAMIC_RESOLUTION", _environment_value,
+		_platform_android,
+		"While the GPU would hold the game under 55 frames a second (for half a\n"
+		"second), draw one step lower (1080 to 900, 900 to 720, 720 to 480: never\n"
+		"more), and go back once the frame would fit in 90% of a 60 Hz frame for\n"
+		"a second. Video Setup, or here. debug.show_resolution shows it. Changes\n"
+		"at once." },
+	{ "debug.resolution_uncapped", _config_boolean, "false", "HALO_RESOLUTION_UNCAPPED", _environment_value,
+		_platform_android,
+		"Draw at display.resolution_limit's lines even past what the console\n"
+		"shows, scaled down to it: a Switch Lite (720p) drawing 1080p, to test\n"
+		"a docked console's GPU load. Changes at once." },
 	{ "performance.cpu_clock", _config_string, "\"1785\"", "HALO_CPU_CLOCK", _environment_value, _platform_android,
 		"The CPU's clock: \"1785\" (1.7 GHz, the most Nintendo's own games use),\n"
 		"\"1020\" (1 GHz, the console's handheld rate: cooler, and the battery\n"

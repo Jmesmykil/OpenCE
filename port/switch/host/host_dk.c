@@ -171,6 +171,9 @@ static struct
 	int timing_armed;
 	uint64_t gpu_busy_total_ns, gpu_busy_peak_ns;
 	uint32_t gpu_frames;
+	/* the GPU's time on a frame, averaged over the last 16 or so, in
+	microseconds (host_dk_gpu_frame_us) */
+	volatile uint32_t gpu_average_us;
 	uint32_t command_rollovers;
 	/* set when the last piece is given: the rest of the frame's commands will
 	not fit unless the host submits and starts over (host_dk_submit does, between
@@ -1060,6 +1063,13 @@ static void gpu_timing_frame_begin(void)
 	}
 	if (dk.timing_count[dk.frame])
 	{
+		/* (an average over about 16 frames, for host_dk_gpu_frame_us) */
+		{
+			uint32_t busy_us = (uint32_t)(busy / 1000);
+
+			dk.gpu_average_us = dk.gpu_average_us ? dk.gpu_average_us + ((int32_t)busy_us - (int32_t)dk.gpu_average_us) / 16
+				: busy_us;
+		}
 		capture_slow_frame(busy);
 		dk.gpu_busy_total_ns += busy;
 		if (busy > dk.gpu_busy_peak_ns)
@@ -1435,6 +1445,14 @@ void host_dk_idle(void)
 	render_queue_drain();
 	if (dk.ready)
 		queue_wait_idle();
+}
+
+/* the guest's, for display.dynamic_resolution (d3d8_dk.c, between frames):
+the GPU's time on a frame, averaged over the last 16 or so, in
+microseconds; 0 before the first */
+unsigned int host_dk_gpu_frame_us(void)
+{
+	return dk.gpu_average_us;
 }
 
 /* the height host_dk_output_height last chose: 720 in handheld, 1080 docked */

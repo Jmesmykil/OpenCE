@@ -38,16 +38,18 @@
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_direct_camera" x="54" y="253" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_direct_camera" x="54" y="193" platform="web"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_resolution_limit" x="54" y="133" platform="switch"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_dynamic_resolution" x="54" y="163" platform="switch"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="54" y="283" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="54" y="223" platform="android web"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="54" y="163" platform="switch ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="54" y="193" platform="switch"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" x="54" y="163" platform="ps5"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" x="54" y="313" platform="desktop"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" x="54" y="253" platform="android web"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" x="54" y="193" platform="switch ps5"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_performance" x="54" y="223" platform="switch"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" x="54" y="223" platform="switch"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" x="54" y="193" platform="ps5"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_performance" x="54" y="253" platform="switch"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" x="54" y="343" platform="desktop"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" x="54" y="283" platform="android web"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" x="54" y="253" platform="switch"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" x="54" y="283" platform="android switch web"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" x="54" y="223" platform="ps5"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/button_bar" y="414"/>
 	</widget>
@@ -173,13 +175,22 @@
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/resolution_limit_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="480P|720P|900P|1080P" setting="display.resolution_limit" values="480|720|900|1080" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
 		<on event="created" run="port setting load"/>
 	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_dynamic_resolution" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="switch">
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/dynamic_resolution_label"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/dynamic_resolution_spinner" x="320" y="1"/>
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/dynamic_resolution_label" type="text" controller="1" width="300" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="13" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	</widget>
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/dynamic_resolution_spinner" type="spinner" left="3" top="2" width="147" height="20" flags="pass_unhandled_to_focused_child left_right_tabs_items" strings="ON|OFF" setting="display.dynamic_resolution" values="true|false" font="ui\large_ui" color="#FF2896FF" align="center" text_y="1" header_bitmap="bitmaps/arrow_sm_left" footer_bitmap="bitmaps/arrow_sm_right" header_bounds="7 -6 19 0" footer_bounds="7 150 19 156">
+		<on event="created" run="port setting load"/>
+	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_graphics" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/graphics_settings_screen"/>
 		<on event="start" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics/graphics_settings_screen"/>
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="13" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/graphics_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="14" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_fov_viewmodels" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels/fov_viewmodel_settings_screen"/>
@@ -187,7 +198,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="14" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/fov_viewmodels_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="15" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_performance" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF" platform="switch">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/performance/performance_settings_screen"/>
@@ -195,7 +206,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/performance_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/performance_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="15" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/performance_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="16" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/op_extra_effects" width="512" height="28" flags="pass_unhandled_to_focused_child" bitmap="bitmaps/option_bkds" color="#FF2896FF">
 		<on event="a" open="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects/extra_effects_settings_screen"/>
@@ -203,7 +214,7 @@
 		<on event="left_mouse" run="mouse emit accept event"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects_label"/>
 	</widget>
-	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="16" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
+	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/extra_effects_label" type="text" controller="1" width="512" height="22" string_list="main_menu/settings_select/player_setup/player_profile_edit/video_settings/labels" string_index="17" font="ui\large_ui" color="#FF2896FF" text_x="13" text_y="4">
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/button_defaults" type="text" width="128" height="24" bitmap="bitmaps/text_button_background" string_list="strings/common_button_captions" string_index="3" font="ui\small_ui" color="#FFFFFFFF" align="center" text_y="2">
 		<on event="a" run="port settings defaults"/>
@@ -229,6 +240,7 @@
 		<string text="SMOOTH MOTION:"/>
 		<string text="INSTANT AIM:"/>
 		<string text="RESOLUTION LIMIT:"/>
+		<string text="DYNAMIC RESOLUTION:"/>
 		<string text="GRAPHICS:"/>
 		<string text="FOV AND VIEWMODELS:"/>
 		<string text="PERFORMANCE:"/>
@@ -249,6 +261,7 @@
 		<string text="Draw a frame for every display refresh, blending\nbetween the game's 30 ticks a second."/>
 		<string text="In first person, turn the view the moment the\nmouse moves, not up to two ticks later."/>
 		<string text="What the game draws at. Shown at 720p in handheld\nand 1080p docked; handheld draws 720p at most."/>
+		<string text="Draw one step lower while the frame rate would\nfall under 55, and back up once it fits again."/>
 		<string text="The HUD, text, anti-aliasing, shadows,\nlighting and HDR."/>
 		<string text="The field of view and the first-person\nweapon. Their defaults keep the stock view."/>
 		<string text="How fast the console runs the game: a steadier\nframe rate, or a cooler console."/>

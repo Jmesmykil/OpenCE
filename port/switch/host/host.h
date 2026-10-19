@@ -51,6 +51,9 @@ void host_storage_commit(void);
 void host_clock_cpu(unsigned int mhz);
 /* the height presented at: 1080 docked, 720 in handheld (host_dk.c) */
 unsigned int host_dk_output_height(void);
+/* the GPU's time on a frame, averaged over the last 16 or so, in
+microseconds (display.dynamic_resolution: d3d8_dk.c) */
+unsigned int host_dk_gpu_frame_us(void);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);

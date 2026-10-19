@@ -2987,10 +2987,21 @@ static void screenshot_render(
 	return;
 }
 
+/* port: debug.show_resolution shows the frame rate with the resolution
+drawn at (halo_screen_width and halo_screen_pixel_scale, every renderer's),
+and the Switch's renderer says whether display.dynamic_resolution has
+dropped a step (weak: NULL elsewhere) */
+int config_boolean(const char *name);
+long halo_screen_width(void);
+float halo_screen_pixel_scale(void);
+extern int halo_screen_dynamic_resolution_dropped(void) __attribute__((weak));
+
 void main_framerate_render(
 	void)
 {
-	if (display_framerate)
+	boolean show_resolution = config_boolean("debug.show_resolution") != 0;
+
+	if (display_framerate || show_resolution)
 	{
 		long font_tag_index;
 
@@ -3002,8 +3013,9 @@ void main_framerate_render(
 			long frame_rate;
 			rectangle2d bounds;
 			/* room for three digits under C99 snprintf, which (unlike MSVC's
-			_snprintf) keeps a byte of the count for the terminator */
-			char frame_rate_string[8];
+			_snprintf) keeps a byte of the count for the terminator; and with
+			debug.show_resolution, the resolution after them */
+			char frame_rate_string[48];
 
 			bounds = render.camera.window_bounds;
 			/* The native ports draw at the display's refresh rate, up to
@@ -3033,13 +3045,30 @@ void main_framerate_render(
 				(void)frame_rate_real;
 			}
 
-			_snprintf(
-				frame_rate_string,
-				NUMBEROF(frame_rate_string) - 1,
-				"%d",
-				(short)frame_rate);
+			if (show_resolution)
+			{
+				float pixel_scale = halo_screen_pixel_scale();
+
+				_snprintf(
+					frame_rate_string,
+					NUMBEROF(frame_rate_string) - 1,
+					"%d %ldx%ld%s",
+					(short)frame_rate,
+					(long)(halo_screen_width() * pixel_scale + 0.5f),
+					(long)(480 * pixel_scale + 0.5f),
+					halo_screen_dynamic_resolution_dropped && halo_screen_dynamic_resolution_dropped() ?
+						" (dynamic)" : "");
+			}
+			else
+			{
+				_snprintf(
+					frame_rate_string,
+					NUMBEROF(frame_rate_string) - 1,
+					"%d",
+					(short)frame_rate);
+			}
 			frame_rate_string[NUMBEROF(frame_rate_string) - 1] = 0;
-			bounds.x0 = (short)(bounds.x1 - 50);
+			bounds.x0 = (short)(bounds.x1 - (show_resolution ? 230 : 50));
 			bounds.y0 = (short)(bounds.y1 - 50);
 			draw_string_set_format(NONE, _text_justification_left, 0);
 			draw_string_set_color(

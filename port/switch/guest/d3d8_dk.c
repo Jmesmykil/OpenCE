@@ -72,6 +72,98 @@ static long ui_offset;
 /* the host's (host_dk.c): the height it presents at, 1080 docked and 720 in
 handheld */
 unsigned int host_dk_output_height(void);
+unsigned int host_dk_gpu_frame_us(void);
+
+/* ---------- display.dynamic_resolution
+
+While the GPU's frame, averaged over the last 16 or so (host_dk_gpu_frame_us),
+is over DYNAMIC_DROP_US for DYNAMIC_DROP_FRAMES frames in a row, the screen
+is drawn one step lower (1080 to 900, 900 to 720, 720 to 480: never more);
+it goes back once the frame at the chosen lines, reckoned from the lower
+one's by their pixels, would be under DYNAMIC_RAISE_US for
+DYNAMIC_RAISE_FRAMES frames. A change waits DYNAMIC_HOLD_FRAMES after the
+last (the targets are made again at each), and the average its first
+DYNAMIC_SETTLE_FRAMES (it is the old size's until then). Asked between
+frames (screen_mode_choose, from halo_screen_commit), once a frame. */
+/* (dropped under 55 frames a second, 1/55 s of the GPU, for half a second;
+back up within 90% of a 60 Hz frame for a second) */
+#define DYNAMIC_DROP_US 18182
+#define DYNAMIC_RAISE_US 15000
+#define DYNAMIC_DROP_FRAMES 30
+#define DYNAMIC_RAISE_FRAMES 60
+#define DYNAMIC_HOLD_FRAMES 120
+#define DYNAMIC_SETTLE_FRAMES 20
+
+static struct
+{
+	unsigned int chosen, lower;
+	int dropped;
+	unsigned long frames_since_change, over, under;
+} dynamic;
+
+/* the lines a step below these (the steps 480, 720, 900 and 1080) */
+static unsigned int dynamic_step_below(unsigned int lines)
+{
+	return lines > 900 ? 900 : lines > 720 ? 720 : 480;
+}
+
+static unsigned int dynamic_resolution(unsigned int lines)
+{
+	unsigned int gpu_us;
+
+	if (!config_boolean("display.dynamic_resolution") || lines <= SCREEN_HEIGHT)
+	{
+		dynamic.dropped = 0;
+		dynamic.chosen = lines;
+		return lines;
+	}
+	if (lines != dynamic.chosen)
+	{
+		/* (another choice of lines, or the console docked or undocked:
+		begun again at it) */
+		dynamic.chosen = lines;
+		dynamic.dropped = 0;
+		dynamic.frames_since_change = dynamic.over = dynamic.under = 0;
+	}
+	dynamic.lower = dynamic_step_below(lines);
+	dynamic.frames_since_change++;
+	gpu_us = host_dk_gpu_frame_us();
+	if (dynamic.frames_since_change < DYNAMIC_SETTLE_FRAMES || !gpu_us)
+		return dynamic.dropped ? dynamic.lower : lines;
+	if (!dynamic.dropped)
+	{
+		dynamic.over = gpu_us > DYNAMIC_DROP_US ? dynamic.over + 1 : 0;
+		if (dynamic.over >= DYNAMIC_DROP_FRAMES && dynamic.frames_since_change >= DYNAMIC_HOLD_FRAMES)
+		{
+			dynamic.dropped = 1;
+			dynamic.frames_since_change = dynamic.over = dynamic.under = 0;
+			platform_log("dynamic resolution: the GPU at %.1f ms a frame: %u lines, from %u", gpu_us / 1000.0,
+				dynamic.lower, lines);
+		}
+	}
+	else
+	{
+		float ratio = (float)lines / (float)dynamic.lower;
+		float reckoned = gpu_us * ratio * ratio;
+
+		dynamic.under = reckoned < DYNAMIC_RAISE_US ? dynamic.under + 1 : 0;
+		if (dynamic.under >= DYNAMIC_RAISE_FRAMES && dynamic.frames_since_change >= DYNAMIC_HOLD_FRAMES)
+		{
+			dynamic.dropped = 0;
+			dynamic.frames_since_change = dynamic.over = dynamic.under = 0;
+			platform_log("dynamic resolution: the GPU at %.1f ms a frame at %u lines, %.1f at %u: back to %u",
+				gpu_us / 1000.0, dynamic.lower, reckoned / 1000.0, lines, lines);
+		}
+	}
+	return dynamic.dropped ? dynamic.lower : lines;
+}
+
+/* for debug.show_resolution's corner (main.c): whether the screen is a
+step under the chosen lines now */
+int halo_screen_dynamic_resolution_dropped(void)
+{
+	return dynamic.dropped;
+}
 #endif
 
 static void screen_mode_choose(long *width, float scale[2])
@@ -101,8 +193,12 @@ static void screen_mode_choose(long *width, float scale[2])
 		unsigned int height = lines > SCREEN_HEIGHT ? (unsigned int)(lines < 1080 ? lines : 1080) : SCREEN_HEIGHT;
 		unsigned int output = host_dk_output_height();
 
-		if (height > output)
+		/* (debug.resolution_uncapped: drawn at those lines all the same, and
+		scaled down to the screen: a Lite's handheld 720p drawing docked
+		1080p's load, for testing it) */
+		if (height > output && !config_boolean("debug.resolution_uncapped"))
 			height = output;
+		height = dynamic_resolution(height);
 		if (height > SCREEN_HEIGHT)
 			scale[0] = scale[1] = (float)height / (float)SCREEN_HEIGHT;
 	}

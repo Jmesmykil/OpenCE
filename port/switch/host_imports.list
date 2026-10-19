@@ -23,3 +23,4 @@ host_sdl_gamepad_gyro
 host_storage_commit
 host_clock_cpu
 host_dk_output_height
+host_dk_gpu_frame_us
