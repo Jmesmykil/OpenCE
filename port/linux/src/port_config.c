@@ -940,8 +940,9 @@ static const struct config_setting config_settings[] =
 		"looks up. true: tilting it up looks down. The stick's invert is its own." },
 #endif
 #if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
-	/* (the phone's: sdl_platform.c's platform_resolution_scale) */
-	{ "display.resolution_limit", _config_string, "\"480\"", "HALO_RESOLUTION_LIMIT", _environment_value,
+	/* (the phone's: sdl_platform.c's platform_resolution_scale. The screen's
+	own by default) */
+	{ "display.resolution_limit", _config_string, "\"native\"", "HALO_RESOLUTION_LIMIT", _environment_value,
 		_platform_android,
 		"The most lines the game draws at, no more than the screen has: \"native\"\n"
 		"(the screen's own), \"2160\", \"1440\", \"1080\", \"720\" or \"480\" (the game's\n"
