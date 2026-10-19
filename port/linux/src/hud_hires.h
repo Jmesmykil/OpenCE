@@ -76,6 +76,14 @@ int hud_hires_override_coverage(long asset);
 placeholder's D3D texture has this Data, and the number of its mip levels;
 0 if data is no placeholder's */
 unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels);
+/* the texture drawn for the placeholder whose D3D texture has this Data
+(the gameplay buttons' bitmaps too: hud_hires_tags.c), or -1; for the
+texture caches that make their own images of it (xbox_textures_dk.c,
+xbox_textures_vk.c) */
+long hud_hires_placeholder_asset(unsigned long data);
+/* changes whenever a placeholder is registered or forgotten, for caching
+hud_hires_placeholder_asset's answer */
+unsigned long hud_hires_placeholder_serial(void);
 /* whether its red holds exact segment thresholds, read unfiltered (d3d8_gl.c,
 nv2a_psh.c: point_threshold) */
 int hud_hires_override_point_threshold(long asset);

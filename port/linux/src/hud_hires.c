@@ -46,6 +46,9 @@ static struct
 	unsigned long levels;
 	int failed;
 	int other_pixels_logged;
+	/* (the Switch's, Android's and the PS5's: whether its PNG decodes, 1
+	yes, -1 no, 0 not tried) */
+	int decodes;
 } textures[MAXIMUM_TEXTURES];
 
 long hud_hires_asset_count(void)
@@ -150,6 +153,8 @@ static struct
 	long asset;
 } placeholders[MAXIMUM_PLACEHOLDERS];
 static long placeholder_count = 0;
+/* counts the placeholders' changes (hud_hires_placeholder_serial) */
+static unsigned long placeholder_serial = 1;
 
 /* the sequences whose sprites the texture is drawn for (hud_hires.h), or 0 */
 unsigned long hud_hires_asset_sprites(long asset)
@@ -189,7 +194,25 @@ int hud_hires_sprites_drawable(long asset, unsigned long address, unsigned long 
 		}
 		return 0;
 	}
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
+	/* (the texture caches of deko3d and Vulkan make their own images of it,
+	and Android's and the PS5's OpenGL images make theirs where it is drawn: here the
+	PNG need only decode. A GL texture asked for in deko3d's image, which
+	has no GL, was none, and the sprites were drawn as they are) */
+	(void)levels;
+	if (!textures[asset].decodes)
+	{
+		unsigned long width, height;
+		unsigned char *pixels = hud_hires_png_pixels(hud_hires_embedded[asset].png, hud_hires_embedded[asset].png_size,
+			&width, &height);
+
+		textures[asset].decodes = pixels ? 1 : -1;
+		free(pixels);
+	}
+	return textures[asset].decodes > 0;
+#else
 	return hud_hires_override_texture(asset, &levels) != 0;
+#endif
 }
 
 /* the placeholder the game draws the texture's sprites from: its D3D
@@ -206,19 +229,32 @@ void hud_hires_register_placeholder(long asset, const unsigned long *texture)
 	{
 		placeholders[index].data = texture ? texture[1] : 0;
 		placeholders[index].asset = asset;
+		placeholder_serial++;
 	}
 }
 
-unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels)
+long hud_hires_placeholder_asset(unsigned long data)
 {
 	long index;
 
 	for (index = 0; data && index < placeholder_count; index++)
 	{
 		if (placeholders[index].data == data)
-			return hud_hires_override_texture(placeholders[index].asset, levels);
+			return placeholders[index].asset;
 	}
-	return 0;
+	return -1;
+}
+
+unsigned long hud_hires_placeholder_serial(void)
+{
+	return placeholder_serial;
+}
+
+unsigned int hud_hires_placeholder_texture(unsigned long data, unsigned long *levels)
+{
+	long asset = hud_hires_placeholder_asset(data);
+
+	return asset >= 0 ? hud_hires_override_texture(asset, levels) : 0;
 }
 
 int hud_hires_override_point_threshold(long asset)

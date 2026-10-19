@@ -584,6 +584,11 @@ struct texture_entry
 	unsigned long menu_serial;
 	uint32_t menu_id;
 	unsigned long menu_levels;
+	/* the high-res texture drawn for it as a placeholder (the gameplay
+	buttons', and a message icon sheet's: hud_hires_tags.c), or -1, as of
+	placeholder_serial */
+	unsigned long placeholder_serial;
+	long placeholder_asset;
 };
 
 #define TEXTURE_BUCKET_COUNT 4096
@@ -913,6 +918,20 @@ static uint32_t texture_entry_result(struct texture_entry *entry, int *kind, str
 	}
 	levels = entry->menu_levels;
 	if ((id = entry->menu_id) != 0)
+	{
+		*kind = DK_TEXTURE_2D;
+		description->levels = levels;
+		description->hires = TRUE;
+		return id;
+	}
+	/* (a placeholder's texture, looked up again only when the placeholders
+	have changed: as xbox_textures.c's hud_hires_placeholder_texture) */
+	if (entry->placeholder_serial != hud_hires_placeholder_serial())
+	{
+		entry->placeholder_serial = hud_hires_placeholder_serial();
+		entry->placeholder_asset = hud_hires_placeholder_asset(entry->data);
+	}
+	if (entry->placeholder_asset >= 0 && (id = hud_image(entry->placeholder_asset, &levels)) != 0)
 	{
 		*kind = DK_TEXTURE_2D;
 		description->levels = levels;
