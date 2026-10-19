@@ -67,7 +67,31 @@ enum
 	_platform_windows = 4,
 	/* (the web build, which has the desktop's settings, and these) */
 	_platform_web = 8,
+	/* (the Linux builds whose game runs as a guest of the Android port's
+	host, port/linux/host, which have the desktop's settings, and the
+	host's own) */
+	_platform_guest = 16,
+#ifdef HALO_PS5
+	/* (the PS5's, port/ps5: a guest build, with the console's own rows and
+	the Vulkan renderer's debugging rows, which its host reads) */
+	_platform_ps5 = 32,
+#endif
 };
+
+/* the Vulkan renderer's debugging rows: Android's, and the PS5's */
+#ifdef HALO_PS5
+#define PLATFORM_VULKAN (_platform_android | _platform_ps5)
+#else
+#define PLATFORM_VULKAN _platform_android
+#endif
+
+/* the gyroscope's rows: Android's (the phone's, and the Switch's controllers),
+and the PS5's (the DualSense's) */
+#ifdef HALO_PS5
+#define PLATFORM_GYRO _platform_ps5
+#else
+#define PLATFORM_GYRO _platform_android
+#endif
 
 struct config_setting
 {
@@ -115,6 +139,15 @@ static const struct config_setting config_settings[] =
 	{ "display.window_scale", _config_integer, "2", "HALO_WINDOW_SCALE", _environment_value, _platform_desktop,
 		"Where display.window_size is empty: the window's size as a multiple of\n"
 		"640x480." },
+#ifdef HALO_PS5
+	/* (the Switch's setting, with the PS5's values: port/ps5/host/host_main.c
+	reads it, at the start and when the file changes) */
+	{ "display.resolution_limit", _config_string, "\"2160\"", "HALO_RESOLUTION_LIMIT", _environment_value,
+		_platform_ps5,
+		"The PS5's: the most lines the game draws at, \"2160\" (3840x2160), \"1440\"\n"
+		"(2560x1440) or \"1080\" (1920x1080), no more than the display shows (the\n"
+		"console's video output), which the picture is scaled to. Changes at once." },
+#endif
 	{ "display.screen_width", _config_integer, "0", "HALO_SCREEN_WIDTH", _environment_value, _platform_android,
 		"Columns of the 480-line picture: 0 for the display's shape, 640 for the\n"
 		"Xbox's 4:3." },
@@ -690,14 +723,14 @@ static const struct config_setting config_settings[] =
 		"Log texture uploads." },
 	{ "debug.texture_no_cache", _config_boolean, "false", "HALO_TEXTURE_NO_CACHE", _environment_set_is_true, _platform_all,
 		"Upload textures again every time they are used." },
-	{ "debug.sample_seconds", _config_real, "0.0", "HALO_SAMPLE", _environment_value, _platform_android,
+	{ "debug.sample_seconds", _config_real, "0.0", "HALO_SAMPLE", _environment_value, _platform_android | _platform_guest,
 		"Log where every game thread is this often, in seconds (read by the\n"
-		"app, port/android/host/host_debug.c); 0 never." },
-	{ "debug.memory_watch", _config_boolean, "true", NULL, _environment_value, _platform_android,
+		"host, port/android/host/host_debug.c); 0 never." },
+	{ "debug.memory_watch", _config_boolean, "true", "HALO_MEMORY_WATCH", _environment_value, _platform_android | _platform_guest,
 		"Notice the game's writes to cached textures and vertices by page\n"
 		"protection; false compares page contents once a frame instead, which is\n"
 		"slower. Under ARM translation (the x86 emulator) the app always compares\n"
-		"contents. Read by the app from the file (port/android/host/host_main.c)." },
+		"contents. Read by the host from the file (port/android/host/host_common.c)." },
 #ifdef HALO_PROFILE
 	{ "debug.profile_record", _config_boolean, "false", "HALO_PROFILE_RECORD", _environment_value, _platform_all,
 		"Record a profile with no command (configure.py --profile builds): from\n"
@@ -713,28 +746,33 @@ static const struct config_setting config_settings[] =
 		"Megabytes a recording keeps in memory, 4 to 1024: two halves, each\n"
 		"written out as a part when it fills." },
 #endif
-#ifdef HALO_ANDROID
-	/* (the phone's gyroscope on Android, the controller's on the Switch) */
-	{ "input.gyro_aim", _config_string, "\"false\"", "HALO_GYRO_AIM", _environment_value, _platform_android,
+#if defined(HALO_ANDROID) || defined(HALO_PS5)
+	/* (the phone's gyroscope on Android, the controller's on the Switch and
+	the PS5) */
+	{ "input.gyro_aim", _config_string, "\"false\"", "HALO_GYRO_AIM", _environment_value, PLATFORM_GYRO,
+#ifdef HALO_PS5
+		"Aim with the DualSense's gyroscope, each local player with their own.\n"
+#else
 		"Aim with the gyroscope: the phone's on Android; on the Switch the\n"
 		"controller's, each local player from their own (a Pro Controller, the\n"
 		"console held in the hands, or one Joy-Con; of two, the right one).\n"
+#endif
 		"\"false\" is the stick only, \"true\" adds the turn to the view, \"zoom\" adds\n"
 		"it only while the player is zoomed in, for fine aiming." },
 	{ "input.gyro_sensitivity_horizontal", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_HORIZONTAL",
-		_environment_value, _platform_android,
+		_environment_value, PLATFORM_GYRO,
 		"How far the view turns left and right for the gyroscope, when\n"
 		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
 	{ "input.gyro_sensitivity_vertical", _config_real, "1.0", "HALO_GYRO_SENSITIVITY_VERTICAL",
-		_environment_value, _platform_android,
+		_environment_value, PLATFORM_GYRO,
 		"How far the view turns up and down for the gyroscope, when\n"
 		"input.gyro_aim is true. 1 is the sensor's own turn. 0.25 to 10." },
 	{ "input.gyro_invert_horizontal", _config_boolean, "false", "HALO_GYRO_INVERT_HORIZONTAL",
-		_environment_value, _platform_android,
+		_environment_value, PLATFORM_GYRO,
 		"Invert the gyroscope's yaw. false: turning the phone or controller right\n"
 		"looks right. true: turning it right looks left. The stick's invert is its own." },
 	{ "input.gyro_invert_vertical", _config_boolean, "false", "HALO_GYRO_INVERT_VERTICAL",
-		_environment_value, _platform_android,
+		_environment_value, PLATFORM_GYRO,
 		"Invert the gyroscope's pitch. false: tilting the phone or controller up\n"
 		"looks up. true: tilting it up looks down. The stick's invert is its own." },
 #endif
@@ -821,10 +859,10 @@ static const struct config_setting config_settings[] =
 		"hash (the names gpu_capture logs); the folder must exist. Empty for none." },
 #endif
 #ifndef HALO_SWITCH
-	{ "debug.vk_present_marker", _config_boolean, "false", "HALO_VK_PRESENT_MARKER", _environment_set_is_true, _platform_android,
+	{ "debug.vk_present_marker", _config_boolean, "false", "HALO_VK_PRESENT_MARKER", _environment_set_is_true, PLATFORM_VULKAN,
 		"Under the Vulkan renderer, draw a red square at the top left and a green one\n"
 		"at the top right of the picture, so that a screenshot shows which way up it is." },
-	{ "debug.vk_self_test", _config_boolean, "false", "HALO_VK_SELF_TEST", _environment_set_is_true, _platform_android,
+	{ "debug.vk_self_test", _config_boolean, "false", "HALO_VK_SELF_TEST", _environment_set_is_true, PLATFORM_VULKAN,
 		"Under the Vulkan renderer, try the renderer's clears and the copying of a\n"
 		"draw's data on small targets of its own at start-up; the log says ok or FAILED." },
 	/* the Android app's Vulkan probe and profiler (port/android/host); the Switch's
@@ -833,7 +871,7 @@ static const struct config_setting config_settings[] =
 		"Run the Vulkan probe (port/android/host/host_vk_probe.c) instead of the\n"
 		"game: \"all\", or a list of caps, memory, compile, pipelines, draw, present;\n"
 		"empty runs the game. It writes vk_probe.txt." },
-	{ "debug.vk_validation", _config_boolean, "false", "HALO_VK_VALIDATION", _environment_set_is_true, _platform_android,
+	{ "debug.vk_validation", _config_boolean, "false", "HALO_VK_VALIDATION", _environment_set_is_true, PLATFORM_VULKAN,
 		"Turn on Vulkan's validation layer in the probe and in the Vulkan renderer,\n"
 		"when the app carries it." },
 	{ "debug.profile_hz", _config_integer, "0", "HALO_PROFILE_HZ", _environment_value, _platform_android,
@@ -850,6 +888,10 @@ static const struct config_setting config_settings[] =
 #define CONFIG_PLATFORM (_platform_desktop | _platform_web)
 #elif defined(_WIN32)
 #define CONFIG_PLATFORM (_platform_desktop | _platform_windows)
+#elif defined(HALO_PS5)
+#define CONFIG_PLATFORM (_platform_desktop | _platform_guest | _platform_ps5)
+#elif defined(HALO_GUEST)
+#define CONFIG_PLATFORM (_platform_desktop | _platform_guest)
 #else
 #define CONFIG_PLATFORM _platform_desktop
 #endif
@@ -887,7 +929,7 @@ static void config_path(char *path, size_t size)
 /* the whole file, NUL terminated, or NULL; free() it */
 static char *config_read_file(const char *path, size_t *size)
 {
-#ifdef HALO_ARM64_GUEST
+#ifdef HALO_GUEST
 	FILE *file = fopen(path, "rb");
 	char *text = NULL;
 	long length;
@@ -930,7 +972,7 @@ static char *config_read_file(const char *path, size_t *size)
 
 static int config_write_file(const char *path, const char *text)
 {
-#ifdef HALO_ARM64_GUEST
+#ifdef HALO_GUEST
 	FILE *file = fopen(path, "wb");
 	int written;
 
@@ -1064,7 +1106,9 @@ static int config_append_setting(struct config_text *text, const struct config_s
 			line++;
 	}
 #ifndef HALO_ANDROID
-	/* (Android apps have no environment to set) */
+	/* (Android apps have no environment to set; a setting without a variable
+	names none) */
+	if (setting->environment)
 	switch (setting->environment_style)
 	{
 	case _environment_value:

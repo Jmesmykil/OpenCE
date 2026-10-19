@@ -99,7 +99,7 @@ static long file_add(const char *path, const unsigned char *data, unsigned long 
 
 static unsigned char *file_read(const char *path, unsigned long *size)
 {
-#ifdef HALO_ARM64_GUEST
+#ifdef HALO_GUEST
 	FILE *file = fopen(path, "rb");
 	unsigned char *data = NULL;
 	long length;
@@ -389,9 +389,11 @@ static long current_line(struct reader *reader)
 
 /* this build's platform, as the platform attribute names it (the Switch's
 game is built as Android's, with HALO_SWITCH too: "android" is the Android
-app's) */
+app's; the PS5's as the desktop's, with HALO_PS5: "desktop" is the PC's) */
 #if defined(HALO_SWITCH)
 #define MENU_PLATFORM "switch"
+#elif defined(HALO_PS5)
+#define MENU_PLATFORM "ps5"
 #elif defined(HALO_ANDROID)
 #define MENU_PLATFORM "android"
 #elif defined(HALO_WEB)
@@ -420,9 +422,10 @@ static int for_this_platform(struct reader *reader, const XML_Char **attributes)
 				if (length)
 				{
 					if ((length != 7 || strncmp(name, "desktop", 7)) && (length != 7 || strncmp(name, "android", 7)) &&
-						(length != 3 || strncmp(name, "web", 3)) && (length != 6 || strncmp(name, "switch", 6)))
+						(length != 3 || strncmp(name, "web", 3)) && (length != 6 || strncmp(name, "switch", 6)) &&
+						(length != 3 || strncmp(name, "ps5", 3)))
 					{
-						reader_error(reader, "platform=\"%s\" names one that is not desktop, android, switch or web",
+						reader_error(reader, "platform=\"%s\" names one that is not desktop, android, switch, ps5 or web",
 							attributes[index + 1]);
 						return 1;
 					}
@@ -1035,7 +1038,7 @@ static struct
 	int failed;
 } art[MAXIMUM_ART];
 static long art_count;
-#if defined(HALO_SWITCH) || defined(HALO_ANDROID)
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
 /* changed whenever the art registered changes (menu_art_serial) */
 static unsigned long art_serial = 1;
 #endif
@@ -1075,7 +1078,7 @@ void halo_menus_art_register(void const *texture, char const *png)
 	memset(&art[index], 0, sizeof(art[index]));
 	art[index].data = data;
 	art[index].png = strdup(png);
-#if defined(HALO_SWITCH) || defined(HALO_ANDROID)
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
 	art_serial++;
 #endif
 }
@@ -1094,7 +1097,7 @@ void halo_menus_art_forget(void)
 		}
 	}
 	art_count = 0;
-#if defined(HALO_SWITCH) || defined(HALO_ANDROID)
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
 	art_serial++;
 #endif
 }
@@ -1128,7 +1131,7 @@ unsigned int menu_art_texture(unsigned long data, unsigned long *levels)
 	return art[index].texture;
 }
 
-#if defined(HALO_SWITCH) || defined(HALO_ANDROID)
+#if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
 unsigned long menu_art_serial(void)
 {
 	return art_serial;
