@@ -216,6 +216,15 @@ static const struct config_setting config_settings[] =
 		_platform_all,
 		"The size the objects' shadows are drawn at, in pixels each way: 128 as\n"
 		"on the Xbox, or 256, 512 or 1024 for smoother edges, as soft." },
+#ifdef HALO_SWITCH
+	{ "display.big_sprite_limit", _config_integer, "8", "HALO_BIG_SPRITE_LIMIT", _environment_value, _platform_all,
+#else
+	{ "display.big_sprite_limit", _config_integer, "11", "HALO_BIG_SPRITE_LIMIT", _environment_value, _platform_all,
+#endif
+		"The most sprites (particles, mist, smoke) drawn in a frame that each\n"
+		"cover more than half the view; the others are left out. 11 as on the\n"
+		"Xbox; fewer for less overdraw where effects pile up close (the Switch's\n"
+		"8: the falls of the Halo level). Changes at once." },
 	{ "display.shadow_limit", _config_integer, "16", "HALO_SHADOW_LIMIT", _environment_value, _platform_all,
 		"The most objects' shadows drawn at once: the biggest on the screen keep\n"
 		"theirs, and the rest fade out as the crowd moves. 0 for no limit, as on\n"
