@@ -11,6 +11,8 @@ plan is worked" there before this.
 What the console is, what the probes measured and the toolchain's traps are
 in `PS5_FINDINGS.md` (the record) and `PS5_HANDOFF.md` (the summary, written
 before this plan; its "Plan: the host" is superseded by the phases below).
+5.1 surround through the console's own audio output is planned, and
+deferred, in `SURROUND.md`.
 
 Status: phase 0, part A is done (the probes: memory, the title, pad, audio,
 RADV, the guest's CPU side up to its first SDL call; `PS5_FINDINGS.md`).
