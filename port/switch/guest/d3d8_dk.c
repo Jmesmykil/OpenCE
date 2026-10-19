@@ -153,6 +153,46 @@ float halo_screen_scale(void)
 	return screen_scale[0] > screen_scale[1] ? screen_scale[0] : screen_scale[1];
 }
 
+/* display.model_detail (as d3d8_gl.c's): "stock" chooses a model's level of
+detail by the Xbox's 480 lines, "native" by the display's, "highest" draws
+the most detailed level of whatever is drawn at all */
+int halo_model_detail_stock(void)
+{
+	return strcmp(config_string("display.model_detail"), "native") &&
+		strcmp(config_string("display.model_detail"), "highest");
+}
+
+float halo_model_detail_scale(int level)
+{
+	float display_scale;
+
+	if (halo_model_detail_stock())
+		return 1.0f;
+	if (!strcmp(config_string("display.model_detail"), "highest") && level)
+		return 1.0e6f;
+	display_scale = halo_screen_pixel_scale();
+	return display_scale > 1.0f ? display_scale : 1.0f;
+}
+
+/* (the OpenGL renderer's alone, which the settings offer only there:
+display.overshield_effect's fade up the body, which this renderer's vertex
+shaders do not draw, and display.hdr's tone mapping) */
+void d3d8_gl_set_height_fade(float inverse_softness, float height, float offset, float scale)
+{
+	(void)inverse_softness;
+	(void)height;
+	(void)offset;
+	(void)scale;
+}
+
+void halo_screen_tone_map(short x0, short y0, short x1, short y1)
+{
+	(void)x0;
+	(void)y0;
+	(void)x1;
+	(void)y1;
+}
+
 void halo_screen_ui_offset(unsigned char centered)
 {
 	ui_offset = centered ? (halo_screen_width() - 640) / 2 : 0;

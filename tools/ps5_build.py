@@ -261,8 +261,9 @@ repositories below, at the commits named, which build it as their READMEs
 and the repository's port/ps5/README.md say. The licence texts the parts
 ask to be carried are in the release's licenses/ folder.
 
-This repository (the game's port, the PS5 host; CC0-1.0, its parts under
-their own licences, below)
+This repository (the game's port, the PS5 host; AGPL-3.0-or-later since
+OpenCE's change of licence, in licenses/ as AGPL-3.0.txt, CC0-1.0 before it;
+its parts under their own licences, below)
   {REPOSITORY_URL}
   commit {commit}
 
@@ -315,7 +316,6 @@ licence's text in licenses/ under its name:
 - zlib, the zlib licence; musl's maths, MIT
 - stb_truetype and stb_vorbis, public domain or MIT
 - SMAA, MIT (anti-aliasing)
-- extract-xiso, a BSD licence (reading the disc image)
 - Overpass, SIL Open Font License 1.1 (the text); Lucide's icons, ISC
 """
 
@@ -357,6 +357,7 @@ RELEASE_LICENSES = (
      "Berkeley SoftFloat 3e's functions in Mesa's util"),
     ("repo", "port/third_party/zlib/LICENSE", "licenses/zlib-LICENSE.txt", None,
      "zlib, in the game and in RADV's archive"),
+    ("repo", "LICENSE", "licenses/AGPL-3.0.txt", None, "the AGPL-3.0, this repository's licence"),
     ("repo", "port/third_party/mbedtls/LICENSE", "licenses/mbedtls-LICENSE.txt", None, "Mbed TLS"),
     ("repo", "port/third_party/miniupnpc/LICENSE", "licenses/miniupnpc-LICENSE.txt", None, "miniupnpc"),
     ("repo", "port/third_party/opus/COPYING", "licenses/opus-COPYING.txt", None, "Opus"),
@@ -368,7 +369,6 @@ RELEASE_LICENSES = (
     ("repo", "port/third_party/stb/LICENSE", "licenses/stb-LICENSE.txt", None, "stb_truetype"),
     ("repo", "port/third_party/stb_vorbis/LICENSE", "licenses/stb_vorbis-LICENSE.txt", None, "stb_vorbis"),
     ("repo", "port/third_party/smaa/LICENSE", "licenses/smaa-LICENSE.txt", None, "SMAA"),
-    ("repo", "port/third_party/extract-xiso/LICENSE.TXT", "licenses/extract-xiso-LICENSE.txt", None, "extract-xiso"),
     ("repo", "port/assets/fonts/Overpass-OFL.txt", "licenses/Overpass-OFL.txt", None, "Overpass"),
     ("repo", "port/assets/icons/lucide/LICENSE", "licenses/lucide-LICENSE.txt", None, "Lucide's icons"),
 )

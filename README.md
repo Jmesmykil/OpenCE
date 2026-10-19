@@ -9,7 +9,7 @@
 [![Android](https://img.shields.io/badge/Android-Vulkan%20%C2%B7%20Turnip%20%C2%B7%20OpenGL%20ES-3ddc84?logo=android&logoColor=white)](#android)
 [![Nintendo Switch](https://img.shields.io/badge/Switch-deko3d-e60012)](#nintendo-switch)
 [![PlayStation 5](https://img.shields.io/badge/PS5-Vulkan%20%C2%B7%20RADV-003791)](#playstation-5)
-[![License: CC0](https://img.shields.io/badge/license-CC0--1.0-lightgrey)](LICENSE.md)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![Discord](https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/9gqcHyr5km)
 
 [**Download**](#download) ·
@@ -303,7 +303,7 @@ To build the game:
 | `ninja linux` | `build/linux/halo` |
 | `ninja linux_arm64` (on 64-bit ARM Linux) | `build/linux_arm64/halo` and `libSDL3.so.0` |
 | `ninja linux_x86_64` (on 64-bit x86 Linux, after `python configure.py --linux-x86-64`) | `build/linux_x86_64/halo` and `libSDL3.so.0` |
-| `ninja windows` (on Windows) | `build/windows/halo.exe` and `SDL3.dll` |
+| `ninja windows` (on Windows, or on Linux after `configure.py --windows-cross`) | `build/windows/halo.exe` and `SDL3.dll` |
 | `ninja android_apk` | `port/android/app/build/outputs/apk/debug/app-debug.apk` |
 | `ninja switch` | `build/switch/halo.nro` and `build/switch/halo_guest.elf` |
 
@@ -425,5 +425,11 @@ endorsed by Microsoft, Bungie or 343 Industries.
 
 ## License
 
-[CC0 1.0](LICENSE.md). Third-party code under `port/third_party` keeps its
-own license.
+This fork includes OpenCE's code, which OpenCE moved to the GNU Affero
+General Public License, version 3 or (at your option) any later version
+(`AGPL-3.0-or-later`), in its commit `4b09168e7`. The full text is in
+[LICENSE](LICENSE). The commits before that change came into this fork,
+and the releases built from them (up to Build 106), were released under
+[CC0 1.0](LICENSES/CC0-1.0.txt) and stay that way. Third-party code under
+`port/third_party`, and the fonts and art under `port/assets`, keep their
+own licenses.

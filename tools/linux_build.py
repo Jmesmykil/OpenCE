@@ -293,7 +293,12 @@ def sdl3_rule(n: Writer, sln: Any, *, name: str, description: str, source: Path,
     options = SDL_OPTIONS + ([f"-DCMAKE_C_COMPILER_LAUNCHER={launcher}"] if launcher else [])
     n.rule(
         name=name,
-        command=(f"cmake -S {source} -B {sdl_build} -G Ninja --fresh "
+        # (SDL's build takes the system root's include folders from
+        # pkg-config, which splits a path at its spaces: a checkout in a folder
+        # with a space in its name is said, rather than failing deep in SDL)
+        command=(f"case \"$$PWD\" in *\" \"*) echo \"SDL3: the portable build cannot be made in a folder "
+                 f"whose path has a space ($$PWD): move the checkout\" >&2; exit 1;; esac && "
+                 f"cmake -S {source} -B {sdl_build} -G Ninja --fresh "
                  + "".join(f"{argument} " for argument in cmake_args)
                  + f"-DCMAKE_C_COMPILER={cc} {' '.join(options)} > {log_dir}/sdl3-configure.log && "
                  f"ninja -C {sdl_build} > {log_dir}/sdl3-build.log"
@@ -326,7 +331,7 @@ def portable_sdl(n: Writer, sln: Any, build_dir: Path, cc: str) -> Tuple[List[st
     n.build(outputs=stamp, rule="linux_sysroot", implicit=[SYSROOT_SCRIPT], implicit_outputs=[sdl_license_source])
     sdl3_rule(n, sln, name="linux_sdl3", description="LINUX SDL3", source=sdl_source, sdl_build=sdl_build,
               log_dir=build_dir, cc=cc,
-              cmake_args=[f"-DCMAKE_TOOLCHAIN_FILE=$$PWD/{SYSROOT_TOOLCHAIN}", f"-DHALO_SYSROOT=$$PWD/{sysroot}"],
+              cmake_args=[f"\"-DCMAKE_TOOLCHAIN_FILE=$$PWD/{SYSROOT_TOOLCHAIN}\"", f"\"-DHALO_SYSROOT=$$PWD/{sysroot}\""],
               check=(f"$python {SYSROOT_SCRIPT} --check-sdl "
                      f"{sdl_build}/include-config-release/build_config/SDL_build_config.h"))
     n.build(outputs=libsdl, rule="linux_sdl3", implicit=[stamp, SYSROOT_TOOLCHAIN])
@@ -594,7 +599,12 @@ def generate_linux_build(n: Writer, sln: Any) -> None:
             sdk_flags,
         ])
         posix_cflags = " ".join(POSIX_FLAGS + target + [f"-I{platform_dir}"])
-        mbedtls_include = f"-I{MBEDTLS_DIR / 'include'}"
+        # (with Mbed TLS's own locks, as built from its unchanged config by
+        # these defines: on Linux the self-updater's thread (posix_update.c)
+        # and internet play's (posix_dtls.c) both use it, and two threads
+        # setting up its PSA crypto or drawing on its random generator at
+        # once crashed it; the other builds use it on one thread)
+        mbedtls_include = f"-I{MBEDTLS_DIR / 'include'} -DMBEDTLS_THREADING_C -DMBEDTLS_THREADING_PTHREAD"
         for source in sorted(platform_dir.glob("*.c")):
             if source.name in ("posix_update.c", "posix_dtls.c"):
                 add_object(source, f"{posix_cflags} {mbedtls_include}", posix=True)
