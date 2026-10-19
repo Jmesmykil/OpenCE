@@ -553,6 +553,43 @@ BOOL platform_offer_game_data(const char *destination)
 }
 #endif
 
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+/* display.resolution_limit on a phone: how many pixels the game's renderers
+draw for each of its 480 lines (d3d8_gl.c and d3d8_vk.c's screen_mode_choose,
+asked every frame), to the smaller of the setting's lines and the screen's
+height in pixels: "native" the screen's own, else "2160", "1440", "1080",
+"720" or "480" (the game's own, as the phones drew before the setting). The
+width keeps the screen's shape, as it does at 480. */
+float platform_resolution_scale(void)
+{
+	static unsigned long read_at = (unsigned long)-1;
+	static long lines = 480;
+	static int native;
+	int pixel_width = 0, pixel_height = 0;
+	long wanted;
+
+	if (read_at != config_changes())
+	{
+		const char *setting = config_string("display.resolution_limit");
+
+		read_at = config_changes();
+		native = !strcmp(setting, "native");
+		lines = native ? 0 : atol(setting);
+		if (!native && (lines < 480 || lines > 4320))
+		{
+			platform_log("display.resolution_limit \"%s\" is not \"native\" or a number of lines from 480 to 4320: "
+				"480", setting);
+			lines = 480;
+		}
+	}
+	if (!platform_window || !SDL_GetWindowSizeInPixels(platform_window, &pixel_width, &pixel_height) ||
+		pixel_height < 480)
+		return 1.0f;
+	wanted = native || lines > pixel_height ? pixel_height : lines;
+	return (float)wanted / 480.0f;
+}
+#endif
+
 int halo_interpolation_enabled(void)
 {
 	static int enabled;

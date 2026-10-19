@@ -81,6 +81,11 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height);
 #ifndef HALO_ANDROID
 BOOL platform_screen_mode(long *width, long *height);
 #endif
+
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+/* display.resolution_limit on a phone: the pixels a game line is drawn at */
+float platform_resolution_scale(void);
+#endif
 /* Video Setup's resolutions (port/linux/game/menu_tags.c), in pixels: the
 display's modes the game can draw at, largest first, each once, but the
 display's own (Native), and display.resolution's where it is none of them;

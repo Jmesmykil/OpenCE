@@ -209,7 +209,8 @@ static void screen_mode_choose(long *width, float scale[2])
 	if (*width > 1600)
 		*width = 1600;
 	*width &= ~1L;
-	scale[0] = scale[1] = 1.0f;
+	/* (display.resolution_limit's lines, the screen's at most: sdl_platform.c) */
+	scale[0] = scale[1] = platform_resolution_scale();
 	screen_supersampling = 1.0f;
 #else
 	long display_width, display_height;

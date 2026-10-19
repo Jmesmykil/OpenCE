@@ -118,6 +118,12 @@ SCREENS = {
              [("2160P (4K)", "2160"), ("1440P (2K)", "1440"), ("1080P (FHD)", "1080")],
              "The most lines the game draws at, no more than\nthe display shows. Changes at once.", "ps5",
              "resolution_limit_ps5"),
+            # (the phone's: sdl_platform.c's platform_resolution_scale)
+            ("MAXIMUM RESOLUTION:", "display.resolution_limit",
+             [("NATIVE", "native"), ("2160P (4K)", "2160"), ("1440P (2K)", "1440"), ("1080P (FHD)", "1080"),
+              ("720P", "720"), ("480P", "480")],
+             "The most lines the game draws at, no more than\nthe screen has. More are sharper, and slower.", "android",
+             "resolution_limit_android"),
             ("V-SYNC:", "display.vsync", ON_OFF,
              "Wait for the display between frames, so that the\npicture never tears.", None),
             ("FRAME RATE LIMIT:", "display.max_fps",
