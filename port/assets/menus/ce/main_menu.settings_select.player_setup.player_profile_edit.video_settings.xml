@@ -6,7 +6,7 @@
 		<on event="back" back="true"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings"/>
 		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/options_menu"/>
-		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/note_0" x="54" y="253" platform="android"/>
+		<child widget="main_menu/settings_select/player_setup/player_profile_edit/video_settings/note_0" x="54" y="313" platform="android"/>
 	</widget>
 	<widget name="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings" controller="1" left="35" top="11" width="605" height="59" bitmap="main_menu/settings_select/player_setup/player_profile_edit/video_settings/header_profile_video_settings">
 	</widget>

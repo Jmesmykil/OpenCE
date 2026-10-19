@@ -82,9 +82,10 @@ SCREENS = {
         # platform_places packs each platform's rows)
         "same_place": ["display.window_size", "anti_aliasing_android"],
         # lines of text among the rows, in a place no row of theirs uses:
-        # (text, platform, place). Below Android's rows (backend, driver,
-        # V-Sync, interpolation, Graphics, FOV and Viewmodels)
-        "notes": [("The graphics backend and driver change when the game restarts.", "android", 6)],
+        # (text, platform, place), None the place after the platform's last
+        # row. Below Android's rows, wherever they end (place 6 was below
+        # them until Maximum Resolution and Extra Effects came)
+        "notes": [("The graphics backend and driver change when the game restarts.", "android", None)],
         "rows": [
             ("DISPLAY MODE:", "display.mode",
              [("FULLSCREEN", "fullscreen"), ("BORDERLESS", "borderless"), ("WINDOWED", "windowed")],
@@ -724,6 +725,10 @@ def _setting_screen(folder: str, spec: dict) -> list:
     extra += _strings(f"{base}/help_strings",
                       [""] + [help_text.replace("\n", "\\n") for _, _, _, help_text, *_ in spec["rows"]] +
                       [help_text.replace("\n", "\\n") for _, _, help_text, *_ in spec.get("categories", ())])
+    # (a note's place None: the one after its platform's last row)
+    if spec.get("notes"):
+        spec = dict(spec, notes=[(text, platform, places[platform] + 1 if place is None else place)
+                                 for text, platform, place in spec["notes"]])
     return _screen(folder, spec, rows, ["port settings help"], [], extra)
 
 
