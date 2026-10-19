@@ -1403,7 +1403,14 @@ uint32_t host_dk_retired(void)
 {
 	uint32_t retired;
 
-	pthread_mutex_lock(&dk_lock);
+	/* (the fences polled when the lock is free; while the render thread
+	holds it, the count as it last left it, which only ever falls behind:
+	a buffer is busy a little longer, and renamed or waited for, never
+	taken early. Waiting for the lock was where the game thread spent its
+	time at the Halo level's falls, 79% of it zoomed, as each dynamic
+	vertex buffer's lock asked here) */
+	if (pthread_mutex_trylock(&dk_lock) != 0)
+		return __atomic_load_n(&dk.serial_retired, __ATOMIC_ACQUIRE);
 	if (dk.ready)
 		fences_poll();
 	retired = dk.serial_retired;
