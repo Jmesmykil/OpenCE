@@ -494,6 +494,7 @@ static void frame_statistics(void)
 		double milliseconds = (double)(now - previous) * 1000.0 / (double)SDL_GetPerformanceFrequency();
 
 		host_dk_frame_report(&report);
+		host_debug_profile_spike((uint64_t)(milliseconds * 1000000.0));
 		if (milliseconds > 20.0)
 		{
 			if (said < SLOW_FRAMES_SAID)

@@ -332,6 +332,9 @@ void host_debug_start_sampler(const char *setting);
 counted and written to the profile folder (0 none); image names the guest
 image running, for tools/switch_profile.py */
 void host_debug_start_profiler(unsigned hz, const char *image);
+/* a frame of frame_ns just ended: with the profiler on, a frame of 40 ms or
+more has the game threads' samples in it written alone (profile/spike_NNN.txt) */
+void host_debug_profile_spike(uint64_t frame_ns);
 
 /* The host's own stack, at the moment it decides it cannot continue. Called
  * from host_fatal and anywhere else that has a failure worth attributing. */
