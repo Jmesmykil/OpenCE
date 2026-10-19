@@ -950,7 +950,8 @@ static const struct config_setting config_settings[] =
 		"harder. Changes at once." },
 #endif
 #ifdef HALO_SWITCH
-	{ "display.resolution_limit", _config_string, "\"480\"", "HALO_RESOLUTION_LIMIT", _environment_value,
+	/* (720 by default: a handheld console's own lines, 1280x720) */
+	{ "display.resolution_limit", _config_string, "\"720\"", "HALO_RESOLUTION_LIMIT", _environment_value,
 		_platform_android,
 		"The lines the game draws at: \"480\" (the game's own), \"720\", \"900\" or\n"
 		"\"1080\" (or any number between), no more than the console shows (1280x720\n"
