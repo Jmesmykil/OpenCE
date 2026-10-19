@@ -247,10 +247,188 @@ Sint64 SDL_TellIO(SDL_IOStream *stream)
 Sint64 SDL_GetIOSize(SDL_IOStream *stream)
 {
 	struct stat information;
+	off_t at, end;
 
-	if (fstat(fileno((FILE *)stream), &information) != 0)
+	if (fileno((FILE *)stream) >= 0)
+	{
+		if (fstat(fileno((FILE *)stream), &information) != 0)
+			return -1;
+		return (Sint64)information.st_size;
+	}
+	/* (a stream of memory, SDL_IOFromConstMem's, has no descriptor) */
+	at = ftello((FILE *)stream);
+	if (at < 0 || fseeko((FILE *)stream, 0, SEEK_END) != 0)
 		return -1;
-	return (Sint64)information.st_size;
+	end = ftello((FILE *)stream);
+	fseeko((FILE *)stream, at, SEEK_SET);
+	return (Sint64)end;
+}
+
+/* (upstream's desktop code since the AGPL merge: the updater reads its zip
+from memory, and the settings and the window ask what follows. A guest has
+no SDL of its own for them, and the console none of the desktop's needs) */
+
+SDL_IOStream *SDL_IOFromConstMem(const void *memory, size_t size)
+{
+	return (SDL_IOStream *)fmemopen((void *)memory, size, "rb");
+}
+
+void *SDL_LoadFile(const char *path, size_t *size)
+{
+	FILE *file = fopen(path, "rb");
+	unsigned char *data = NULL;
+	long length;
+
+	if (size)
+		*size = 0;
+	if (!file)
+		return NULL;
+	if (fseek(file, 0, SEEK_END) == 0 && (length = ftell(file)) >= 0 && fseek(file, 0, SEEK_SET) == 0)
+	{
+		/* (ended with a 0, as SDL's is) */
+		data = malloc((size_t)length + 1);
+		if (data && fread(data, 1, (size_t)length, file) == (size_t)length)
+		{
+			data[length] = 0;
+			if (size)
+				*size = (size_t)length;
+		}
+		else
+		{
+			free(data);
+			data = NULL;
+		}
+	}
+	fclose(file);
+	return data;
+}
+
+bool SDL_GetPathInfo(const char *path, SDL_PathInfo *info)
+{
+	struct stat information;
+
+	if (stat(path, &information) != 0)
+		return false;
+	if (info)
+	{
+		info->type = S_ISDIR(information.st_mode) ? SDL_PATHTYPE_DIRECTORY :
+			S_ISREG(information.st_mode) ? SDL_PATHTYPE_FILE : SDL_PATHTYPE_OTHER;
+		info->size = (Uint64)information.st_size;
+		info->create_time = (SDL_Time)information.st_ctime * 1000000000LL;
+		info->modify_time = (SDL_Time)information.st_mtime * 1000000000LL;
+		info->access_time = (SDL_Time)information.st_atime * 1000000000LL;
+	}
+	return true;
+}
+
+/* (the key a scancode types on a US layout: the keys' own labels, which
+Controls Setup shows; a guest has no layout of the host's to ask) */
+SDL_Keycode SDL_GetKeyFromScancode(SDL_Scancode scancode, SDL_Keymod modstate, bool key_event)
+{
+	(void)modstate;
+	(void)key_event;
+	if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z)
+		return (SDL_Keycode)('a' + (scancode - SDL_SCANCODE_A));
+	if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9)
+		return (SDL_Keycode)('1' + (scancode - SDL_SCANCODE_1));
+	switch (scancode)
+	{
+	case SDL_SCANCODE_0: return '0';
+	case SDL_SCANCODE_RETURN: return SDLK_RETURN;
+	case SDL_SCANCODE_ESCAPE: return SDLK_ESCAPE;
+	case SDL_SCANCODE_BACKSPACE: return SDLK_BACKSPACE;
+	case SDL_SCANCODE_TAB: return SDLK_TAB;
+	case SDL_SCANCODE_SPACE: return SDLK_SPACE;
+	case SDL_SCANCODE_MINUS: return '-';
+	case SDL_SCANCODE_EQUALS: return '=';
+	case SDL_SCANCODE_LEFTBRACKET: return '[';
+	case SDL_SCANCODE_RIGHTBRACKET: return ']';
+	case SDL_SCANCODE_BACKSLASH: return '\\';
+	case SDL_SCANCODE_SEMICOLON: return ';';
+	case SDL_SCANCODE_APOSTROPHE: return '\'';
+	case SDL_SCANCODE_GRAVE: return '`';
+	case SDL_SCANCODE_COMMA: return ',';
+	case SDL_SCANCODE_PERIOD: return '.';
+	case SDL_SCANCODE_SLASH: return '/';
+	default: return SDL_SCANCODE_TO_KEYCODE(scancode);
+	}
+}
+
+/* (5.1 is asked of the device only where the host says it has it: here
+it says nothing, and the sound stays stereo) */
+bool SDL_GetAudioDeviceFormat(SDL_AudioDeviceID devid, SDL_AudioSpec *spec, int *sample_frames)
+{
+	(void)devid;
+	(void)spec;
+	(void)sample_frames;
+	return false;
+}
+
+/* (the window's properties: none here, so every property is its default, as
+a display that says nothing of HDR) */
+SDL_PropertiesID SDL_GetWindowProperties(SDL_Window *window)
+{
+	(void)window;
+	return 0;
+}
+
+bool SDL_GetBooleanProperty(SDL_PropertiesID props, const char *name, bool default_value)
+{
+	(void)props;
+	(void)name;
+	return default_value;
+}
+
+float SDL_GetFloatProperty(SDL_PropertiesID props, const char *name, float default_value)
+{
+	(void)props;
+	(void)name;
+	return default_value;
+}
+
+const char *SDL_GetCurrentVideoDriver(void)
+{
+	return "guest";
+}
+
+/* (the game's one window, the last made: guest_sdl.c's SDL_CreateWindow) */
+extern SDL_Window *guest_sdl_window;
+
+SDL_Window *SDL_GetKeyboardFocus(void)
+{
+	return guest_sdl_window && (SDL_GetWindowFlags(guest_sdl_window) & SDL_WINDOW_INPUT_FOCUS) ? guest_sdl_window : NULL;
+}
+
+/* (a mouse held to the window, and its cursor: a console's has neither) */
+bool SDL_SetWindowMouseGrab(SDL_Window *window, bool grabbed)
+{
+	(void)window;
+	(void)grabbed;
+	return true;
+}
+
+bool SDL_ShowCursor(void)
+{
+	return true;
+}
+
+bool SDL_HideCursor(void)
+{
+	return true;
+}
+
+/* (sdl_platform.c's look for Wayland's EGL: no library a guest can load) */
+void *dlopen(const char *path, int flags)
+{
+	(void)path;
+	(void)flags;
+	return NULL;
+}
+
+int dlclose(void *handle)
+{
+	(void)handle;
+	return 0;
 }
 
 /* ---------- SDL_GlobDirectory: * and ? within a name, as SDL's */
@@ -782,13 +960,33 @@ static void download_progress(unsigned int context, unsigned int received, unsig
 	binding->progress(binding->context, received, total);
 }
 
-int update_download(const char *url, const char *path, update_progress_proc progress, void *context,
-	char *error, int error_size)
+int update_download(const char *url, const char *path, unsigned long long maximum, update_progress_proc progress,
+	void *context, char *error, int error_size)
 {
 	struct download_progress binding = { progress, context };
+	FILE *file;
+	long size = -1;
 
-	return host_update_download(url, path, progress ? (unsigned int)(uintptr_t)download_progress : 0,
-		(unsigned int)(uintptr_t)&binding, error, error_size);
+	if (!host_update_download(url, path, progress ? (unsigned int)(uintptr_t)download_progress : 0,
+		(unsigned int)(uintptr_t)&binding, error, error_size))
+		return 0;
+	/* (no more than maximum bytes, as update.h has it: the host's download
+	takes no limit, so a file past it is refused once it is here) */
+	file = fopen(path, "rb");
+	if (file)
+	{
+		if (fseek(file, 0, SEEK_END) == 0)
+			size = ftell(file);
+		fclose(file);
+	}
+	if (size < 0 || (unsigned long long)size > maximum)
+	{
+		remove(path);
+		snprintf(error, (size_t)error_size, size < 0 ? "the download cannot be read" :
+			"the download is larger than %llu bytes", maximum);
+		return 0;
+	}
+	return 1;
 }
 
 int update_executable_path(char *path, int size)

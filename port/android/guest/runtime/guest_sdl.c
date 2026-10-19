@@ -166,9 +166,14 @@ void SDL_Delay(Uint32 milliseconds)
 
 /* ---------- video */
 
+/* the last window made: the game makes one (guest_desktop.c's
+SDL_GetKeyboardFocus) */
+SDL_Window *guest_sdl_window;
+
 SDL_Window *SDL_CreateWindow(const char *title, int width, int height, SDL_WindowFlags flags)
 {
-	return (SDL_Window *)host_sdl_create_window(title, width, height, (long long)flags);
+	guest_sdl_window = (SDL_Window *)host_sdl_create_window(title, width, height, (long long)flags);
+	return guest_sdl_window;
 }
 
 bool SDL_GetWindowSizeInPixels(SDL_Window *window, int *width, int *height)

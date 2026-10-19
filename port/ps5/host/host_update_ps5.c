@@ -78,6 +78,11 @@ it.
 #define UPDATE_TITLE_ENTRY "PPSA99500/"
 #define UPDATE_ANSWER PS5_DATA_FOLDER "/update.latest.json"
 #define UPDATE_ARCHIVE PS5_DATA_FOLDER "/update.partial.zip"
+/* the most of each download taken (update.h), as the game's own updater
+has them (port/linux/src/updater.c): the release's answer, and the archive
+(52 MB at build 106) */
+#define UPDATE_MAXIMUM_ANSWER (1024ULL * 1024)
+#define UPDATE_MAXIMUM_ARCHIVE (256ULL * 1024 * 1024)
 #define UPDATE_STAMP PS5_TITLE_FOLDER "/update.txt"
 #define UPDATE_CERTIFICATES PS5_TITLE_FOLDER "/certificates.pem"
 /* the program, put in place last */
@@ -275,7 +280,7 @@ static long latest_build(void)
 	long size, build;
 	FILE *file;
 
-	if (!update_download(UPDATE_LATEST, UPDATE_ANSWER, NULL, NULL, error, sizeof(error)))
+	if (!update_download(UPDATE_LATEST, UPDATE_ANSWER, UPDATE_MAXIMUM_ANSWER, NULL, NULL, error, sizeof(error)))
 	{
 		ps5_log("update: the latest release cannot be asked for: %s", error);
 		return 0;
@@ -519,7 +524,8 @@ static void *update_thread(void *argument)
 		snprintf(url, sizeof(url), "https://github.com/" UPDATE_REPOSITORY "/releases/download/build-%ld/" UPDATE_ASSET,
 			build);
 		start = ps5_now_ns();
-		if (!update_download(url, UPDATE_ARCHIVE, download_progress, &progress, error, sizeof(error)))
+		if (!update_download(url, UPDATE_ARCHIVE, UPDATE_MAXIMUM_ARCHIVE, download_progress, &progress, error,
+			sizeof(error)))
 		{
 			unlink(UPDATE_ARCHIVE);
 			ps5_log("update: the download of %s did not finish: %s", url, error);
