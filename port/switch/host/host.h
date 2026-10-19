@@ -54,6 +54,17 @@ unsigned int host_dk_output_height(void);
 /* the GPU's time on a frame, averaged over the last 16 or so, in
 microseconds (display.dynamic_resolution: d3d8_dk.c) */
 unsigned int host_dk_gpu_frame_us(void);
+/* what the threads waited for since the last call, for the log's line about
+a slow frame (host_sdl2.c's frame_statistics); the call starts the count
+again */
+struct host_dk_frame_report
+{
+	uint32_t submit_wait_us, streams;
+	uint32_t acquire_max_us, fence_max_us;
+	uint32_t presents;
+	uint32_t gpu_last_us, gpu_average_us;
+};
+void host_dk_frame_report(struct host_dk_frame_report *report);
 
 /* the host descriptor behind a guest one, or -1 (host_syscall.c) */
 int host_guest_fd(int guest_fd);
@@ -221,6 +232,11 @@ extern int host_dk_capture;
 /* debug.render_thread (host_dk.c): the guest's commands run on a thread of
 their own, not the game's */
 extern int host_dk_render_thread;
+/* debug.frame_pacing: the game thread waits, as it hands a frame over, for
+the present of the frame before it (host_dk_pace, from the stand-in
+window's swap) */
+extern int host_dk_frame_pacing;
+void host_dk_pace(void);
 /* debug.gpu_experiment: what-ifs that measure what part of the GPU's time a
 change could take back, comma-separated: "no_compression" (render targets
 without hardware compression), "no_target_barriers" (no wait before a

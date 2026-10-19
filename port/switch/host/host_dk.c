@@ -1011,6 +1011,31 @@ static void fence_wait_said(int index, const char *what)
 		host_logf(HOST_LOG_ERROR, "deko3d: %s: the GPU finished after all", what);
 }
 
+/* ---------- the slow frames' figures (host_sdl2.c's frame_statistics)
+
+What each thread waited for since the last report: the game thread for room
+in the render queue (host_dk_submit), the render thread for a screen image
+(dkQueueAcquireImage) and for the GPU to give back a frame's slot
+(frame_begin's fence), and how many frames it presented. Written by their
+own threads, read by the game thread's report: a figure a frame late is no
+matter in a line about a slow frame. */
+/* (the frame's pace, below with host_dk_frame_pacing) */
+static void pace_present_run(void);
+
+static struct
+{
+	uint64_t submit_wait_ns;
+	uint32_t streams;
+	volatile uint64_t acquire_max_ns, fence_max_ns;
+	volatile uint32_t presents;
+	volatile uint32_t gpu_last_us;
+} slow;
+
+static uint64_t slow_now_ns(void)
+{
+	return armTicksToNs(armGetSystemTick());
+}
+
 /* ---------- the GPU's time a frame
 
 Each submission is bracketed by two timestamps: the first in a small command
@@ -1067,6 +1092,8 @@ static void gpu_timing_frame_begin(void)
 		{
 			uint32_t busy_us = (uint32_t)(busy / 1000);
 
+			slow.gpu_last_us = busy_us;
+
 			dk.gpu_average_us = dk.gpu_average_us ? dk.gpu_average_us + ((int32_t)busy_us - (int32_t)dk.gpu_average_us) / 16
 				: busy_us;
 		}
@@ -1100,6 +1127,21 @@ static int gpu_timing_bracket(void)
 	return 1;
 }
 
+void host_dk_frame_report(struct host_dk_frame_report *report)
+{
+	report->submit_wait_us = (uint32_t)(slow.submit_wait_ns / 1000);
+	report->streams = slow.streams;
+	report->acquire_max_us = (uint32_t)(slow.acquire_max_ns / 1000);
+	report->fence_max_us = (uint32_t)(slow.fence_max_ns / 1000);
+	report->presents = slow.presents;
+	report->gpu_last_us = slow.gpu_last_us;
+	report->gpu_average_us = dk.gpu_average_us;
+	slow.submit_wait_ns = 0;
+	slow.streams = 0;
+	slow.acquire_max_ns = slow.fence_max_ns = 0;
+	slow.presents = 0;
+}
+
 static void frame_begin(void)
 {
 	/* (under the lock: the guest's other threads read the fences through
@@ -1109,7 +1151,12 @@ static void frame_begin(void)
 		fences_forget();
 	if (dk.fence_pending[dk.frame])
 	{
+		uint64_t waited = slow_now_ns();
+
 		fence_wait_said(dk.frame, "the next frame");
+		waited = slow_now_ns() - waited;
+		if (waited > slow.fence_max_ns)
+			slow.fence_max_ns = waited;
 		dk.fence_pending[dk.frame] = 0;
 		if (dk.fence_serial[dk.frame] > dk.serial_retired)
 			dk.serial_retired = dk.fence_serial[dk.frame];
@@ -1761,7 +1808,14 @@ static void present(const struct dk_command_present *command)
 	}
 	if (output_height != dk.screen_height)
 		swapchain_remake();
-	slot = dkQueueAcquireImage(dk.queue, dk.swapchain);
+	{
+		uint64_t waited = slow_now_ns();
+
+		slot = dkQueueAcquireImage(dk.queue, dk.swapchain);
+		waited = slow_now_ns() - waited;
+		if (waited > slow.acquire_max_ns)
+			slow.acquire_max_ns = waited;
+	}
 	DkImageView screen_view;
 	DkImageView const *screen_views[1] = { &screen_view };
 	DkScissor scissor = { 0, 0, dk.screen_width, dk.screen_height };
@@ -1839,6 +1893,7 @@ static void present(const struct dk_command_present *command)
 		}
 	}
 	dkQueuePresentImage(dk.queue, dk.swapchain, slot);
+	slow.presents++;
 	host_dk_presenting = 1;
 	if (++dk.frames_presented == 1)
 		host_logf(HOST_LOG_INFO, "deko3d: first frame presented");
@@ -3909,6 +3964,7 @@ static void submit_run(const unsigned char *at, uint32_t size)
 			break;
 		case DK_COMMAND_PRESENT:
 			present((const struct dk_command_present *)header);
+			pace_present_run();
 			break;
 		case DK_COMMAND_STATE:
 			state_receive((const struct dk_command_state *)header);
@@ -3982,15 +4038,84 @@ deko3d's, presenting - took the game thread a sixth of its time in a
 40-player match, while the console's other cores waited. The stream is
 copied into one of RENDER_QUEUE buffers and run by a thread of its own, on
 a helper core, in order; the game goes on with its next frame. It waits
-only when all of them are still to run, so it is never more than a frame
-or so ahead. The guest's checks against the GPU (host_dk_retired) count
+when all of them are still to run; how far ahead it goes is the frame's
+pace's (below), not the queue's. The guest's checks against the GPU (host_dk_retired) count
 submissions the GPU has finished, which this thread has run before, so
 what the guest keeps for a submission is kept until it is run; the queue
 drains before host_dk_idle waits for the GPU. debug.render_thread = false
 runs each stream on the game thread, as before. */
 int host_dk_render_thread = 1;
 
-#define RENDER_QUEUE 3
+/* ---------- the frame's pace (debug.frame_pacing)
+
+With the render thread, the game thread was held back only by a full render
+queue: it ran frames ahead in a burst (under 15 ms apart), then waited out
+two of the display's refreshes at once inside the next frame (the slow
+frames' lines: 79 of 87 at the Halo level, the game thread running 4-12 ms
+and waiting 20-39 ms while two presents waited 16 ms each for a screen
+image). Shown a refresh apart, frames begun 5 ms and then 33 ms apart
+judder under the interpolation, though the display shows 60. Here the game
+thread, as it hands a frame over (the stand-in window's swap), waits for
+the present of the frame before it: never more than one frame ahead, and
+each begun a refresh after the last. 100 ms at most, should a present
+never come (a faulted queue presents nothing). */
+int host_dk_frame_pacing = 1;
+
+#define PACE_AHEAD 1
+#define PACE_LIMIT_NS 100000000ULL
+
+static Mutex pace_lock;
+static CondVar pace_presented;
+/* the presents the render thread has run, and the frames the game thread
+has handed over */
+static uint32_t pace_run, pace_handed;
+
+static void pace_present_run(void)
+{
+	mutexLock(&pace_lock);
+	pace_run++;
+	condvarWakeAll(&pace_presented);
+	mutexUnlock(&pace_lock);
+}
+
+void host_dk_pace(void)
+{
+	static int said;
+	uint64_t start;
+
+	if (!host_dk_frame_pacing || !host_dk_render_thread)
+		return;
+	mutexLock(&pace_lock);
+	pace_handed++;
+	start = slow_now_ns();
+	while ((int32_t)(pace_handed - pace_run) > PACE_AHEAD)
+	{
+		uint64_t waited = slow_now_ns() - start;
+
+		if (waited >= PACE_LIMIT_NS)
+		{
+			if (!said)
+			{
+				said = 1;
+				host_logf(HOST_LOG_WARN, "deko3d: a frame's pace waited 100 ms for a present (%u handed over, %u "
+					"presented); it goes on", (unsigned)pace_handed, (unsigned)pace_run);
+			}
+			/* (caught up, so as not to wait so again for the same) */
+			pace_run = pace_handed - PACE_AHEAD;
+			break;
+		}
+		condvarWaitTimeout(&pace_presented, &pace_lock, PACE_LIMIT_NS - waited);
+	}
+	mutexUnlock(&pace_lock);
+}
+
+/* (8: room for a frame's streams and the next one's. A slot is held while
+its stream runs, a present's wait for a screen image included, so at 3 a
+frame flushed three times - a busy check, KickPushBuffer, the frees after
+handover - waited mid-frame for the frame before it to be presented:
+33 ms frames at 60 fps, the game thread running 11 ms of them. The
+streams' buffers grow as used, 1 MB at most each.) */
+#define RENDER_QUEUE 8
 #define RENDER_THREAD_STACK (1024 * 1024)
 
 static struct
@@ -4083,8 +4208,15 @@ void host_dk_submit(uint32_t commands, uint32_t size)
 		return;
 	}
 	pthread_mutex_lock(&render_queue.lock);
-	while (render_queue.count == RENDER_QUEUE)
-		pthread_cond_wait(&render_queue.room, &render_queue.lock);
+	slow.streams++;
+	if (render_queue.count == RENDER_QUEUE)
+	{
+		uint64_t waited = slow_now_ns();
+
+		while (render_queue.count == RENDER_QUEUE)
+			pthread_cond_wait(&render_queue.room, &render_queue.lock);
+		slow.submit_wait_ns += slow_now_ns() - waited;
+	}
 	index = (render_queue.head + render_queue.count) % RENDER_QUEUE;
 	pthread_mutex_unlock(&render_queue.lock);
 	/* (the buffer is the game thread's until counted: the render thread

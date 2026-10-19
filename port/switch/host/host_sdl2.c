@@ -450,6 +450,9 @@ static u64 thread_ticks(void)
 	return ticks;
 }
 
+/* the slow frames said in a window of frame_statistics, the rest counted */
+#define SLOW_FRAMES_SAID 20
+
 static void frame_statistics(void)
 {
 	/* the game thread's own run time, and the clock's, at the window's start */
@@ -480,6 +483,43 @@ static void frame_statistics(void)
 	frames++;
 	if (now - previous > longest)
 		longest = now - previous;
+	/* each frame over 20 ms said, with what each thread waited for in it
+	(host_dk_frame_report), at most SLOW_FRAMES_SAID a window and the rest
+	counted: where a dropped frame went */
+	{
+		static u64 frame_busy_start;
+		static uint32_t said, unsaid;
+		struct host_dk_frame_report report;
+		u64 busy = thread_ticks();
+		double milliseconds = (double)(now - previous) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+
+		host_dk_frame_report(&report);
+		if (milliseconds > 20.0)
+		{
+			if (said < SLOW_FRAMES_SAID)
+			{
+				said++;
+				host_logf(HOST_LOG_INFO, "slow frame: %.1f ms; the game thread ran %.1f ms and waited %.1f ms for room "
+					"in the render queue (%u streams); the render thread presented %u, waited %.1f ms at most for a "
+					"screen image and %.1f ms for a frame's slot; the GPU %.1f ms on its last frame (%.1f on average)",
+					milliseconds,
+					busy && frame_busy_start ? (double)(busy - frame_busy_start) * 1000.0 / (double)armGetSystemTickFreq() :
+						0.0,
+					report.submit_wait_us / 1000.0, (unsigned)report.streams, (unsigned)report.presents,
+					report.acquire_max_us / 1000.0, report.fence_max_us / 1000.0, report.gpu_last_us / 1000.0,
+					report.gpu_average_us / 1000.0);
+			}
+			else
+				unsaid++;
+		}
+		frame_busy_start = busy;
+		if (now - start >= (uint64_t)(interval * (double)SDL_GetPerformanceFrequency()))
+		{
+			if (unsaid)
+				host_logf(HOST_LOG_INFO, "slow frame: %u more in these seconds not said", (unsigned)unsaid);
+			said = unsaid = 0;
+		}
+	}
 	{
 		/* how the frames' times spread: vsync puts them on multiples of
 		16.7 ms, a slower thread or the GPU anywhere */
@@ -541,6 +581,10 @@ int host_sdl_gl_swap_window(uint32_t window)
 			now = next;
 		}
 		next = now - next > interval ? now + interval : next + interval;
+		/* (the frame handed over: the game goes on once the one before it is
+		presented, host_dk_pace) */
+		if (host_dk_presenting)
+			host_dk_pace();
 		frame_statistics();
 		return 1;
 	}
