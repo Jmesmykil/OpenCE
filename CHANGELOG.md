@@ -1,5 +1,18 @@
 # Changelog
 
+## Build 106
+
+- PS5: fixes a bug with the updater. It installed a new release's files
+  without the permission to run them, so the game did not start again
+  after an update; it now installs them as FTP does. Build 105's updater
+  still has the bug: on Build 105, install this build by hand, once: over
+  FTP, delete the PPSA99500 folder in /data/homebrew, then copy this
+  build's in its place (copying over the old files keeps the ones an
+  update wrote unable to run). Your saves and settings, in /data/halo,
+  stay. Updates after it install themselves. (thelinkin3000)
+- The README opens with a trailer: the game on the Nintendo Switch
+  (puginatux's video).
+
 ## Build 105
 
 - PS5: the game as a homebrew title for a jailbroken PS5 (system software
