@@ -1,5 +1,18 @@
 # Changelog
 
+## Build 105
+
+- PS5: the game as a homebrew title for a jailbroken PS5 (system software
+  13.60 or lower, with ShadowMountPlus and an FTP server):
+  halo-ps5-release.zip, whose PPSA99500 folder goes in /data/homebrew and
+  the disc image in /data/halo. Up to native 4K at 120 frames a second on
+  a TV that takes it, split screen with a second pad, aiming with the
+  DualSense's gyroscope, voice chat through the pad's microphone, and
+  system link and internet play with every other build. It draws with the
+  Android port's Vulkan renderer on RADV, and updates itself from the
+  releases while you play. The first visit to each place on a new install
+  can stutter while its shaders are made. (thelinkin3000)
+
 ## Build 104
 
 - Switch and Android (Vulkan): Custom Edition maps and mods draw their
