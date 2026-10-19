@@ -46,7 +46,7 @@ and to **deko3d**, the Switch's own GPU interface, on the Switch.
 
 [![Halo Combat Evolved - Nintendo Switch: watch on YouTube](https://img.youtube.com/vi/imNdnKszCVI/maxresdefault.jpg)](https://www.youtube.com/watch?v=imNdnKszCVI)
 
-*Halo: Combat Evolved on the Nintendo Switch (video by hardran3).*
+*Halo: Combat Evolved on the Nintendo Switch (video by puginatux).*
 
 </div>
 
