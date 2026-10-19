@@ -128,6 +128,8 @@ host's copies go as its own ticks have them) ... */
 #define CLIENT_CLOCK_FAST_WINDOWS 5
 /* the longest notice's text (_distributed_message_notice) */
 #define MAXIMUM_NOTICE_LENGTH 160
+/* (the Switch) the host's notices written to debug.txt a second, at most */
+#define DISTRIBUTED_NOTICES_LOGGED 3
 /* a Discord user's id and name as kept, with their ends (p2p.h's
 P2P_DISCORD_ID_SIZE and P2P_DISCORD_NAME_SIZE) */
 #define DISCORD_ID_SIZE 24
@@ -4265,6 +4267,40 @@ void network_distributed_handle_message(
 				text[index] = '?';
 		}
 		console_warning("%s", text);
+#ifdef HALO_SWITCH
+		/* (on the Switch, debug.txt is on the card, and each line written
+		waits for it on the game thread: a server's map vote, a screen of
+		notices a second padded with blank ones, took frames to 2.5 s. Its
+		blank lines are not written, and at most DISTRIBUTED_NOTICES_LOGGED
+		a second, the rest counted on the next one that is) */
+		{
+			static unsigned long second_start;
+			static long logged_this_second, left_out;
+			unsigned long now = system_milliseconds();
+
+			for (index = 0; text[index] == ' '; index++)
+			{
+			}
+			if (!text[index])
+				break;
+			if (now - second_start >= 1000)
+			{
+				second_start = now;
+				logged_this_second = 0;
+			}
+			if (logged_this_second >= DISTRIBUTED_NOTICES_LOGGED)
+			{
+				left_out++;
+				break;
+			}
+			logged_this_second++;
+			if (left_out)
+			{
+				error(_error_log, "the host: (%ld more lines not written here)", left_out);
+				left_out = 0;
+			}
+		}
+#endif
 		error(_error_log, "the host: %s", text);
 		break;
 	}
