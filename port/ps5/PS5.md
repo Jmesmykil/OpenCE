@@ -2829,8 +2829,11 @@ glslang on the path, clang 22 for the compile), `port/ps5/host/host_main.c`
     system's at launch), so everything goes in place at once. A start that
     finds the stamp (a session closed halfway through the renames) puts
     the remaining `.new` files in place before it loads the guest and says
-    so. Files the title writes are 0666 and folders 0777, as the player's
-    folder (above), so the FTP server can still replace them by hand. The
+    so. Files and folders the updater writes are 0777, as the FTP server
+    writes a title's: the console does not start an `eboot.bin` without
+    the execute bit (the first update from a release, written 0666,
+    installed and then did not start: "Progress"), and the FTP server can
+    still replace them by hand. The
     zip is deleted after; a failure deletes the `.new` files and the zip
     and leaves the title as it was.
   - **What the player sees.** Notifications, as the first start's
@@ -3355,6 +3358,43 @@ graphics, multiplayer), `AGENTS.md` has its row, build line, tests and
 README, and `README.txt` says how to talk with the pad (30 lines).
 `CHANGELOG.md` is the release commit's, Build 105, after the merge. Not
 read by the user before the release, at the user's word.
+
+**Step 8, the release and the update from it.** At the user's word
+("Clean the files, make the README changes, then squash-merge to main.
+Push to main, then make a new commit with the changelog to build a new
+release"): ps5-x32 squashed onto Build 104 as one commit, `1f8a9c704`
+("The PS5 port: ...", its tree ps5-x32's), pushed to main; Build 105
+(`d94d38e03`, `CHANGELOG.md` alone, as Build 104's) pushed and tagged
+`v105`; run `39192250869` green (Android, Switch, PS5, release, notify),
+release build-105 with six zips, latest. Its `halo-ps5-release.zip`: 42
+entries, every one stored; its notice names `d94d38e03`; the Android and
+Switch zips hold the files build-104's did (8 and 11). The README then
+gained the trailer (puginatux's video, `06ea6d185`, `f52cbe624`). Main's
+worktree on the machine was not touched (its checkout is behind GitHub's).
+
+The user then started the branch build that was on the console: it did
+not look ("this build has no number"), which is right: only a release
+tag's builds have a number. **The update from a release**: the local tree
+built as release build 104 (`HALO_BUILD_NUMBER=104 tools/ci_build.py ps5
+release`, the updater's object checked to have 104) and uploaded; the user
+started it (`20261019-031926`): "build 105 is available (this is build
+104): downloading halo-ps5-release.zip", the notifications at 25, 50 and
+75 %, "downloaded in 10.3 s", "8 files put in place, 0 not", "build 105 is
+installed (1.0 s)" and its notification. **Then the title did not start**
+("It's failing to start now"): no line of a new log. The updater had
+written every file 0666, owned by the title (user 1), where the FTP
+server's are 0777, owned by root; the console does not start an
+`eboot.bin` without the execute bit. Mended on the console: the eight
+files deleted over FTP (an upload onto a file keeps its mode) and the
+release's own `PPSA99500` uploaded, each 0777 again. The updater now
+writes 0777 (`copy_entry`). Made again with it (`20261019-032423`): the
+fixed build 104 uploaded (its notice checked: `d8bd2b2a6 +changes`), the
+user started it twice; the second start was Build 105 ("build d94d38e",
+"build 105 (release) looks for a newer release"), its eight files the
+title's (owner 1) and `rwxrwxrwx`, its notice the release's commit. Build
+106 carries the fix. Build 105's own updater still writes 0666, so a
+console on Build 105 cannot start 106 once it has installed it: Build
+106's notes say to install it by hand over FTP, once.
 
 **Step 5, the measurements: declined.** The user, 2026-10-19: "The
 measurements are done or I don't care about them". None was made in this

@@ -34,8 +34,10 @@ player closes it; a title cannot start itself again, and the new host and
 the new guest must start together. A start that finds the stamp (a session
 closed during the renames) puts the rest in place before the guest loads
 (ps5_update_recover); .new files without one are a download that did not
-finish, and go. What the updater writes is 0666 and its folders 0777, so
-the console's FTP server can still replace them by hand.
+finish, and go. What the updater writes is 0777, files and folders, as the
+console's FTP server writes a title's: the console does not start an
+eboot.bin without the execute bit, and the FTP server can still replace
+them by hand.
 
 The guest's own updater (port/linux/src/updater.c, compiled into the
 desktop guest) is built for the PS5 with no number, so it never looks, and
@@ -335,11 +337,14 @@ static int copy_entry(FILE *archive, const struct ps5_zip_entry *entry, const ch
 {
 	static unsigned char buffer[256 * 1024];
 	unsigned long left = entry->compressed, crc = 0;
-	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0777);
 
 	if (fd < 0)
 		return fail(error, size, "cannot write %s (%s)", path, strerror(errno));
-	fchmod(fd, 0666);
+	/* (0777, as the FTP server writes a title's files: the console does
+	not start an eboot.bin, or load its libc.prx, without the execute bit;
+	an update written 0666 installed and then would not start) */
+	fchmod(fd, 0777);
 	while (left)
 	{
 		size_t take = left < sizeof(buffer) ? left : sizeof(buffer);
