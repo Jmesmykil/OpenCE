@@ -156,19 +156,42 @@ float halo_screen_scale(void)
 /* display.model_detail (as d3d8_gl.c's): "stock" chooses a model's level of
 detail by the Xbox's 480 lines, "native" by the display's, "highest" draws
 the most detailed level of whatever is drawn at all */
+enum
+{
+	_model_detail_stock,
+	_model_detail_native,
+	_model_detail_highest,
+};
+
+/* (read again only when a setting changes: every model asks, every frame) */
+static int model_detail_setting(void)
+{
+	static unsigned long read_at = (unsigned long)-1;
+	static int value;
+
+	if (read_at != config_changes())
+	{
+		const char *setting = config_string("display.model_detail");
+
+		read_at = config_changes();
+		value = !strcmp(setting, "native") ? _model_detail_native :
+			!strcmp(setting, "highest") ? _model_detail_highest : _model_detail_stock;
+	}
+	return value;
+}
+
 int halo_model_detail_stock(void)
 {
-	return strcmp(config_string("display.model_detail"), "native") &&
-		strcmp(config_string("display.model_detail"), "highest");
+	return model_detail_setting() == _model_detail_stock;
 }
 
 float halo_model_detail_scale(int level)
 {
 	float display_scale;
 
-	if (halo_model_detail_stock())
+	if (model_detail_setting() == _model_detail_stock)
 		return 1.0f;
-	if (!strcmp(config_string("display.model_detail"), "highest") && level)
+	if (model_detail_setting() == _model_detail_highest && level)
 		return 1.0e6f;
 	display_scale = halo_screen_pixel_scale();
 	return display_scale > 1.0f ? display_scale : 1.0f;
