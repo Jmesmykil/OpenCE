@@ -700,6 +700,9 @@ struct capture_entry
 	uint32_t count, primitive;
 	uint32_t color, depth;
 	uint32_t texture0;
+	/* the draw's blend (on, source, destination, equation, as the guest's
+	state says them) and depth test and write */
+	uint32_t blend, blend_source, blend_destination, blend_equation, depth_state;
 };
 
 static struct
@@ -782,6 +785,11 @@ static void command_done(struct trace_event *event)
 		entry->color = dk.color ? dk.color->surface.data : 0;
 		entry->depth = dk.depth ? dk.depth->surface.data : 0;
 		entry->texture0 = event->kind == DK_COMMAND_DRAW ? event->a[8] : 0;
+		entry->blend = dk.state.blend;
+		entry->blend_source = dk.state.blend_source;
+		entry->blend_destination = dk.state.blend_destination;
+		entry->blend_equation = dk.state.blend_equation;
+		entry->depth_state = dk.state.depth_test | dk.state.depth_write << 1;
 		capture.count++;
 	}
 }
@@ -4608,10 +4616,13 @@ static void capture_report(void)
 		capture_target_name(entry->color, target, sizeof(target));
 		if (entry->kind == DK_COMMAND_DRAW)
 			host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, #%u %s [%s]: primitive %u, %u %s, pixel %s, vertex %s, "
-				"texture %08x, into %s", (double)ns[longest[index]] / 1e6, (unsigned)longest[index],
-				trace_kind_name(entry->kind), trace_pass_name(entry->pass), (unsigned)(entry->primitive & 0xff),
-				(unsigned)entry->count, ((entry->primitive >> 16) & 0xff) ? "indices" : "vertices", name, vertex_name,
-				(unsigned)entry->texture0, target);
+				"texture %08x, blend %u (%u, %u, op %u), depth test %u write %u, into %s", (double)ns[longest[index]] / 1e6,
+				(unsigned)longest[index], trace_kind_name(entry->kind), trace_pass_name(entry->pass),
+				(unsigned)(entry->primitive & 0xff), (unsigned)entry->count,
+				((entry->primitive >> 16) & 0xff) ? "indices" : "vertices", name, vertex_name, (unsigned)entry->texture0,
+				(unsigned)entry->blend, (unsigned)entry->blend_source, (unsigned)entry->blend_destination,
+				(unsigned)entry->blend_equation, (unsigned)(entry->depth_state & 1), (unsigned)(entry->depth_state >> 1 & 1),
+				target);
 		else
 			host_logf(HOST_LOG_INFO, "deko3d capture:   %.3f ms, #%u %s [%s], into %s", (double)ns[longest[index]] / 1e6,
 				(unsigned)longest[index], trace_kind_name(entry->kind), trace_pass_name(entry->pass), target);

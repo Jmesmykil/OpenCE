@@ -1042,8 +1042,9 @@ uint32_t dk_texture_get(const DWORD *resource, const D3DCOLOR *palette, int *kin
 			platform_is_contiguous((void *)(entry->address + entry->size - 1)))
 		{
 			if (config_boolean("debug.texture_log"))
-				platform_log("texture upload %08lx fmt %02lx %lux%lu size %lu gen %lu id %u", (unsigned long)data,
-					(unsigned long)entry->description.format, entry->description.width, entry->description.height,
+				platform_log("texture upload %08lx fmt %02lx %lux%lux%lu, %lu levels, kind %u, size %lu gen %lu id %u",
+					(unsigned long)data, (unsigned long)entry->description.format, entry->description.width,
+					entry->description.height, entry->description.depth, entry->description.levels, (unsigned)entry->kind,
 					entry->size, entry->generation, (unsigned)entry->id);
 			upload(entry->id, entry->kind, &entry->description, (const unsigned char *)entry->address, palette,
 				custom_edition_texels_swizzle(entry->address));
