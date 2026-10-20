@@ -415,6 +415,31 @@ const char *host_data_root(void)
 	return data_root;
 }
 
+/* the data and save roots, from HALO_DATA_ROOT and HALO_SAVE_ROOT or beside
+the program; once, by the first to want them (the updater, before the game
+thread) */
+static void roots_resolve(void)
+{
+	const char *setting;
+
+	if (save_root[0])
+		return;
+	setting = getenv("HALO_DATA_ROOT");
+	snprintf(data_root, sizeof(data_root), "%s", setting && *setting ? setting : executable_root);
+	setting = getenv("HALO_SAVE_ROOT");
+	if (setting && *setting)
+		snprintf(save_root, sizeof(save_root), "%s", setting);
+	else
+		snprintf(save_root, sizeof(save_root), "%s/save", data_root);
+	mkdir(save_root, 0755);
+}
+
+const char *host_save_root(void)
+{
+	roots_resolve();
+	return save_root;
+}
+
 static struct timespec extraction_started;
 
 static int directory_has_maps(const char *root)
@@ -945,14 +970,7 @@ static void *game_main(void *unused)
 
 	(void)unused;
 	log_marker("marker: game thread running");
-	setting = getenv("HALO_DATA_ROOT");
-	snprintf(data_root, sizeof(data_root), "%s", setting && *setting ? setting : executable_root);
-	setting = getenv("HALO_SAVE_ROOT");
-	if (setting && *setting)
-		snprintf(save_root, sizeof(save_root), "%s", setting);
-	else
-		snprintf(save_root, sizeof(save_root), "%s/save", data_root);
-	mkdir(save_root, 0755);
+	roots_resolve();
 	log_marker("marker: data paths resolved");
 	ensure_game_data(data_root);
 

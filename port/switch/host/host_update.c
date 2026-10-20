@@ -27,6 +27,17 @@ old game image, which belong together. The new image waits beside the old one
 and the new program puts it in place when it starts (host_update_finish). A
 restart through the loader (envSetNextLoad) was tried first, and under
 Sphaira the new build stopped as soon as it had started.
+
+The shared shader keys come the same way, after the release's check: the
+repository's keys.dkk (the shaders known from the campaign and the
+multiplayer maps, port/switch/guest/dk_shaders.c), named by its SHA-1 in
+keys.sha1 beside it on main. When that is not the SHA-1 of the console's
+save/z/shader_keys/keys.dkk, the file is downloaded as keys.dkk.new, checked
+against the SHA-1 and the key files' header, and put in place - before the
+game starts, so its shader cache reads it at its first pass. The guest merges
+it with the console's own console.dkk as it reads them (a key both have is
+one). Without a network, or with neither file on main, the keys the console
+has are kept.
 */
 
 #include "host.h"
@@ -35,12 +46,14 @@ Sphaira the new build stopped as soon as it had started.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include <switch.h>
 
 #include "tomlc17.h"
 
 #include "host_ui.h"
+#include "../guest/dk_shaders.h"
 
 /* (given for this file by the build: tools/switch_build.py) */
 #ifndef HALO_BUILD_NUMBER
@@ -51,6 +64,9 @@ Sphaira the new build stopped as soon as it had started.
 #endif
 
 #define UPDATE_REPOSITORY "thelinkin3000/halo-ce-universal"
+/* the shared shader keys, and their SHA-1 (sha1sum's line, or just the hash) */
+#define KEYS_URL "https://raw.githubusercontent.com/" UPDATE_REPOSITORY "/main/keys.dkk"
+#define KEYS_SHA1_URL "https://raw.githubusercontent.com/" UPDATE_REPOSITORY "/main/keys.sha1"
 #define UPDATE_ASSET "halo-switch-" HALO_BUILD_FLAVOR ".zip"
 #define UPDATE_PROGRAM "halo.nro"
 #define UPDATE_IMAGE "halo_guest.elf"
@@ -542,12 +558,179 @@ static int download_and_install(long build, char *error, size_t error_size)
 	return install(error, error_size);
 }
 
+/* ---------- the shared shader keys */
+
+/* the SHA-1 file's first line, kept as it comes */
+struct keys_sha1_text
+{
+	char text[128];
+	size_t length;
+};
+
+static int keys_sha1_body(void *context, const void *data, size_t size, long long total)
+{
+	struct keys_sha1_text *sha1 = context;
+	size_t room = sizeof(sha1->text) - 1 - sha1->length;
+
+	(void)total;
+	if (size > room)
+		size = room;
+	memcpy(sha1->text + sha1->length, data, size);
+	sha1->length += size;
+	sha1->text[sha1->length] = 0;
+	return 1;
+}
+
+/* 40 hex digits at the start of text into a hash; 0 if there are not */
+static int sha1_parse(const char *text, unsigned char hash[SHA1_HASH_SIZE])
+{
+	int index;
+
+	for (index = 0; index < SHA1_HASH_SIZE * 2; index++)
+	{
+		char digit = text[index];
+		int value = digit >= '0' && digit <= '9' ? digit - '0' : (digit | 0x20) >= 'a' && (digit | 0x20) <= 'f' ?
+			(digit | 0x20) - 'a' + 10 : -1;
+
+		if (value < 0)
+			return 0;
+		if (index % 2)
+			hash[index / 2] |= (unsigned char)value;
+		else
+			hash[index / 2] = (unsigned char)(value << 4);
+	}
+	return 1;
+}
+
+/* the SHA-1 of a file; 0 if it cannot be read */
+static int sha1_of_file(const char *path, unsigned char hash[SHA1_HASH_SIZE])
+{
+	static unsigned char buffer[64 * 1024];
+	Sha1Context context;
+	FILE *file = fopen(path, "rb");
+	size_t got;
+
+	if (!file)
+		return 0;
+	sha1ContextCreate(&context);
+	while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+		sha1ContextUpdate(&context, buffer, got);
+	fclose(file);
+	sha1ContextGetHash(&context, hash);
+	return 1;
+}
+
+/* the download, written as it comes and hashed as it is written */
+struct keys_download
+{
+	FILE *file;
+	Sha1Context sha1;
+	unsigned char header[12];
+	long long received;
+	int failed;
+};
+
+static int keys_body(void *context, const void *data, size_t size, long long total)
+{
+	struct keys_download *download = context;
+
+	(void)total;
+	if (download->received < (long long)sizeof(download->header))
+	{
+		size_t take = sizeof(download->header) - (size_t)download->received;
+
+		memcpy(download->header + download->received, data, take < size ? take : size);
+	}
+	sha1ContextUpdate(&download->sha1, data, size);
+	if (fwrite(data, 1, size, download->file) != size)
+	{
+		download->failed = 1;
+		return 0;
+	}
+	download->received += (long long)size;
+	return 1;
+}
+
+/* whether a downloaded file is a key file of this build, whole */
+static int keys_valid(const struct keys_download *download)
+{
+	uint32_t words[3];
+
+	if (download->received < (long long)sizeof(download->header) ||
+		(download->received - (long long)sizeof(download->header)) % DK_KEY_RECORD_SIZE)
+		return 0;
+	memcpy(words, download->header, sizeof(words));
+	return words[0] == DK_KEY_MAGIC && words[1] == DK_KEY_FORMAT && words[2] == DK_KEY_RECORD_SIZE;
+}
+
+/* keys.dkk from main, when its SHA-1 there is not the console's file's */
+static void keys_refresh(void)
+{
+	struct keys_sha1_text sha1_text;
+	struct keys_download download;
+	unsigned char wanted[SHA1_HASH_SIZE], have[SHA1_HASH_SIZE], got[SHA1_HASH_SIZE];
+	char folder[512], path[560], temporary[568], error[256];
+	int status;
+
+	memset(&sha1_text, 0, sizeof(sha1_text));
+	status = host_https_get(KEYS_SHA1_URL, 1, keys_sha1_body, &sha1_text, NULL, 0, error, sizeof(error));
+	if (status != 200)
+	{
+		host_logf(HOST_LOG_INFO, "update: no shared shader keys to check (%s)", status < 0 ? error : "not on main");
+		return;
+	}
+	if (!sha1_parse(sha1_text.text, wanted))
+	{
+		host_logf(HOST_LOG_WARN, "update: keys.sha1 on main holds no SHA-1; the shader keys are left as they are");
+		return;
+	}
+	snprintf(folder, sizeof(folder), "%s/z", host_save_root());
+	mkdir(folder, 0755);
+	snprintf(folder, sizeof(folder), "%s/z/shader_keys", host_save_root());
+	mkdir(folder, 0755);
+	snprintf(path, sizeof(path), "%s/keys.dkk", folder);
+	snprintf(temporary, sizeof(temporary), "%s.new", path);
+	if (sha1_of_file(path, have) && !memcmp(have, wanted, sizeof(have)))
+	{
+		host_logf(HOST_LOG_INFO, "update: the shared shader keys are the latest");
+		return;
+	}
+	host_ui_message("HALO: COMBAT EVOLVED", "Downloading the shared shader keys...", NULL);
+	memset(&download, 0, sizeof(download));
+	download.file = fopen(temporary, "wb");
+	if (!download.file)
+	{
+		host_logf(HOST_LOG_ERROR, "update: %s cannot be written; the shader keys are left as they are", temporary);
+		return;
+	}
+	sha1ContextCreate(&download.sha1);
+	status = host_https_get(KEYS_URL, 1, keys_body, &download, NULL, 0, error, sizeof(error));
+	if (fclose(download.file) != 0)
+		download.failed = 1;
+	sha1ContextGetHash(&download.sha1, got);
+	if (status != 200 || download.failed || memcmp(got, wanted, sizeof(got)) || !keys_valid(&download))
+	{
+		host_logf(HOST_LOG_WARN, "update: the shared shader keys did not download whole (%s); left as they are",
+			status < 0 ? error : status != 200 ? "not on main" : download.failed ? "the card would not take them" :
+			memcmp(got, wanted, sizeof(got)) ? "not the SHA-1 in keys.sha1" : "not a key file of this build");
+		remove(temporary);
+		return;
+	}
+	if (!replace(temporary, path))
+	{
+		host_logf(HOST_LOG_ERROR, "update: %s could not be put in place", path);
+		remove(temporary);
+		return;
+	}
+	host_logf(HOST_LOG_INFO, "update: the shared shader keys are updated (%lld keys)",
+		(download.received - (long long)sizeof(download.header)) / DK_KEY_RECORD_SIZE);
+}
+
+/* the release's check, and its offer */
+static void release_offer(void);
+
 void host_update_offer(void *pad)
 {
-	char error[256];
-	char message[160];
-	long build;
-
 	menu_pad = pad;
 	if (HALO_BUILD_NUMBER <= 0)
 	{
@@ -559,6 +742,16 @@ void host_update_offer(void *pad)
 		host_logf(HOST_LOG_INFO, "update: update.auto is off in config.toml");
 		return;
 	}
+	release_offer();
+	keys_refresh();
+}
+
+static void release_offer(void)
+{
+	char error[256];
+	char message[160];
+	long build;
+
 	host_ui_message("HALO: COMBAT EVOLVED", "Looking for an update...", NULL);
 	build = latest_build();
 	if (build <= HALO_BUILD_NUMBER)

@@ -79,8 +79,6 @@ int d3d8_dk_vertex_program_by_id(unsigned long id, uint64_t *program_hash, const
 
 /* ---------- the keys */
 
-#define DK_KEY_MAGIC 0x314b4b44UL /* "DKK1" */
-#define DK_KEY_FORMAT 1
 #define DK_KEY_FOLDER "z:\\shader_keys"
 #define DK_KEY_CONSOLE_FILE "z:\\shader_keys\\console.dkk"
 #define DK_KEY_SHARED_FILE "z:\\shader_keys\\keys.dkk"
@@ -120,6 +118,7 @@ struct dk_key_record
 	uint32_t map_hash;
 	uint8_t data[DK_KEY_DATA_SIZE];
 };
+typedef char dk_key_record_size_check[sizeof(struct dk_key_record) == DK_KEY_RECORD_SIZE ? 1 : -1];
 
 struct dk_key
 {

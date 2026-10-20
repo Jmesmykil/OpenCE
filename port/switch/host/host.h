@@ -389,6 +389,9 @@ const char *host_executable_root(void);
 maps are there, and the deko3d renderer's shader cache under it
 (host_dk_shaders.c) */
 const char *host_data_root(void);
+/* the save root, save/ in the data folder by default: the game's z: drive,
+where the shared shader keys go (host_update.c), is under it */
+const char *host_save_root(void);
 
 /* before the game, with the screens up (host_ui_open): offers a newer release
 of the port if there is one, and installs it if the player agrees, for the

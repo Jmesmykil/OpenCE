@@ -32,6 +32,13 @@ folder's name, not this. */
 words, which no program's comes out at) */
 #define DK_FIXED_FUNCTION_PROGRAM_HASH 0x66697865642d6675ULL /* "fixed-fu" */
 
+/* the key files (dk_shaders.c), which the host's updater checks too before
+it puts a downloaded keys.dkk in place (host_update.c): three words - the
+magic, the format and a record's size - then the records */
+#define DK_KEY_MAGIC 0x314b4b44UL /* "DKK1" */
+#define DK_KEY_FORMAT 1
+#define DK_KEY_RECORD_SIZE 264
+
 /* The pixel key's texture_modes: four 5-bit modes, and above them this bit
 when texture coordinate 0 is clipped (halo_texture_clip, d3d8_dk.c): the
 shader lets a pixel go first if its u or v is outside the limits in its

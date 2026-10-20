@@ -245,7 +245,7 @@ jobs:
         run: python3 tools/ci_build.py linux_x86_64 release
 
       - name: Test
-        run: python3 -m pytest -q tools/test_host_units.py tools/test_guest_image_check.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_guest_layout.py tools/test_linux_guest_build.py
+        run: python3 -m pytest -q tools/test_host_units.py tools/test_guest_image_check.py tools/test_check_host_imports.py tools/test_host_syscall.py tools/test_guest_layout.py tools/test_linux_guest_build.py tools/test_shader_keys.py
 
       - name: Compile cache
         run: ccache --show-stats
