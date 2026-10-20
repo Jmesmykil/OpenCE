@@ -57,12 +57,12 @@ command stream) is an index into the table of loaded shaders, plus one.
 #define HOST_DK_UAM_COMMIT "unknown"
 #endif
 
-/* (16384 shaders of the 0.85 KB they average, with room: the preload loads
-every shader on the card, and a card that has met many maps had more than
-the 4096 the table held, 16 MB of code memory with them) */
+/* (32768 shaders of the 0.85 KB they average, with room: a card that has met many maps had more than the 4096 the
+table held, 16 MB of code memory with them, and the shared keys of every map are 17939 shaders, 9.6 MB: at 16384 the
+table filled with them and the menus' own could not be loaded, their draws left out) */
 #define DKSH_CODE_SIZE (32 * 1024 * 1024)
 #define DKSH_CODE_FLAGS (DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached | DkMemBlockFlags_Code)
-#define DKSH_TABLE_LIMIT 16384
+#define DKSH_TABLE_LIMIT 32768
 #define DKSH_SET_SLOTS 65536 /* a power of two, for the mask */
 /* the most the set holds: seven eighths of its slots, so linear probing
 always finds an empty slot (a full set would probe for ever) */
@@ -382,7 +382,7 @@ static uint64_t live_key(uint64_t hash, uint32_t stage)
 the last run's live list does not have, if they are enough to be worth it;
 TRUE if it was, with dksh.pack the new one and *length its length. The
 card's lock is held; nothing else has the pack yet. */
-static int pack_prune(long *length)
+static int pack_prune(long *length, const unsigned char *whole)
 {
 	char path[1024], live[1024], temporary[1040];
 	FILE *list, *pruned;
@@ -410,15 +410,19 @@ static int pack_prune(long *length)
 		return 0;
 	}
 	qsort(keys, key_count, sizeof(*keys), hash_compare);
-	/* counted first: what would be kept */
+	/* counted first: what would be kept (from the pack read whole if it could be, pack_read_whole: a seek and a
+	read for each record were 17952 small reads of the card, 2.4 s at the start) */
 	offset = sizeof(struct dksh_pack_header);
 	for (;;)
 	{
 		struct dksh_pack_record record;
 		uint64_t key;
 
-		if ((long)offset + (long)sizeof(record) > *length || fseek(dksh.pack, offset, SEEK_SET) != 0 ||
-			fread(&record, sizeof(record), 1, dksh.pack) != 1 || record.magic != DKSH_RECORD_MAGIC ||
+		if (whole && (long)offset + (long)sizeof(record) <= *length)
+			memcpy(&record, whole + offset, sizeof(record));
+		if ((long)offset + (long)sizeof(record) > *length ||
+			(!whole && (fseek(dksh.pack, offset, SEEK_SET) != 0 || fread(&record, sizeof(record), 1, dksh.pack) != 1)) ||
+			record.magic != DKSH_RECORD_MAGIC ||
 			record.stage > 1 || !record.size || record.size > DKSH_RECORD_LIMIT ||
 			(long)offset + (long)sizeof(record) + (long)record.size > *length)
 		{
@@ -560,6 +564,19 @@ static void slot_live(struct dksh_slot *slot)
 	}
 }
 
+/* the pack read whole, in one read (malloc'd), or NULL if there is no memory for it */
+static unsigned char *pack_read_whole(long length)
+{
+	unsigned char *whole = length > 0 ? malloc((size_t)length) : NULL;
+
+	if (whole && (fseek(dksh.pack, 0, SEEK_SET) != 0 || fread(whole, 1, (size_t)length, dksh.pack) != (size_t)length))
+	{
+		free(whole);
+		whole = NULL;
+	}
+	return whole;
+}
+
 /* opens this compiler's pack (made if there is none, or if it is not one)
 and reads its records into the set; the card's lock is held */
 static void pack_open_locked(unsigned long *packed)
@@ -568,6 +585,7 @@ static void pack_open_locked(unsigned long *packed)
 	struct dksh_pack_header header;
 	long length;
 	uint32_t offset;
+	unsigned char *whole;
 
 	pack_path(path, sizeof(path));
 	dksh.pack = fopen(path, "r+b");
@@ -593,13 +611,51 @@ static void pack_open_locked(unsigned long *packed)
 	}
 	fseek(dksh.pack, 0, SEEK_END);
 	length = ftell(dksh.pack);
+	whole = pack_read_whole(length);
 	/* (the shaders the last run did not ask for left out: pack_prune) */
-	if (pack_prune(&length))
+	if (pack_prune(&length, whole))
+	{
 		dksh.pack_pruned = 1;
+		free(whole);
+		whole = dksh.pack ? pack_read_whole(length) : NULL;
+	}
 	/* (a pruned pack that would not open again: as if there were none) */
 	if (!dksh.pack)
+	{
+		free(whole);
 		return;
+	}
 	offset = sizeof(header);
+	/* The records read from the pack read whole, at once: a seek and a read for each record's header cost the
+	card one small read each (a seek drops stdio's buffer), 17952 of them for 5 s at the start, the game thread
+	waiting and the map being unpacked meanwhile reading at 3 MB/s; the record-at-a-time loop below is for a
+	pack there is no memory to read whole */
+	if (whole)
+	{
+		for (;;)
+		{
+			struct dksh_pack_record record;
+			struct dksh_slot *slot;
+
+			if ((long)offset + (long)sizeof(record) > length)
+				break;
+			memcpy(&record, whole + offset, sizeof(record));
+			if (record.magic != DKSH_RECORD_MAGIC || record.stage > 1 || !record.size ||
+				record.size > DKSH_RECORD_LIMIT || (long)offset + (long)sizeof(record) + (long)record.size > length)
+				break;
+			slot = set_insert(record.hash, record.stage);
+			if (slot)
+			{
+				slot->pack_offset = offset + (uint32_t)sizeof(record);
+				slot->pack_size = record.size;
+				(*packed)++;
+			}
+			offset += (uint32_t)sizeof(record) + record.size;
+		}
+		free(whole);
+		dksh.pack_end = offset;
+		return;
+	}
 	for (;;)
 	{
 		struct dksh_pack_record record;

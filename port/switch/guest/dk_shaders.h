@@ -131,6 +131,9 @@ void dk_shader_map_loading(uint32_t map_hash);
 /* whether the loading screen stays up a frame more for the map's keys to be
 compiled (d3d8_gl_map_waiting): DK_MAP_WAIT_MS at most, from the loading */
 int dk_shader_map_waiting(void);
+/* how far the shaders' part of the loading screen has come, 0 to 1, or below 0 when there is nothing to wait for
+(d3d8_gl_map_progress) */
+float dk_shader_map_progress(void);
 /* the map the game finished loading (d3d8_gl_map_loaded): raised as above if
 the loading screen did not, and waited for, from the card, for what is left
 of the map's wait */

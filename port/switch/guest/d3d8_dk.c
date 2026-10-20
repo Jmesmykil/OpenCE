@@ -2008,6 +2008,12 @@ int d3d8_gl_map_waiting(void)
 	return dk_shader_map_waiting();
 }
 
+/* how far the shaders' part of it has come, 0 to 1 */
+float d3d8_gl_map_progress(void)
+{
+	return dk_shader_map_progress();
+}
+
 void d3d8_gl_map_loaded(const char *name)
 {
 	dk_shader_map_loaded(map_hash(name));

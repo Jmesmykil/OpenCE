@@ -105,6 +105,14 @@ to DK_MAP_WAIT_MS in all (dk_shader_map_loading, dk_shader_map_loaded) */
 #define DK_PRELOAD_PER_FRAME 16
 #define DK_PRELOAD_QUEUE 128
 #define DK_MAP_WAIT_MS 10000
+/* the startup pass's time a frame, beside its DK_PASS_PER_FRAME keys whose GLSL it makes: a key the host has needs
+only to be asked (17942 keys at eight a frame took the pass fifteen seconds, the menus stuttering throughout) */
+#define DK_PASS_BUDGET_US 2000
+/* the first loading screen (the menus' map, at the start) stays up until the shader cache has started, its pass and
+the preload are done and nothing urgent is compiling, for this long at most, so that the menus come up smooth; the
+preload loads this many a frame meanwhile */
+#define DK_BOOT_WAIT_MS 30000
+#define DK_BOOT_PRELOAD_PER_FRAME 64
 
 /* the key's data as it is in a record: a vertex key or a pixel key,
 padded to the pixel key's size (the larger of the two) so a record is one
@@ -141,6 +149,8 @@ struct dk_key
 	uint32_t handle;
 	/* the pass found it on the card (or loaded): nothing to compile */
 	int ready;
+	/* known only from the shared keys (keys.dkk): loaded with its map, not by the preload */
+	int shared;
 };
 
 static struct dk_key *keys;
@@ -148,6 +158,9 @@ static unsigned long key_count, key_capacity;
 static BOOL started, pass_finished;
 static unsigned long pass_index;
 static BOOL preload_finished;
+/* the first loading screen's wait for the start (DK_BOOT_WAIT_MS): going on, and over */
+static BOOL boot_waiting, boot_waited;
+static unsigned long long boot_started_ms;
 static unsigned long preload_index, preload_asked;
 /* the keys the preload has to ask for (on the card, not loaded), counted
 when it starts, for its message */
@@ -267,18 +280,48 @@ static unsigned long key_data_size(uint32_t stage)
 
 /* ---------- the key store */
 
+/* The keys by their hash: an open-addressed table of their indices plus one, twice the store's capacity, so that
+adding a key does not compare it with every key before it (17942 keys made that 160 million comparisons, four
+seconds of the game thread at the start) */
+static unsigned long *key_slots;
+static unsigned long key_slot_count;
+
+static unsigned long key_slot_of(uint64_t hash)
+{
+	unsigned long slot = (unsigned long)(hash ^ (hash >> 32)) & (key_slot_count - 1);
+
+	while (key_slots[slot] && keys[key_slots[slot] - 1].hash != hash)
+		slot = (slot + 1) & (key_slot_count - 1);
+	return slot;
+}
+
+/* the table made again for the store's capacity; 0 if there is no memory for it */
+static int key_slots_make(unsigned long capacity)
+{
+	unsigned long count = 1, index;
+	unsigned long *made;
+
+	while (count < capacity * 2)
+		count <<= 1;
+	made = calloc(count, sizeof(*made));
+	if (!made)
+		return 0;
+	free(key_slots);
+	key_slots = made;
+	key_slot_count = count;
+	for (index = 0; index < key_count; index++)
+		key_slots[key_slot_of(keys[index].hash)] = index + 1;
+	return 1;
+}
+
 /* records are deduplicated by their shader hash as they are read; the
 first of a hash wins, which is also what a file a player shares counts on */
 static struct dk_key *key_add(uint32_t stage, uint32_t map_hash, const void *data)
 {
 	uint64_t hash = key_hash(stage, data);
-	unsigned long index;
 
-	for (index = 0; index < key_count; index++)
-	{
-		if (keys[index].hash == hash)
-			return NULL;
-	}
+	if (key_slot_count && key_slots[key_slot_of(hash)])
+		return NULL;
 	if (key_count == key_capacity)
 	{
 		unsigned long grown_capacity = key_capacity ? key_capacity * 2 : 1024;
@@ -287,6 +330,9 @@ static struct dk_key *key_add(uint32_t stage, uint32_t map_hash, const void *dat
 		if (!grown)
 			return NULL;
 		keys = grown;
+		/* (the table for the new capacity, from the keys where they are now) */
+		if (!key_slots_make(grown_capacity))
+			return NULL;
 		key_capacity = grown_capacity;
 	}
 	memset(&keys[key_count], 0, sizeof(keys[key_count]));
@@ -294,6 +340,7 @@ static struct dk_key *key_add(uint32_t stage, uint32_t map_hash, const void *dat
 	keys[key_count].map_hash = map_hash;
 	memcpy(&keys[key_count].data, data, key_data_size(stage));
 	keys[key_count].hash = hash;
+	key_slots[key_slot_of(hash)] = key_count + 1;
 	return &keys[key_count++];
 }
 
@@ -312,6 +359,9 @@ static unsigned long keys_read_file(const char *xbox_path)
 	platform_translate_path(xbox_path, path, sizeof(path));
 	if ((file = fopen(path, "rb")) == NULL)
 		return 0;
+	/* (read a quarter of a megabyte at a time, not stdio's kilobyte: each read is a call to the host and the card's,
+	and the shared keys are 4.5 MB) */
+	setvbuf(file, NULL, _IOFBF, 256 * 1024);
 	if (fread(header, sizeof(header), 1, file) == 1 && header[0] == DK_KEY_MAGIC && header[1] == DK_KEY_FORMAT &&
 		header[2] == sizeof(record))
 	{
@@ -319,8 +369,13 @@ static unsigned long keys_read_file(const char *xbox_path)
 		{
 			if (record.stage == DK_SHADER_STAGE_VERTEX || record.stage == DK_SHADER_STAGE_PIXEL)
 			{
-				if (key_add(record.stage, record.map_hash, record.data))
+				struct dk_key *key = key_add(record.stage, record.map_hash, record.data);
+
+				if (key)
+				{
+					key->shared = !strcmp(xbox_path, DK_KEY_SHARED_FILE);
 					added++;
+				}
 			}
 		}
 	}
@@ -660,10 +715,11 @@ without loading it (host_dk_shader_known) - loading every shader on the card
 here cost the menus a third of their frames for four seconds. A key the
 host has not got is queued; one already queued is raised to the priority.
 TRUE if the shader is on the card or loaded */
-static BOOL pass_ask(struct dk_key *key, uint32_t priority)
+static BOOL pass_ask(struct dk_key *key, uint32_t priority, int *generated)
 {
 	uint32_t known;
 
+	*generated = 0;
 	hash_log_once(key->hash);
 	known = host_dk_shader_known(key->stage, key->hash);
 	if (known >= 2)
@@ -676,6 +732,7 @@ static BOOL pass_ask(struct dk_key *key, uint32_t priority)
 	{
 		char *glsl = key_glsl(key);
 
+		*generated = 1;
 		if (glsl)
 		{
 			host_dk_shader_compile(key->stage, key->hash, (uint32_t)(uintptr_t)glsl, (uint32_t)strlen(glsl),
@@ -747,16 +804,18 @@ static void preload_frame(void)
 
 		preload_counted = TRUE;
 		for (index = 0; index < key_count; index++)
-			preload_total += keys[index].ready && !keys[index].handle ? 1 : 0;
+			preload_total += keys[index].ready && !keys[index].handle && !keys[index].shared ? 1 : 0;
 	}
 	if (host_dk_shader_loading() >= DK_PRELOAD_QUEUE)
 		return;
-	while (taken < DK_PRELOAD_PER_FRAME && preload_index < key_count)
+	while (taken < (boot_waiting ? DK_BOOT_PRELOAD_PER_FRAME : DK_PRELOAD_PER_FRAME) && preload_index < key_count)
 	{
 		struct dk_key *key = &keys[preload_index++];
 		uint32_t state = 0;
 
-		if (!key->ready || key->handle)
+		/* (a key only the shared keys hold is its map's to load: the shared keys are every map's, 17939
+		shaders, which loaded at the start took the preload 14 s) */
+		if (!key->ready || key->handle || key->shared)
 			continue;
 		/* (loaded: its handle; on the card: queued for the loader) */
 		key->handle = host_dk_shader_find(key->stage, key->hash, (uint32_t)(uintptr_t)&state);
@@ -845,15 +904,23 @@ static void status_frame(void)
 /* the startup pass: eight keys a frame (limit), each asked of the host in
 turn and queued if the host does not have it. Runs until every key is asked,
 and says when it is done - the second launch's numbers come from these lines */
-static void pass_frame(unsigned long limit)
+static unsigned long long now_us(void);
+
+static void pass_frame(unsigned long limit, unsigned long long budget_us)
 {
-	unsigned long taken = 0;
+	unsigned long taken = 0, asked = 0;
+	unsigned long long started = budget_us ? now_us() : 0;
 
 	if (pass_finished)
 		return;
 	while (taken < limit && pass_index < key_count)
 	{
 		struct dk_key *key = &keys[pass_index++];
+		int generated;
+
+		/* (the clock read every 64 keys: a read is a call to the host) */
+		if (budget_us && !(++asked % 64) && now_us() - started >= budget_us)
+			break;
 
 		if (key->asked)
 			continue;
@@ -866,9 +933,10 @@ static void pass_frame(unsigned long limit)
 			continue;
 		}
 		key->ready = pass_ask(key, key->map_hash && key->map_hash == current_map ? DK_SHADER_PRIORITY_MAP :
-			DK_SHADER_PRIORITY_REST);
+			DK_SHADER_PRIORITY_REST, &generated);
 		key->asked = 1;
-		taken++;
+		/* (only a key whose GLSL was made counts against the frame's DK_PASS_PER_FRAME) */
+		taken += generated;
 	}
 	if (pass_index < key_count)
 		return;
@@ -896,7 +964,7 @@ void dk_shader_frame(void)
 		return;
 	status_frame();
 	preload_frame();
-	pass_frame(DK_PASS_PER_FRAME);
+	pass_frame(DK_PASS_PER_FRAME, DK_PASS_BUDGET_US);
 }
 
 /* The wait for a map's shaders under the loading screen, DK_MAP_WAIT_MS at
@@ -909,13 +977,20 @@ compiled (dk_shader_map_loaded). A map read into the cache before (nothing
 to show the loading screen for) has only the second. */
 static uint32_t wait_map;
 static unsigned long long wait_started_ms;
+/* the most shaders the wait has seen still to load or compile, which its progress is measured against */
+static uint32_t wait_most;
 
-static unsigned long long now_ms(void)
+static unsigned long long now_us(void)
 {
 	struct timespec now;
 
 	clock_gettime(CLOCK_MONOTONIC, &now);
-	return (unsigned long long)now.tv_sec * 1000ULL + (unsigned long long)now.tv_nsec / 1000000ULL;
+	return (unsigned long long)now.tv_sec * 1000000ULL + (unsigned long long)now.tv_nsec / 1000ULL;
+}
+
+static unsigned long long now_ms(void)
+{
+	return now_us() / 1000ULL;
 }
 
 /* what is left of the map's wait */
@@ -938,9 +1013,12 @@ static void map_wait_begin(uint32_t map_hash)
 		return;
 	wait_map = map_hash;
 	wait_started_ms = now_ms();
+	wait_most = 0;
 	/* (the map before's left in the queue are the rest's again: this map's
 	wait is for its own) */
 	host_dk_shader_priority_lower(DK_SHADER_PRIORITY_MAP, DK_SHADER_PRIORITY_REST);
+	/* (and the draws' of the map before, which a draw of this one raises again if it wants one) */
+	host_dk_shader_priority_lower(DK_SHADER_PRIORITY_DRAW, DK_SHADER_PRIORITY_REST);
 	for (index = 0; index < key_count; index++)
 	{
 		if (keys[index].map_hash != map_hash || keys[index].handle)
@@ -956,7 +1034,100 @@ static void map_wait_begin(uint32_t map_hash)
 d3d8_gl_map_loading) */
 void dk_shader_map_loading(uint32_t map_hash)
 {
+	if (!boot_waited && !boot_waiting)
+	{
+		boot_waiting = TRUE;
+		boot_started_ms = now_ms();
+	}
 	map_wait_begin(map_hash);
+}
+
+/* the first loading screen's wait: whether the start is still going on (the cache not started yet, its pass or the
+preload not done, a shader still to load or something urgent to compile), with time left */
+static void map_wait_begin(uint32_t map_hash);
+
+static int boot_wait(void)
+{
+	static unsigned long long said;
+	static BOOL raised;
+	unsigned long long waited = now_ms() - boot_started_ms;
+
+	/* the menus' keys raised once the pass is done (their loading screen came before the cache had started, and
+	a key only the shared keys hold is not the preload's), so that their shaders are loaded before the menus show */
+	if (started && pass_finished && !raised)
+	{
+		raised = TRUE;
+		wait_map = 0;
+		map_wait_begin(current_map);
+	}
+	uint32_t urgent = started ? host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP) : 0;
+	uint32_t loading = started ? host_dk_shader_loading() : 0;
+
+	if (waited < DK_BOOT_WAIT_MS && (!started || !pass_finished || (DK_PRELOAD_ENABLED && !preload_finished) ||
+		loading || urgent))
+	{
+		if (now_ms() - said >= 1000)
+		{
+			said = now_ms();
+			terminal_status_printf(global_real_argb_yellow, "Preparing shaders: %lu to check, %lu to load, %u to "
+				"compile.", started ? key_count - pass_index : key_count,
+				started && preload_counted && preload_total > preload_asked ? preload_total - preload_asked : 0UL,
+				(unsigned)urgent);
+		}
+		return 1;
+	}
+	boot_waiting = FALSE;
+	boot_waited = TRUE;
+	wait_most = 0;
+	platform_log("shader cache: the first loading screen waited %llu ms for the start (%s; the pass %s, the preload "
+		"%s, %u loading, %u urgent to compile)", waited, waited >= DK_BOOT_WAIT_MS ? "the most it waits" : "all done",
+		pass_finished ? "done" : "not done", preload_finished ? "done" : "not done", (unsigned)loading, (unsigned)urgent);
+	return 0;
+}
+
+/* how far a wait has come, 0 to 1: the shaders still to load or compile against the most it has seen, and no less
+than its share of its time (so that it is at the end when the wait gives up) */
+static float wait_fraction(uint32_t left, unsigned long long waited_ms, unsigned long long most_ms)
+{
+	float done, timed = (float)waited_ms / (float)most_ms;
+
+	if (left > wait_most)
+		wait_most = left;
+	done = wait_most ? 1.0f - (float)left / (float)wait_most : 1.0f;
+	if (timed > done)
+		done = timed;
+	return done > 1.0f ? 1.0f : done;
+}
+
+/* How far the shaders' part of a loading screen has come, 0 to 1 (half of the loading screen's progress, the map's
+copy the other half: game_precache_new_map): at the first loading screen the start's work - the pass, the preload,
+and what the menus need loaded or compiled - and at a map's, its shaders still to compile; 1 with nothing to wait
+for. The light sweeps across the screen as the progress goes, which the copy alone (0.3 s for the menus' map read
+ahead) sent across at once, the screen then dark for the rest of the wait. Below 0 when a map's load has had nothing
+to wait for: its progress is the copy's alone. */
+float dk_shader_map_progress(void)
+{
+	if (boot_waiting)
+	{
+		float pass = started && key_count ? (float)pass_index / (float)key_count : 0.0f;
+		float preload = !started || !pass_finished ? 0.0f : !DK_PRELOAD_ENABLED || preload_finished ? 1.0f :
+			preload_counted && preload_total ? (float)preload_asked / (float)preload_total : 0.0f;
+		uint32_t left = started && pass_finished ?
+			host_dk_shader_loading() + host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP) : 1;
+
+		if (preload > 1.0f)
+			preload = 1.0f;
+		return pass * 0.4f + preload * 0.4f +
+			wait_fraction(left, 0, DK_BOOT_WAIT_MS) * (started && pass_finished ? 0.2f : 0.0f);
+	}
+	if (!started || !wait_map)
+		return -1.0f;
+	{
+		float done = wait_fraction(host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP), now_ms() - wait_started_ms,
+			DK_MAP_WAIT_MS);
+
+		return wait_most ? done : -1.0f;
+	}
 }
 
 /* whether the loading screen stays up for the map's keys: some still to
@@ -966,6 +1137,8 @@ int dk_shader_map_waiting(void)
 	static unsigned long long said;
 	uint32_t pending;
 
+	if (boot_waiting && boot_wait())
+		return 1;
 	if (!started || !wait_map || !wait_left_ms())
 		return 0;
 	pending = host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP);
@@ -999,7 +1172,7 @@ void dk_shader_map_loaded(uint32_t map_hash)
 		and drew a second and more of the level with draws missing (frames
 		of 1500 skipped), the intro's fade and bars among them. Asking the
 		host is cheap for a shader on the card (it loads nothing) */
-		pass_frame(key_count);
+		pass_frame(key_count, 0);
 		while (pass_finished && waited < left &&
 			((DK_PRELOAD_ENABLED && !preload_finished) || host_dk_shader_loading() ||
 			host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP)))

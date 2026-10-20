@@ -820,6 +820,7 @@ void game_dispose(
 
 #ifdef HALO_SWITCH
 extern int d3d8_gl_map_waiting(void);
+extern float d3d8_gl_map_progress(void);
 #endif
 
 void game_precache_new_map(
@@ -891,6 +892,26 @@ void game_precache_new_map(
 			{
 				map_status = cache_files_precache_map_status(
 					&game_globals->loading_progress);
+#ifdef HALO_SWITCH
+				/* port: the loading screen's progress is half the map's copy and half its shaders
+				(port/switch/guest/dk_shaders.c), never going back, so that its light sweeps across the whole
+				time it is up and not across the copy alone, then dark through the shaders' wait */
+				{
+					static real shown;
+					real shaders = (real)d3d8_gl_map_progress();
+					real progress = shaders < 0.0f ? game_globals->loading_progress :
+						game_globals->loading_progress*0.5f + shaders*0.5f;
+
+					if (game_globals->loading_progress <= 0.0f)
+						shown = 0.0f;
+					if (progress < shown)
+						progress = shown;
+					if (progress > 1.0f)
+						progress = 1.0f;
+					shown = progress;
+					game_globals->loading_progress = progress;
+				}
+#endif
 				main_pregame_render();
 				main_rasterizer_throttle();
 				main_present_frame();
