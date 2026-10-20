@@ -830,10 +830,17 @@ static void fences_forget(void)
 }
 
 /* the queue drained, unless it has faulted (queue_faulted) */
+/* what the render thread is doing, for its watchdog (render_watchdog) */
+static const char *volatile render_where = "starting";
+
 static void queue_wait_idle(void)
 {
+	const char *was = render_where;
+
+	render_where = "waiting for the GPU to go idle (dkQueueWaitIdle)";
 	if (!queue_faulted())
 		dkQueueWaitIdle(dk.queue);
+	render_where = was;
 }
 
 /* gives the command buffer the next piece of this frame's command memory */
@@ -995,6 +1002,7 @@ static void fence_wait_said(int index, const char *what)
 {
 	int said = 0;
 
+	render_where = what;
 	while (dkFenceWait(&dk.fences[index], 2000000000LL) != DkResult_Success)
 	{
 		if (queue_faulted())
@@ -1817,7 +1825,9 @@ static void present(const struct dk_command_present *command)
 	{
 		uint64_t waited = slow_now_ns();
 
+		render_where = "acquiring a screen image (dkQueueAcquireImage)";
 		slot = dkQueueAcquireImage(dk.queue, dk.swapchain);
+		render_where = "presenting";
 		waited = slow_now_ns() - waited;
 		if (waited > slow.acquire_max_ns)
 			slow.acquire_max_ns = waited;
@@ -2884,6 +2894,7 @@ static void hud_image_receive(const struct dk_command_hud_image *command)
 
 	if (!dk.ready || !tex.image_descriptors || !command->id || command->id >= DK_TEXTURE_LIMIT)
 		return;
+	render_where = "making a high-res HUD image (hud_image_receive)";
 	hud_sources_collect(0);
 	if (!host_dk_hud_take(command->sheet.asset, &levels))
 	{
@@ -2919,7 +2930,9 @@ static void hud_image_receive(const struct dk_command_hud_image *command)
 		texture->width != made.width || texture->height != made.height || texture->depth != 1 ||
 		texture->levels != made.levels || texture->swizzle != 0))
 		texture_release(texture);
+	render_where = "making a high-res HUD image's memory block (dkMemBlockCreate)";
 	memory = memory_block(levels.bytes, DkMemBlockFlags_CpuCached | DkMemBlockFlags_GpuCached, levels.texels);
+	render_where = "making a high-res HUD image (hud_image_receive)";
 	if (!memory || (!texture->present && !texture_make(texture, &made)))
 	{
 		texture_problem("no memory for high-res hud sheet %u's image %u", (unsigned)command->sheet.asset,
@@ -4297,10 +4310,131 @@ static struct
 	} streams[RENDER_QUEUE];
 } render_queue = { PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER };
 
+/* (read without the lock: the watchdog's look) */
+static uint32_t render_queued(void)
+{
+	return (uint32_t)render_queue.count;
+}
+
+/* ---------- the render thread's watchdog
+
+A render thread that stops says nothing: what it waits in (a screen image,
+a lock, deko3d itself) has no time limit there, and the game thread then
+waits for its submissions (a resource lock) with the picture frozen. So a
+thread of its own looks once a second: with streams queued and none run for
+RENDER_STALL_SECONDS, it logs what the render thread was doing and its
+stack (host_debug_thread_backtrace), once for each stop. */
+
+#define RENDER_STALL_SECONDS 3
+
+static Handle render_handle;
+static volatile uint32_t render_progress;
+
+/* (libnx's mutex word: the owner's thread handle, with the waiters' bit) */
+#define LOCK_WAITERS 0x40000000u
+
+/* The other two ways the picture has stopped with nothing said (c40's
+opening): dk_lock held and never let go, which host_dk_retired's trylock
+then answers with a count that never moves; and the GPU never finishing a
+submission while nothing waits for it with a limit (the render thread idle,
+the game thread in a resource lock). Each said once a stop, with the lock's
+holder's stack, or the GPU's state and its trace (debug.gpu_trace). */
+static void watchdog_lock_and_gpu(void)
+{
+	static uint32_t lock_owner, lock_seconds, retired_seen, gpu_seconds;
+	static int lock_said, gpu_said;
+	uint32_t owner = __atomic_load_n(&dk_lock.normal, __ATOMIC_ACQUIRE) & ~LOCK_WAITERS;
+
+	if (owner && owner == lock_owner)
+	{
+		if (++lock_seconds >= RENDER_STALL_SECONDS && !lock_said)
+		{
+			lock_said = 1;
+			host_logf(HOST_LOG_ERROR, "deko3d: dk_lock has been held for %u s by thread handle 0x%x%s (render "
+				"thread: %s)", (unsigned)lock_seconds, (unsigned)owner, owner == render_handle ? ", the render thread" :
+				"", render_where);
+			host_debug_thread_backtrace(owner, "deko3d: dk_lock's holder");
+		}
+		return;
+	}
+	lock_owner = owner;
+	lock_seconds = 0;
+	lock_said = 0;
+	if (owner || pthread_mutex_trylock(&dk_lock) != 0)
+		return;
+	{
+		uint32_t retired, waiting = 0;
+		int index, error;
+
+		if (dk.ready)
+			fences_poll();
+		retired = dk.serial_retired;
+		for (index = 0; index < FRAMES; index++)
+			if (dk.fence_pending[index] && dk.fence_serial[index] > waiting)
+				waiting = dk.fence_serial[index];
+		error = dk.queue && dkQueueIsInErrorState(dk.queue);
+		pthread_mutex_unlock(&dk_lock);
+		if (!waiting || retired != retired_seen || render_queued())
+		{
+			retired_seen = retired;
+			gpu_seconds = 0;
+			gpu_said = 0;
+			return;
+		}
+		if (++gpu_seconds >= RENDER_STALL_SECONDS && !gpu_said)
+		{
+			gpu_said = 1;
+			host_logf(HOST_LOG_ERROR, "deko3d: the GPU has finished nothing for %u s: submissions up to %u retired, %u "
+				"waited for, %u recorded; the queue %s; the render thread idle (%s)%s", (unsigned)gpu_seconds,
+				(unsigned)retired, (unsigned)waiting, (unsigned)dk.serial, error ? "in an error state" :
+				"not in an error state", render_where, host_dk_trace ? "; the trace follows" :
+				"; debug.gpu_trace = true would say which command");
+			if (host_dk_trace)
+				trace_dump();
+		}
+	}
+}
+
+static void *render_watchdog(void *unused)
+{
+	uint32_t seen = render_progress, still = 0;
+	int said = 0;
+
+	(void)unused;
+	for (;;)
+	{
+		svcSleepThread(1000000000LL);
+		watchdog_lock_and_gpu();
+		if (render_progress != seen || !render_queued())
+		{
+			seen = render_progress;
+			still = 0;
+			said = 0;
+			continue;
+		}
+		if (++still < RENDER_STALL_SECONDS || said)
+			continue;
+		said = 1;
+		host_logf(HOST_LOG_ERROR, "deko3d: the render thread has run nothing for %u s with %u streams queued: %s "
+			"(submission %u, %u retired, the queue %s)", (unsigned)still, (unsigned)render_queued(), render_where,
+			(unsigned)dk.serial, (unsigned)dk.serial_retired,
+			dk.queue && dkQueueIsInErrorState(dk.queue) ? "in an error state" : "not in an error state");
+		host_debug_thread_backtrace(render_handle, "deko3d: the render thread");
+	}
+	return NULL;
+}
+
 static void *render_thread(void *unused)
 {
 	(void)unused;
 	host_thread_place_on_helper_core();
+	render_handle = threadGetCurHandle();
+	{
+		pthread_t watchdog;
+
+		if (pthread_create(&watchdog, NULL, render_watchdog, NULL) == 0)
+			pthread_detach(watchdog);
+	}
 	for (;;)
 	{
 		unsigned index;
@@ -4310,9 +4444,12 @@ static void *render_thread(void *unused)
 			pthread_cond_wait(&render_queue.work, &render_queue.lock);
 		index = render_queue.head;
 		pthread_mutex_unlock(&render_queue.lock);
+		render_where = "running a stream";
 
 		submit_run(render_queue.streams[index].data, render_queue.streams[index].size);
 
+		render_progress++;
+		render_where = "waiting for a stream";
 		pthread_mutex_lock(&render_queue.lock);
 		render_queue.head = (render_queue.head + 1) % RENDER_QUEUE;
 		render_queue.count--;

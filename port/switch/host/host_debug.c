@@ -319,6 +319,37 @@ static int profile_walk(const ThreadContext *context, uint64_t *addresses)
 	return depth;
 }
 
+/* where a host thread is: paused, its program counter and frame chain
+read and logged, and let go (a stopped render thread, host_dk.c's watchdog).
+The host's addresses are given with the anchor's, as the profiles' are, for
+addr2line on build/switch/halo.elf */
+void host_debug_thread_backtrace(Handle handle, const char *who)
+{
+	ThreadContext context;
+	uint64_t addresses[PROFILE_DEPTH];
+	char line[PROFILE_DEPTH * 13 + 1];
+	int depth = 0, at, used = 0;
+	Result result = svcSetThreadActivity(handle, ThreadActivity_Paused);
+
+	if (R_SUCCEEDED(result))
+	{
+		result = svcGetThreadContext3(&context, handle);
+		if (R_SUCCEEDED(result))
+			depth = profile_walk(&context, addresses);
+		svcSetThreadActivity(handle, ThreadActivity_Runnable);
+	}
+	if (!depth)
+	{
+		host_logf(HOST_LOG_ERROR, "%s: its stack could not be read: 0x%x", who, (unsigned)result);
+		return;
+	}
+	line[0] = 0;
+	for (at = 0; at < depth && used < (int)sizeof(line) - 13; at++)
+		used += snprintf(line + used, sizeof(line) - used, " %llx", (unsigned long long)addresses[at]);
+	host_logf(HOST_LOG_ERROR, "%s: lr %llx, stack%s (anchor host_debug_start_profiler 0x%llx)", who,
+		(unsigned long long)context.lr, line, (unsigned long long)(uintptr_t)host_debug_start_profiler);
+}
+
 static void profile_count(int slot, const uint64_t *addresses, int depth)
 {
 	uint64_t hash = 1469598103934665603ULL ^ (uint64_t)slot;
