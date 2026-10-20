@@ -1,5 +1,10 @@
 # Changelog
 
+## Build 111
+
+- Switch and PS5: the main menu has no QUIT: the console's own Home or PS button leaves the game. (thelinkin3000)
+- PS5: each build has its own version number on the console, so stores and the console can tell that a newer build is an update. (thelinkin3000)
+
 ## Build 110
 
 - Switch and Android: Halo's loading screen draws, the light sweeping over the Xbox's picture with its glowing trail; maps extracted by earlier builds get the picture from the disc image at the next start (on every platform). (thelinkin3000)
