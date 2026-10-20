@@ -572,20 +572,37 @@ static int vertex_program(uint64_t program_hash, const uint32_t **instructions, 
 	return 0;
 }
 
+/* whether a vertex key names a program there is GLSL for: one the game has
+made, or the fixed-function pipeline's (DK_FIXED_FUNCTION_PROGRAM_HASH) */
+static int vertex_known(uint64_t program_hash)
+{
+	const uint32_t *instructions;
+	unsigned long instruction_count;
+
+	return program_hash == DK_FIXED_FUNCTION_PROGRAM_HASH ||
+		vertex_program(program_hash, &instructions, &instruction_count);
+}
+
+/* a vertex key's GLSL; NULL if it names no program there is GLSL for */
+static char *vertex_glsl(const struct dk_vertex_key *key)
+{
+	const uint32_t *instructions;
+	unsigned long instruction_count;
+
+	if (key->program_hash == DK_FIXED_FUNCTION_PROGRAM_HASH)
+		return nv2a_dk_fixed_function_glsl();
+	if (!vertex_program(key->program_hash, &instructions, &instruction_count))
+		return NULL;
+	return nv2a_dk_vertex_shader_to_glsl(instructions, instruction_count, key->packed_mask);
+}
+
 /* the GLSL for a key, from the generators (phase 4); NULL if the game has
 not made the program a vertex key names (a record from another build, or
 one the game never makes: the key is kept and skipped) */
 static char *key_glsl(const struct dk_key *key)
 {
 	if (key->stage == DK_SHADER_STAGE_VERTEX)
-	{
-		const uint32_t *instructions;
-		unsigned long instruction_count;
-
-		if (!vertex_program(key->data.vertex.program_hash, &instructions, &instruction_count))
-			return NULL;
-		return nv2a_dk_vertex_shader_to_glsl(instructions, instruction_count, key->data.vertex.packed_mask);
-	}
+		return vertex_glsl(&key->data.vertex);
 	{
 		struct nv2a_pixel_shader_key pixel = key->data.pixel;
 
@@ -689,6 +706,16 @@ void dk_shader_start(void)
 		import_program_records();
 	else if (key_count == before)
 		platform_log("shader keys: %s holds no keys of this build", DK_KEY_CONSOLE_FILE);
+	/* the fixed-function pipeline's (the loading screen's draws), which no
+	key file needs to hold: made at the startup pass, before the first
+	map's load wants it */
+	{
+		struct dk_vertex_key fixed_function;
+
+		memset(&fixed_function, 0, sizeof(fixed_function));
+		fixed_function.program_hash = DK_FIXED_FUNCTION_PROGRAM_HASH;
+		key_add(DK_SHADER_STAGE_VERTEX, 0, &fixed_function);
+	}
 	platform_log("shader cache: %lu keys known; the rest is compiled in the background while the game runs",
 		key_count);
 }
@@ -830,16 +857,10 @@ static void pass_frame(unsigned long limit)
 		/* a vertex key whose program the game has not made: kept and
 		skipped, and it costs nothing, so it does not count against the
 		frame's eight */
+		if (key->stage == DK_SHADER_STAGE_VERTEX && !vertex_known(key->data.vertex.program_hash))
 		{
-			const uint32_t *instructions;
-			unsigned long instruction_count;
-
-			if (key->stage == DK_SHADER_STAGE_VERTEX &&
-				!vertex_program(key->data.vertex.program_hash, &instructions, &instruction_count))
-			{
-				key->asked = 2;
-				continue;
-			}
+			key->asked = 2;
+			continue;
 		}
 		key->ready = pass_ask(key, key->map_hash && key->map_hash == current_map ? DK_SHADER_PRIORITY_MAP :
 			DK_SHADER_PRIORITY_REST);
@@ -969,14 +990,7 @@ static void glsl_write(uint32_t stage, uint64_t hash, const void *key_data)
 	if (!folder || !folder[0])
 		return;
 	if (stage == DK_SHADER_STAGE_VERTEX)
-	{
-		const struct dk_vertex_key *vertex = key_data;
-		const uint32_t *instructions;
-		unsigned long instruction_count;
-
-		if (vertex_program(vertex->program_hash, &instructions, &instruction_count))
-			glsl = nv2a_dk_vertex_shader_to_glsl(instructions, instruction_count, vertex->packed_mask);
-	}
+		glsl = vertex_glsl(key_data);
 	else
 		glsl = nv2a_dk_pixel_shader_to_glsl((const struct nv2a_pixel_shader_key *)key_data);
 	if (!glsl)
@@ -1066,17 +1080,9 @@ uint32_t dk_shader_for_draw(uint32_t stage, const void *key_data)
 		char *glsl = NULL;
 
 		if (stage == DK_SHADER_STAGE_VERTEX)
-		{
-			const uint32_t *instructions;
-			unsigned long instruction_count;
-
-			if (vertex_program(data.vertex.program_hash, &instructions, &instruction_count))
-				glsl = nv2a_dk_vertex_shader_to_glsl(instructions, instruction_count, data.vertex.packed_mask);
-		}
+			glsl = vertex_glsl(&data.vertex);
 		else
-		{
 			glsl = nv2a_dk_pixel_shader_to_glsl(&data.pixel);
-		}
 		if (glsl)
 		{
 			host_dk_shader_compile(stage, hash, (uint32_t)(uintptr_t)glsl, (uint32_t)strlen(glsl),

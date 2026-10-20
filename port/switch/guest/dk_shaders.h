@@ -27,6 +27,11 @@ names. A change to what the host compiles (UAM's commit) is the cache
 folder's name, not this. */
 #define DK_SHADER_GENERATOR_VERSION 6
 
+/* the program hash a vertex key of the fixed-function pipeline has
+(nv2a_dk_fixed_function_glsl), in place of a program's (FNV-1a 64 of its
+words, which no program's comes out at) */
+#define DK_FIXED_FUNCTION_PROGRAM_HASH 0x66697865642d6675ULL /* "fixed-fu" */
+
 /* The pixel key's texture_modes: four 5-bit modes, and above them this bit
 when texture coordinate 0 is clipped (halo_texture_clip, d3d8_dk.c): the
 shader lets a pixel go first if its u or v is outside the limits in its
@@ -198,6 +203,10 @@ fed as NORMPACKED3 32-bit integers and unpacked in the shader. Returns a
 malloc'd string. */
 char *nv2a_dk_vertex_shader_to_glsl(const uint32_t *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask);
+/* the fixed-function pipeline's vertex shader (SetVertexShader with 0: the
+loading screen's immediate-mode draws, whose positions d3d8_dk.c's
+D3DDevice_End has put in clip space). Returns a malloc'd string. */
+char *nv2a_dk_fixed_function_glsl(void);
 
 struct nv2a_pixel_shader_key;
 
