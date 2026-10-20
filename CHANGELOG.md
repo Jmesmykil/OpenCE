@@ -1,5 +1,36 @@
 # Changelog
 
+## Build 108
+
+- Switch: fixes a freeze in The Library's opening cutscene, and pauses of a few seconds while loading: a part of a frame the game waited for was never sent to the GPU. (thelinkin3000)
+- Switch: steady 60 frames a second. Frames were started in bursts and then held back, which dropped frames even with the CPU and GPU at 40%; each frame now starts one refresh after the last. (thelinkin3000)
+- Switch: no more hitch the first time a high-res HUD element shows (the damage arrows, the meters, the scopes): the console decodes them as the map loads. (thelinkin3000)
+- Switch: Dynamic Resolution in Video Setup drops one step while the GPU falls behind; Resolution Limit is 720 by default; fewer large particles at once and a cheaper zoom keep heavy scenes at 60. (thelinkin3000)
+- Android: Maximum Resolution in Video Setup, the screen's own by default, down to 480; Vulkan draws cost less; the restart notice in Video Setup no longer covers FOV and Viewmodels. (thelinkin3000)
+- Switch and Android: the high-res button prompts draw. (thelinkin3000)
+
+### From OpenCE
+
+- Network version 32: plays only with builds of the same version.
+- OpenCE is now under the AGPL 3.0 or later. (MrBruh)
+- Bots in local Slayer games. (BirchWoodGod)
+- A latency meter for network games. (BirchWoodGod)
+- HDR. (hkmodd)
+- Model Detail in the Graphics settings. (Paul Hontz)
+- Anisotropic filtering. (Paul Hontz)
+- 5.1 surround on desktop. (frankyfife)
+- A third-person view for Warthog and Scorpion passengers. (biu788)
+- A match clock on the multiplayer HUD. (medic-code)
+- Video Setup's Extra Effects screen. (jcompto95-tech)
+- An overshield effect. (jcompto95-tech)
+- Extra weapons, pickups and vehicles for co-op hosts. (eltanschauung)
+- Host aim assist options. (eltanschauung)
+- Friendly fire chosen by each co-op player. (Jonas Volman)
+- The Bumper Jumper button layout. (Ari Wilson)
+- Halo's loading screen. (FractumSeraph)
+- The PC menus in a Custom Edition's language. (hkmodd)
+- Culling of the level's hidden triangles. (Mootjuh)
+
 ## Build 107
 
 - Switch: steady 60 frames a second. Frames were started in bursts and then held back, which dropped frames even with the CPU and GPU at 40%; each frame now starts one refresh after the last. (thelinkin3000)
