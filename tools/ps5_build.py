@@ -182,6 +182,32 @@ def generate_ps5_build(n: Writer, sln: Any) -> None:
     n.output.write(output.getvalue())
 
 
+# ---------- the title's version
+
+def content_version(build: int) -> str:
+    """The contentVersion of build N, in the PlayStation's NN.NNN.NNN: 01.000.110 for Build 110."""
+    return f"01.{build // 1000:03d}.{build % 1000:03d}"
+
+
+def check_content_version(param_path: Path, build_number: str) -> None:
+    """A numbered build's title must carry its build's contentVersion in the committed param.json: consoles (and the
+    PS5 homebrew catalog, which reads port/ps5/sce_sys/param.json at the release's tag, beside the icon) tell an
+    installed copy is outdated by it, and a release that did not raise it is no update to them. The Build N commit
+    raises it; a release built without it fails here, before anything is published. Unnumbered builds are not
+    checked."""
+    try:
+        number = int(build_number or "0")
+    except ValueError:
+        number = 0
+    if number <= 0:
+        return
+    wanted = content_version(number)
+    found = json.loads(param_path.read_text()).get("contentVersion")
+    if found != wanted:
+        raise RuntimeError(f"{param_path} has contentVersion {found}, and build {number} wants {wanted}: raise it in "
+                           f"the Build {number} commit")
+
+
 # ---------- the checkouts and their pins
 
 def _git_head(path: Path) -> Optional[str]:
@@ -760,6 +786,7 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
     # Switch's icon.jpg is:
     #   python3 -c "from PIL import Image; Image.open('port/assets/icon/opence-icon.png').convert('RGBA')
     #       .resize((512, 512), Image.LANCZOS).save('port/ps5/sce_sys/icon0.png', optimize=True)"
+    check_content_version(PORT_DIR / "sce_sys" / "param.json", os.environ.get("HALO_BUILD_NUMBER", "0"))
     n.build(outputs=param, rule="ps5_copy", inputs=root / PORT_DIR / "sce_sys" / "param.json")
     n.build(outputs=icon, rule="ps5_copy", inputs=root / PORT_DIR / "sce_sys" / "icon0.png")
     # PS5_Vulkan's libc.prx shim, after its checksum (and rebuilt by its
