@@ -49,6 +49,7 @@ what tests the writer in this phase.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /* the host's half of the cache, through the import stubs (a 64-bit hash
@@ -58,6 +59,8 @@ uint32_t host_dk_shader_find(uint32_t stage, uint64_t hash, uint32_t state_out);
 void host_dk_shader_compile(uint32_t stage, uint64_t hash, uint32_t glsl, uint32_t glsl_size, uint32_t priority);
 uint32_t host_dk_shader_known(uint32_t stage, uint64_t hash);
 uint32_t host_dk_shader_pending(void);
+uint32_t host_dk_shader_pending_urgent(uint32_t priority);
+void host_dk_shader_priority_lower(uint32_t from, uint32_t to);
 uint32_t host_dk_shader_loading(void);
 void host_dk_shader_preload_done(void);
 uint32_t host_dk_shader_loose_loads(void);
@@ -96,11 +99,12 @@ about it every this many frames */
 /* the preload: after the startup pass, every key on the card handed to the
 host's loader thread, this many a frame and while it has fewer than
 DK_PRELOAD_QUEUE waiting; and a map's load waits under the loading screen
-for it (and the loader) for up to DK_MAP_WAIT_MS */
+for it (and the loader), and for the map's own keys to be compiled, for up
+to DK_MAP_WAIT_MS in all (dk_shader_map_loading, dk_shader_map_loaded) */
 #define DK_PRELOAD_ENABLED 1
 #define DK_PRELOAD_PER_FRAME 16
 #define DK_PRELOAD_QUEUE 128
-#define DK_MAP_WAIT_MS 8000
+#define DK_MAP_WAIT_MS 10000
 
 /* the key's data as it is in a record: a vertex key or a pixel key,
 padded to the pixel key's size (the larger of the two) so a record is one
@@ -895,15 +899,48 @@ void dk_shader_frame(void)
 	pass_frame(DK_PASS_PER_FRAME);
 }
 
-/* the map the game finished loading (d3d8_gl_map_loaded): its keys go to
-the front of the background compile's queue, raised in priority */
-void dk_shader_map_loaded(uint32_t map_hash)
+/* The wait for a map's shaders under the loading screen, DK_MAP_WAIT_MS at
+most from when its load began: first while the loading screen is drawn, as
+the map is read into the cache (dk_shader_map_loading, dk_shader_map_waiting:
+the game's own loop, game_precache_new_map), until the map's keys are
+compiled; then in scenario_load, where nothing is drawn, for what the
+loader has to read from the card and anything of the map's still being
+compiled (dk_shader_map_loaded). A map read into the cache before (nothing
+to show the loading screen for) has only the second. */
+static uint32_t wait_map;
+static unsigned long long wait_started_ms;
+
+static unsigned long long now_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long long)now.tv_sec * 1000ULL + (unsigned long long)now.tv_nsec / 1000000ULL;
+}
+
+/* what is left of the map's wait */
+static unsigned long wait_left_ms(void)
+{
+	unsigned long long waited = now_ms() - wait_started_ms;
+
+	return waited < DK_MAP_WAIT_MS ? (unsigned long)(DK_MAP_WAIT_MS - waited) : 0;
+}
+
+/* the map's keys go to the front of the background compile's queue, raised
+in priority, and its wait starts; once a load (the loading screen's and
+scenario_load's, for the same map, share it) */
+static void map_wait_begin(uint32_t map_hash)
 {
 	unsigned long index, raised = 0;
 
 	current_map = map_hash;
-	if (!started)
+	if (!started || wait_map == map_hash)
 		return;
+	wait_map = map_hash;
+	wait_started_ms = now_ms();
+	/* (the map before's left in the queue are the rest's again: this map's
+	wait is for its own) */
+	host_dk_shader_priority_lower(DK_SHADER_PRIORITY_MAP, DK_SHADER_PRIORITY_REST);
 	for (index = 0; index < key_count; index++)
 	{
 		if (keys[index].map_hash != map_hash || keys[index].handle)
@@ -913,12 +950,49 @@ void dk_shader_map_loaded(uint32_t map_hash)
 		raised++;
 	}
 	platform_log("shader cache: the map's keys raised in the compile queue (%lu)", raised);
-	/* under the loading screen (scenario_load), the preload finished and
-	the loader's queue emptied, for up to DK_MAP_WAIT_MS: a match starting
-	before then would draw nothing of what it has not loaded yet. (A
-	network game's client tolerates this: 75 s before its game starts.) */
+}
+
+/* the map the loading screen is being drawn for (game_precache_new_map,
+d3d8_gl_map_loading) */
+void dk_shader_map_loading(uint32_t map_hash)
+{
+	map_wait_begin(map_hash);
+}
+
+/* whether the loading screen stays up for the map's keys: some still to
+compile (or a draw's, ahead of them), with time left */
+int dk_shader_map_waiting(void)
+{
+	static unsigned long long said;
+	uint32_t pending;
+
+	if (!started || !wait_map || !wait_left_ms())
+		return 0;
+	pending = host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP);
+	if (!pending)
+		return 0;
+	/* (the console says how many, once a second) */
+	if (now_ms() - said >= 1000)
 	{
-		unsigned long waited = 0;
+		said = now_ms();
+		terminal_status_printf(global_real_argb_yellow, "Compiling this map's shaders: %u left.", (unsigned)pending);
+	}
+	return 1;
+}
+
+/* the map the game finished loading (d3d8_gl_map_loaded) */
+void dk_shader_map_loaded(uint32_t map_hash)
+{
+	map_wait_begin(map_hash);
+	if (!started)
+		return;
+	/* under the loading screen (scenario_load), the preload finished, the
+	loader's queue emptied and the map's keys compiled, for what is left of
+	DK_MAP_WAIT_MS: a match starting before then would draw nothing of what
+	it has not loaded yet. (A network game's client tolerates this: 75 s
+	before its game starts.) */
+	{
+		unsigned long waited = 0, left = wait_left_ms();
 
 		/* the rest of the startup pass first, which the preload follows: a
 		map started within the pass's first seconds waited for none of it,
@@ -926,16 +1000,21 @@ void dk_shader_map_loaded(uint32_t map_hash)
 		of 1500 skipped), the intro's fade and bars among them. Asking the
 		host is cheap for a shader on the card (it loads nothing) */
 		pass_frame(key_count);
-		while (pass_finished && waited < DK_MAP_WAIT_MS &&
-			((DK_PRELOAD_ENABLED && !preload_finished) || host_dk_shader_loading()))
+		while (pass_finished && waited < left &&
+			((DK_PRELOAD_ENABLED && !preload_finished) || host_dk_shader_loading() ||
+			host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP)))
 		{
 			preload_frame();
 			usleep(10000);
 			waited += 10;
 		}
-		platform_log("shader cache: waited %lu ms under the loading screen for the shaders on the card (%u still "
-			"to load%s)", waited, (unsigned)host_dk_shader_loading(), preload_finished ? "" : ", the preload not done");
+		platform_log("shader cache: waited %llu ms for the map's shaders, %lu of them in scenario_load (%u still to "
+			"load, %u of the map's still to compile%s)", now_ms() - wait_started_ms, waited,
+			(unsigned)host_dk_shader_loading(), (unsigned)host_dk_shader_pending_urgent(DK_SHADER_PRIORITY_MAP),
+			preload_finished ? "" : ", the preload not done");
 	}
+	/* (the next load of a map, this one again too, waits anew) */
+	wait_map = 0;
 }
 
 /* for phase 6: the shader a draw needs. 0 means not ready, and the draw is

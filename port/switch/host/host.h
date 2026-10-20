@@ -313,6 +313,12 @@ uint32_t host_dk_shader_known(uint32_t stage, uint64_t hash);
 /* how many shaders are queued or being compiled (the guest tells the player
 while there are many: dk_shaders.c) */
 uint32_t host_dk_shader_pending(void);
+/* how many of them are at priority or more urgent (lower): the map's, while
+its load waits for them under the loading screen (dk_shaders.c) */
+uint32_t host_dk_shader_pending_urgent(uint32_t priority);
+/* every queued shader at priority from goes to priority to: the map played
+before's, left uncompiled, when another map's load raises its own */
+void host_dk_shader_priority_lower(uint32_t from, uint32_t to);
 /* how many shaders on the card are queued for, or being read by, the loader
 thread (the guest's preload and its wait under the loading screen) */
 uint32_t host_dk_shader_loading(void);

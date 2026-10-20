@@ -1985,15 +1985,32 @@ static void fixed_function_transform(float *position)
 }
 
 /* the game finished loading a map (scenario_load) */
-void d3d8_gl_map_loaded(const char *name)
+/* d3d8_gl.c's program_record_map_hash: the map's name hashed, so the keys
+met on it can be raised in the background compile's queue */
+static uint32_t map_hash(const char *name)
 {
-	/* d3d8_gl.c's program_record_map_hash: the map's name hashed, so the
-	keys met on it can be raised in the background compile's queue */
 	uint32_t hash = 2166136261UL;
 
 	for (; *name; name++)
 		hash = (hash ^ (unsigned char)*name) * 16777619UL;
-	dk_shader_map_loaded(hash ? hash : 1);
+	return hash ? hash : 1;
+}
+
+/* the loading screen is up for a map (game_precache_new_map) */
+void d3d8_gl_map_loading(const char *name)
+{
+	dk_shader_map_loading(map_hash(name));
+}
+
+/* whether it stays up a frame more, for the map's shaders */
+int d3d8_gl_map_waiting(void)
+{
+	return dk_shader_map_waiting();
+}
+
+void d3d8_gl_map_loaded(const char *name)
+{
+	dk_shader_map_loaded(map_hash(name));
 }
 
 /* ---------- the shader dump (debug.gpu_dump_shaders; DEKO3D.md, phase 4)

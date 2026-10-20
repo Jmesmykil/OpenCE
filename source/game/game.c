@@ -811,6 +811,10 @@ void game_dispose(
 	return;
 }
 
+#ifdef HALO_SWITCH
+extern int d3d8_gl_map_waiting(void);
+#endif
+
 void game_precache_new_map(
 	char *map_name,
 	boolean blocking)
@@ -864,6 +868,16 @@ void game_precache_new_map(
 					cache_files_precache_is_copying_map(map_name));
 			ui_widget_load_progress_widget();
 			progress_bar_begin(global_scenario_index != NONE);
+#ifdef HALO_SWITCH
+			/* port: the map's shaders are compiled under the loading screen,
+			which stays up for them once the map is read, for ten seconds at
+			most from here (port/switch/guest/dk_shaders.c) */
+			{
+				extern void d3d8_gl_map_loading(const char *name);
+
+				d3d8_gl_map_loading(map_name);
+			}
+#endif
 			do
 			{
 				map_status = cache_files_precache_map_status(
@@ -872,7 +886,11 @@ void game_precache_new_map(
 				main_rasterizer_throttle();
 				main_present_frame();
 			}
+#ifdef HALO_SWITCH
+			while (!map_status || (map_status == _cached_map_file_success && d3d8_gl_map_waiting()));
+#else
 			while (!map_status);
+#endif
 
 			progress_bar_end();
 			ui_widgets_close_all();

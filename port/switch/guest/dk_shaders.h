@@ -124,9 +124,16 @@ void dk_shader_start(void);
 /* the startup pass, a few keys a frame: asks the host for each in turn and
 queues the ones it does not have, in the background */
 void dk_shader_frame(void);
-/* the map the game finished loading (d3d8_gl_map_loaded), as d3d8_gl.c's
-program_record_map_hash has it: that map's keys are sent again with the
-map's priority, which raises them in the queue */
+/* the map whose loading screen is up (d3d8_gl_map_loading), hashed as
+d3d8_gl.c's program_record_map_hash has it: its keys are sent again with the
+map's priority, which raises them in the queue, and its wait begins */
+void dk_shader_map_loading(uint32_t map_hash);
+/* whether the loading screen stays up a frame more for the map's keys to be
+compiled (d3d8_gl_map_waiting): DK_MAP_WAIT_MS at most, from the loading */
+int dk_shader_map_waiting(void);
+/* the map the game finished loading (d3d8_gl_map_loaded): raised as above if
+the loading screen did not, and waited for, from the card, for what is left
+of the map's wait */
 void dk_shader_map_loaded(uint32_t map_hash);
 /* for phase 6: the handle of the shader a draw needs (0: not ready, skip
 the draw), and, for a key nobody has met, the GLSL generated and queued at

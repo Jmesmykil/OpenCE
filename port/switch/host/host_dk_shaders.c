@@ -220,6 +220,7 @@ static struct
 	int compiling;
 	uint64_t compiling_hash;
 	uint32_t compiling_stage;
+	uint32_t compiling_priority;
 
 	/* the compile thread's progress, for the log */
 	unsigned long compiled, failed;
@@ -813,6 +814,7 @@ static void *compile_thread(void *unused)
 		dksh.compiling = 1;
 		dksh.compiling_hash = request.hash;
 		dksh.compiling_stage = request.stage;
+		dksh.compiling_priority = request.priority;
 		pthread_mutex_unlock(&dksh.lock);
 
 		/* compiled into memory: the card is the writer's, every
@@ -1621,6 +1623,35 @@ uint32_t host_dk_shader_pending(void)
 		return 0;
 	pthread_mutex_lock(&dksh.lock);
 	pending = dksh.queue_count + (dksh.compiling ? 1 : 0);
+	pthread_mutex_unlock(&dksh.lock);
+	return pending;
+}
+
+void host_dk_shader_priority_lower(uint32_t from, uint32_t to)
+{
+	uint32_t index;
+
+	if (!dksh.started)
+		return;
+	pthread_mutex_lock(&dksh.lock);
+	for (index = 0; index < dksh.queue_count; index++)
+	{
+		if (dksh.queue[index].priority == from)
+			dksh.queue[index].priority = to;
+	}
+	pthread_mutex_unlock(&dksh.lock);
+}
+
+uint32_t host_dk_shader_pending_urgent(uint32_t priority)
+{
+	uint32_t pending, index;
+
+	if (!dksh.started)
+		return 0;
+	pthread_mutex_lock(&dksh.lock);
+	pending = dksh.compiling && dksh.compiling_priority <= priority ? 1 : 0;
+	for (index = 0; index < dksh.queue_count; index++)
+		pending += dksh.queue[index].priority <= priority ? 1 : 0;
 	pthread_mutex_unlock(&dksh.lock);
 	return pending;
 }

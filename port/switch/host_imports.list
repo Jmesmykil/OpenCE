@@ -13,6 +13,8 @@ host_dk_shader_find
 host_dk_shader_compile
 host_dk_shader_known
 host_dk_shader_pending
+host_dk_shader_pending_urgent
+host_dk_shader_priority_lower
 host_dk_shader_loading
 host_dk_shader_preload_done
 host_dk_shader_loose_loads
