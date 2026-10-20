@@ -1,5 +1,14 @@
 # Changelog
 
+## Build 110
+
+- Switch and Android: Halo's loading screen draws, the light sweeping over the Xbox's picture with its glowing trail; maps extracted by earlier builds get the picture from the disc image at the next start (on every platform). (thelinkin3000)
+- Switch: the first seconds after starting no longer freeze or cut the music, and the menus appear whole once their shaders are ready, behind the loading screen. (thelinkin3000)
+- Switch: when it looks for an update, the Switch also downloads the shaders of the campaign and of every multiplayer map (the shared shader keys), so a console compiles them in the background from its first start instead of as each map is first played. (thelinkin3000)
+- Switch: a map's load waits for its shaders under the loading screen, ten seconds at most, so a level's first moments are drawn whole; the loading screen's light now sweeps across the whole wait. Going back to the menus after a level no longer waits four seconds. (thelinkin3000)
+- Switch, Android and PS5: maps load sooner: the map is read from the card while it is unpacked (a campaign level about two seconds sooner on the Switch). (thelinkin3000)
+- Android and PS5: no more objects missing for the first frames of a map or a new effect: shaders compile on all the cores but two, and a draw whose shader is not ready compiles it itself, for up to a frame's time each frame. (thelinkin3000)
+
 ## Build 109
 
 - Switch: fixes a freeze in The Library's opening cutscene, and pauses of a few seconds while loading: a part of a frame the game waited for was never sent to the GPU. (thelinkin3000)
