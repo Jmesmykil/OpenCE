@@ -630,9 +630,16 @@ boolean game_load(
 
 	random_seed_debug_log(TRUE);
 	csmemcpy(&game_globals->options, options, sizeof(*options));
-	if (scenario_load(options->map_name))
 	{
-		game_globals->map_loaded = TRUE;
+		/* port: how long the map's load takes once it is in the cache, in the port's log */
+		extern void platform_log(char const *format, ...);
+		unsigned long started = GetTickCount();
+
+		if (scenario_load(options->map_name))
+		{
+			game_globals->map_loaded = TRUE;
+		}
+		platform_log("map load: %s: scenario_load %lu ms", options->map_name, GetTickCount() - started);
 	}
 
 	return game_globals->map_loaded;
@@ -858,6 +865,8 @@ void game_precache_new_map(
 		if (blocking)
 		{
 			struct game_runtime_globals_prefix *globals = game_globals;
+			/* port: (for the loading screen's time, below) */
+			unsigned long loading_started = GetTickCount();
 
 			globals->map_load_in_progress = TRUE;
 			globals->loading_progress = 0.0f;
@@ -893,6 +902,12 @@ void game_precache_new_map(
 #endif
 
 			progress_bar_end();
+			{
+				/* port: the loading screen's time (the copy, and on the Switch the map's shaders), in the port's log */
+				extern void platform_log(char const *format, ...);
+
+				platform_log("map load: %s: the loading screen %lu ms", map_name, GetTickCount() - loading_started);
+			}
 			ui_widgets_close_all();
 			if (map_status == _cached_map_file_failed)
 				display_error_damaged_media();

@@ -23,6 +23,7 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -382,16 +383,23 @@ void platform_maps_folder_check(struct platform_maps_folder *maps)
 
 /* ---------- file handles */
 
+struct read_ahead;
+
 struct platform_file
 {
 	int descriptor;
 	char path[1024];
+	/* platform_file_read_ahead's, or NULL */
+	struct read_ahead *read_ahead;
 };
+
+static void read_ahead_stop(struct platform_file *file);
 
 static void file_destroy(struct platform_handle *handle)
 {
 	struct platform_file *file = handle->data;
 
+	read_ahead_stop(file);
 	close(file->descriptor);
 	free(file);
 }
@@ -658,6 +666,187 @@ BOOL WINAPI WriteFile(HANDLE handle, LPCVOID buffer, DWORD count, LPDWORD bytes_
 	return result;
 }
 
+/* ---------- read ahead (platform_file_read_ahead)
+
+A map unpacked into the cache was read 128 KB at a time, each read waited
+for before zlib took it, so the card and zlib took turns: a campaign
+level's copy was its reads' time and zlib's added (2.9 s and 2.3 s of a30's
+5.3 s on the Switch). A thread of the file's own reads it from its start,
+a megabyte at a time, into a ring READ_AHEAD_SIZE ahead of the game's
+reads, which are copied out of it as it fills; a read behind the ring or
+past it (none, as the game reads the map) goes to the file as before. */
+
+enum
+{
+	READ_AHEAD_SIZE = 8 * 1024 * 1024,
+	READ_AHEAD_CHUNK = 1024 * 1024,
+};
+
+struct read_ahead
+{
+	pthread_t thread;
+	pthread_mutex_t lock;
+	pthread_cond_t changed;
+	char *ring;
+	unsigned long long file_size;
+	/* the ring holds the file's bytes from consumed to filled, each at its offset modulo the ring's size */
+	unsigned long long consumed, filled;
+	int stop, error;
+	/* the reader's time reading, and waiting for room (the game behind it), and the game's waiting for it */
+	unsigned long long read_us, room_us, waited_us;
+};
+
+static unsigned long long read_ahead_now_us(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned long long)now.tv_sec * 1000000ULL + (unsigned long long)now.tv_nsec / 1000ULL;
+}
+
+static void *read_ahead_thread(void *context)
+{
+	struct platform_file *file = context;
+	struct read_ahead *ahead = file->read_ahead;
+
+	pthread_mutex_lock(&ahead->lock);
+	while (!ahead->stop && !ahead->error && ahead->filled < ahead->file_size)
+	{
+		unsigned long long at = ahead->filled, room = ahead->consumed + READ_AHEAD_SIZE - ahead->filled;
+		size_t wanted = READ_AHEAD_CHUNK, position = (size_t)(at % READ_AHEAD_SIZE);
+		ssize_t result;
+		unsigned long long started;
+
+		if (room < READ_AHEAD_CHUNK && room < ahead->file_size - at)
+		{
+			started = read_ahead_now_us();
+			pthread_cond_wait(&ahead->changed, &ahead->lock);
+			ahead->room_us += read_ahead_now_us() - started;
+			continue;
+		}
+		if (wanted > room)
+			wanted = (size_t)room;
+		if (wanted > ahead->file_size - at)
+			wanted = (size_t)(ahead->file_size - at);
+		if (wanted > READ_AHEAD_SIZE - position)
+			wanted = READ_AHEAD_SIZE - position;
+		pthread_mutex_unlock(&ahead->lock);
+		started = read_ahead_now_us();
+		result = pread(file->descriptor, ahead->ring + position, wanted, (off_t)at);
+		pthread_mutex_lock(&ahead->lock);
+		ahead->read_us += read_ahead_now_us() - started;
+		if (result < 0 && errno == EINTR)
+			continue;
+		if (result <= 0)
+			ahead->error = 1;
+		else
+			ahead->filled += (unsigned long long)result;
+		pthread_cond_broadcast(&ahead->changed);
+	}
+	pthread_mutex_unlock(&ahead->lock);
+	return NULL;
+}
+
+void platform_file_read_ahead(HANDLE handle)
+{
+	struct platform_file *file = file_from_handle(handle);
+	struct read_ahead *ahead;
+	off_t size;
+
+	if (!file || file->read_ahead)
+		return;
+	size = lseek(file->descriptor, 0, SEEK_END);
+	ahead = calloc(1, sizeof(*ahead));
+	if (size <= 0 || !ahead)
+	{
+		free(ahead);
+		return;
+	}
+	ahead->ring = malloc(READ_AHEAD_SIZE);
+	if (!ahead->ring)
+	{
+		free(ahead);
+		return;
+	}
+	ahead->file_size = (unsigned long long)size;
+	pthread_mutex_init(&ahead->lock, NULL);
+	pthread_cond_init(&ahead->changed, NULL);
+	file->read_ahead = ahead;
+	if (pthread_create(&ahead->thread, NULL, read_ahead_thread, file) != 0)
+	{
+		file->read_ahead = NULL;
+		pthread_cond_destroy(&ahead->changed);
+		pthread_mutex_destroy(&ahead->lock);
+		free(ahead->ring);
+		free(ahead);
+	}
+}
+
+/* a read from the ring: TRUE with *done its bytes, or FALSE for one it does not hold, read from the file instead */
+static BOOL read_ahead_read(struct platform_file *file, void *buffer, DWORD count, DWORD *done,
+	unsigned long long offset)
+{
+	struct read_ahead *ahead = file->read_ahead;
+	unsigned long long end, started;
+	DWORD copied = 0;
+
+	pthread_mutex_lock(&ahead->lock);
+	if (offset < ahead->consumed || offset > ahead->file_size ||
+		(unsigned long long)count > READ_AHEAD_SIZE || offset + count > ahead->consumed + READ_AHEAD_SIZE)
+	{
+		pthread_mutex_unlock(&ahead->lock);
+		return FALSE;
+	}
+	end = offset + count < ahead->file_size ? offset + count : ahead->file_size;
+	started = read_ahead_now_us();
+	while (ahead->filled < end && !ahead->error)
+		pthread_cond_wait(&ahead->changed, &ahead->lock);
+	ahead->waited_us += read_ahead_now_us() - started;
+	if (ahead->filled < end)
+	{
+		pthread_mutex_unlock(&ahead->lock);
+		return FALSE;
+	}
+	while (offset + copied < end)
+	{
+		size_t position = (size_t)((offset + copied) % READ_AHEAD_SIZE);
+		size_t piece = (size_t)(end - offset - copied);
+
+		if (piece > READ_AHEAD_SIZE - position)
+			piece = READ_AHEAD_SIZE - position;
+		memcpy((char *)buffer + copied, ahead->ring + position, piece);
+		copied += (DWORD)piece;
+	}
+	/* (what is before the read is not wanted again: room for the reader) */
+	ahead->consumed = end;
+	pthread_cond_broadcast(&ahead->changed);
+	pthread_mutex_unlock(&ahead->lock);
+	*done = copied;
+	return TRUE;
+}
+
+static void read_ahead_stop(struct platform_file *file)
+{
+	struct read_ahead *ahead = file->read_ahead;
+
+	if (!ahead)
+		return;
+	pthread_mutex_lock(&ahead->lock);
+	ahead->stop = 1;
+	pthread_cond_broadcast(&ahead->changed);
+	pthread_mutex_unlock(&ahead->lock);
+	pthread_join(ahead->thread, NULL);
+	platform_log("read ahead: %s: %.1f MB read in %.2f s (%.1f MB/s), %.2f s waiting for room, the reads waited "
+		"%.2f s for it%s", file->path, ahead->filled / 1e6, ahead->read_us / 1e6,
+		ahead->read_us ? ahead->filled / (double)ahead->read_us : 0.0, ahead->room_us / 1e6, ahead->waited_us / 1e6,
+		ahead->error ? " (a read failed: the rest from the file)" : "");
+	pthread_cond_destroy(&ahead->changed);
+	pthread_mutex_destroy(&ahead->lock);
+	free(ahead->ring);
+	free(ahead);
+	file->read_ahead = NULL;
+}
+
 /* ReadFileEx/WriteFileEx complete immediately; as on Win32, the completion
 routine runs during the issuing thread's next alertable wait. */
 
@@ -682,7 +871,10 @@ BOOL WINAPI ReadFileEx(HANDLE handle, LPVOID buffer, DWORD count, LPOVERLAPPED o
 			SetLastError(ERROR_INVALID_PARAMETER);
 		return FALSE;
 	}
-	result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
+	if (file->read_ahead && read_ahead_read(file, buffer, count, &done, overlapped_offset(overlapped)))
+		result = TRUE;
+	else
+		result = read_at(file, buffer, count, &done, TRUE, overlapped_offset(overlapped));
 	overlapped->Internal = result ? ERROR_SUCCESS : GetLastError();
 	if (result && done == 0 && count > 0)
 		overlapped->Internal = ERROR_HANDLE_EOF;
