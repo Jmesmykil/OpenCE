@@ -590,7 +590,18 @@ static void ensure_game_data(const char *root)
 	const char *name;
 
 	if (directory_has_maps(root))
+	{
+		/* (maps extracted before the extraction wrote the loading screen's picture: it from the image, if it is
+		still beside the port) */
+		name = find_disc_image(root);
+		if (name)
+		{
+			snprintf(image, sizeof(image), "%s/%s", root, name);
+			if (xiso_write_missing_loading_picture(image, root))
+				host_logf(HOST_LOG_INFO, "the loading screen's picture taken from %s (the maps folder had none)", name);
+		}
 		return;
+	}
 	name = find_disc_image(root);
 	if (!name)
 		host_fatal("The Halo game data was not found: %s/maps/ui.map is missing, and no disc image is "
