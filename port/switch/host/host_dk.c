@@ -1415,6 +1415,12 @@ static void commands_submit_serial(uint32_t finished)
 	dk.fence_serial[dk.frame] = finished;
 	dk.serial_fenced = finished;
 	pthread_mutex_unlock(&dk_lock);
+	/* Sent to the GPU now: dkQueueSubmitCommands only queues them, and until
+	a present or a wait for the queue nothing reaches the GPU. A submission
+	the game ends mid-frame to wait for (a resource lock: c40's opening
+	draws into a 320x240 target and waits for it) was then never run, the
+	game waited for it forever, and the picture froze. */
+	dkQueueFlush(dk.queue);
 	dk.cleaned_count = 0;
 	dk.recorded = 0;
 }
