@@ -1,5 +1,11 @@
 # Changelog
 
+## Build 112
+
+- Switch: creating a LAN game after opening the server browser works again: leaving the browser now closes its connections to the internet play servers, which had used up the console's room for network connections. (thelinkin3000)
+- Switch: the Mods menu keeps which mods are on and off after the game restarts. Every save after the first had failed, because the console would not replace the old file (profile saves were affected the same way). (thelinkin3000)
+- The gametype list in Create Game and in Settings > Gametypes no longer reads the chosen gametype from the card every frame, which kept the Switch busy for as long as the screen was open. (thelinkin3000)
+
 ## Build 111
 
 - Switch and PS5: the main menu has no QUIT: the console's own Home or PS button leaves the game. (thelinkin3000)
