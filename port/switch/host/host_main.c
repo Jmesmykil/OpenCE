@@ -1214,8 +1214,25 @@ int main(int argc, char *argv[])
 	 * the program perfectly and then captured nothing at all - the port ran,
 	 * nxlink attached, and every line went somewhere the host side never
 	 * saw. That is the whole of why the previous attempts produced no output
-	 * despite deploying correctly. */
-	socketInitializeDefault();
+	 * despite deploying correctly.
+	 *
+	 * With twice libnx's socket buffer budget (sb_efficiency 8, the most:
+	 * about 4.4 MB rather than 2.2). Every socket's buffers come out of it
+	 * (host_net.c), and hosting an internet game did not have enough: the
+	 * four signalling brokers' connections, the tunnel, and the game's
+	 * server and client sockets left the server no room to take its own
+	 * client's connection, which the console answered with a reset
+	 * (WSAECONNRESET connecting to 127.0.0.1:5150). */
+	{
+		SocketInitConfig sockets = *socketGetDefaultInitConfig();
+
+		sockets.sb_efficiency = 8;
+		if (R_FAILED(socketInitialize(&sockets)))
+		{
+			host_logf(HOST_LOG_WARN, "sockets: the larger buffer budget was refused; using libnx's default");
+			socketInitializeDefault();
+		}
+	}
 	if (nxlinkConnectToHost(false, true) >= 0)
 		host_logf(HOST_LOG_INFO, "output is going to a nxlink host as well as here");
 	else
