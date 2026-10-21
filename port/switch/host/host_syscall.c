@@ -507,15 +507,26 @@ int unlinkat(int directory, const char *path, int flags)
 	}
 }
 
-/* (map sharing names a map file for its hash: port/linux/game/map_share.c) */
+/* (map sharing names a map file for its hash: port/linux/game/map_share.c)
+The console's rename will not replace a file, where POSIX's does: a file
+written beside another and renamed over it (the mods' load_order.toml,
+port_mods.c) was written the first time and never again. So a file in the
+way is deleted first, as host_dk_shaders.c does for its own. */
 static int guest_renameat(int old_directory, const char *old_path, int new_directory, const char *new_path)
 {
+	struct stat old_information, new_information;
 	int result;
 
 	if (old_directory >= 0 || new_directory >= 0)
 		return -EBADF;
 	host_sd_lock();
 	result = rename(old_path, new_path);
+	if (result != 0 && stat(old_path, &old_information) == 0 && S_ISREG(old_information.st_mode) &&
+		stat(new_path, &new_information) == 0 && S_ISREG(new_information.st_mode) &&
+		unlink(new_path) == 0)
+	{
+		result = rename(old_path, new_path);
+	}
 	host_sd_unlock();
 	return result;
 }
