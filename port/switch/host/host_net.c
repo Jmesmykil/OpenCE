@@ -234,14 +234,46 @@ int posix_socket_last_error(void)
 	return last_error;
 }
 
+/* The sockets open through these calls (posix_socket and posix_socket_accept,
+less posix_socket_close; libnx's resolver, nxlink and miniupnpc open theirs
+directly, and are not counted), and the most open at once: each new most
+past SOCKETS_SAID is logged, so a log shows how many were open when the
+console's stack began refusing connections (as a host's of many players) */
+#define SOCKETS_SAID 16
+
+static int sockets_open;
+static int sockets_most;
+
+static void sockets_opened(int result, const char *how)
+{
+	int open;
+
+	if (result < 0)
+		return;
+	open = __atomic_add_fetch(&sockets_open, 1, __ATOMIC_RELAXED);
+	if (open > __atomic_load_n(&sockets_most, __ATOMIC_RELAXED))
+	{
+		__atomic_store_n(&sockets_most, open, __ATOMIC_RELAXED);
+		if (open > SOCKETS_SAID)
+			host_logf(HOST_LOG_INFO, "sockets: %d open, the most yet (%s)", open, how);
+	}
+}
+
 int posix_socket(int family, int type, int protocol)
 {
-	return succeed(socket(family, type, protocol));
+	int result = socket(family, type, protocol);
+
+	sockets_opened(result, type == SOCK_STREAM ? "a TCP socket" : "a UDP socket");
+	return succeed(result);
 }
 
 int posix_socket_close(int socket)
 {
-	return succeed(close(socket));
+	int result = close(socket);
+
+	if (result == 0)
+		__atomic_sub_fetch(&sockets_open, 1, __ATOMIC_RELAXED);
+	return succeed(result);
 }
 
 int posix_socket_bind(int socket, const void *address, int address_length)
@@ -287,6 +319,7 @@ int posix_socket_accept(int socket, void *address, int *address_length)
 
 	if (result >= 0)
 		address_out(&converted, length, address, address_length);
+	sockets_opened(result, "a connection accepted");
 	return succeed(result);
 }
 
