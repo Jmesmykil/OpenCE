@@ -1,5 +1,12 @@
 # Changelog
 
+## Build 113
+
+- Switch: hosting an internet game works: the console ran out of room for network connections and refused its own player's. (thelinkin3000)
+- Switch: UPnP port forwarding for internet play, as on the other platforms: a router with UPnP on forwards the console's port, so players behind strict networks can reach a game it hosts. (thelinkin3000)
+- Switch: hosts up to 48 players. A LAN game held 48 players at a steady 60 frames a second (it took 22 before, and stuttered with many players): the console's network work is now done in batches and off the game's thread. Server Setup's MAX PLAYERS goes up to 48 on the Switch. (thelinkin3000)
+- The gametype list in Create Game and in Settings > Gametypes no longer reads the gametypes' names from the card every frame, which held it under 20 frames a second on the Switch. (thelinkin3000)
+
 ## Build 112
 
 - Switch: creating a LAN game after opening the server browser works again: leaving the browser now closes its connections to the internet play servers, which had used up the console's room for network connections. (thelinkin3000)
