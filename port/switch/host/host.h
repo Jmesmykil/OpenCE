@@ -41,6 +41,9 @@ int host_errno(void);
  * the same lock rather than a second one - a second lock would still let a
  * guest read meet the logger's fsync inside the driver. Nothing that holds
  * this lock may log. */
+/* the end of a frame on the thread that presents: the datagrams it held to
+send together are sent (host_net.c) */
+void host_net_frame_end(void);
 void host_sd_lock(void);
 void host_sd_unlock(void);
 /* write the SD card's journal, so a file closed by the guest is still there

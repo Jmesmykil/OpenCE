@@ -566,6 +566,8 @@ int host_sdl_gl_swap_window(uint32_t window)
 {
 	SDL_Window *object = handle_get(window, _handle_window);
 
+	/* (the datagrams the game held this frame go: host_net.c) */
+	host_net_frame_end();
 	if (!object)
 		return 0;
 	if ((void *)object == (void *)&standin_window)

@@ -32,6 +32,7 @@ offer. UPnP is posix_upnp.c's, compiled here with the port's miniupnpc.
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -259,9 +260,324 @@ static void sockets_opened(int result, const char *how)
 	}
 }
 
+/* ---------- datagrams read in batches
+
+Every socket call is a request to the console's network service, and a host
+of 48 machines spent 12% of its game thread reading its datagrams one
+request each (and 1 more to find there were no more). A non-blocking
+socket's datagrams are read here up to DATAGRAM_BATCH at a time with one
+recvmmsg, and handed out one per call; select, recv and FIONREAD count the
+ones held. Only reads with no flags into buffers of DATAGRAM_SLOT bytes at
+most are batched (the game's are 1200, internet play's tunnel's about
+1500), each received as the caller's buffer would have, so a datagram too
+large for it still fails as Winsock's does (WSAEMSGSIZE). */
+
+#define DATAGRAM_BATCH 16
+#define DATAGRAM_SLOT 2048
+#define BATCHED_SOCKETS 1024
+
+struct datagram_queue
+{
+	int count, next;
+	struct
+	{
+		int size;
+		int truncated;
+		socklen_t address_length;
+		struct sockaddr_storage address;
+		unsigned char data[DATAGRAM_SLOT];
+	} datagrams[DATAGRAM_BATCH];
+};
+
+static pthread_mutex_t datagram_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct datagram_queue *datagram_queues[BATCHED_SOCKETS];
+static unsigned char socket_nonblocking[BATCHED_SOCKETS];
+
+/* the datagrams held for a socket (under datagram_lock) */
+static int datagrams_held(int socket)
+{
+	struct datagram_queue *queue = socket >= 0 && socket < BATCHED_SOCKETS ? datagram_queues[socket] : NULL;
+
+	return queue ? queue->count - queue->next : 0;
+}
+
+/* a socket closed: what it held goes */
+static void datagrams_forget(int socket)
+{
+	if (socket < 0 || socket >= BATCHED_SOCKETS)
+		return;
+	pthread_mutex_lock(&datagram_lock);
+	free(datagram_queues[socket]);
+	datagram_queues[socket] = NULL;
+	socket_nonblocking[socket] = 0;
+	pthread_mutex_unlock(&datagram_lock);
+}
+
+/* the next datagram held for a socket, read in a batch if none is: its
+size, or -1 with errno (EAGAIN: none); 0 if the read is not one to batch */
+static int datagram_take(int socket, void *buffer, int length, int flags, struct sockaddr_storage *address,
+	socklen_t *address_length, int *truncated, int *batched)
+{
+	struct datagram_queue *queue;
+	int size;
+
+	*batched = 0;
+	if (flags || socket < 0 || socket >= BATCHED_SOCKETS || length <= 0 || length > DATAGRAM_SLOT)
+		return 0;
+	pthread_mutex_lock(&datagram_lock);
+	if (!socket_nonblocking[socket])
+	{
+		pthread_mutex_unlock(&datagram_lock);
+		return 0;
+	}
+	*batched = 1;
+	queue = datagram_queues[socket];
+	if (!queue)
+	{
+		queue = datagram_queues[socket] = calloc(1, sizeof(*queue));
+		if (!queue)
+		{
+			*batched = 0;
+			pthread_mutex_unlock(&datagram_lock);
+			return 0;
+		}
+	}
+	if (queue->next == queue->count)
+	{
+		struct mmsghdr messages[DATAGRAM_BATCH];
+		struct iovec vectors[DATAGRAM_BATCH];
+		int index, received;
+
+		memset(messages, 0, sizeof(messages));
+		for (index = 0; index < DATAGRAM_BATCH; index++)
+		{
+			vectors[index].iov_base = queue->datagrams[index].data;
+			vectors[index].iov_len = (size_t)length;
+			messages[index].msg_hdr.msg_name = &queue->datagrams[index].address;
+			messages[index].msg_hdr.msg_namelen = sizeof(queue->datagrams[index].address);
+			messages[index].msg_hdr.msg_iov = &vectors[index];
+			messages[index].msg_hdr.msg_iovlen = 1;
+		}
+		queue->count = queue->next = 0;
+		received = recvmmsg(socket, messages, DATAGRAM_BATCH, MSG_DONTWAIT, NULL);
+		if (received <= 0)
+		{
+			pthread_mutex_unlock(&datagram_lock);
+			if (received == 0)
+				errno = EAGAIN;
+			return -1;
+		}
+		for (index = 0; index < received; index++)
+		{
+			queue->datagrams[index].size = (int)messages[index].msg_len;
+			queue->datagrams[index].truncated = (messages[index].msg_hdr.msg_flags & MSG_TRUNC) != 0;
+			queue->datagrams[index].address_length = messages[index].msg_hdr.msg_namelen;
+		}
+		queue->count = received;
+	}
+	size = queue->datagrams[queue->next].size < length ? queue->datagrams[queue->next].size : length;
+	memcpy(buffer, queue->datagrams[queue->next].data, (size_t)size);
+	if (address)
+		memcpy(address, &queue->datagrams[queue->next].address, sizeof(*address));
+	if (address_length)
+		*address_length = queue->datagrams[queue->next].address_length;
+	*truncated = queue->datagrams[queue->next].truncated;
+	queue->next++;
+	pthread_mutex_unlock(&datagram_lock);
+	return size;
+}
+
+/* ---------- datagrams sent in batches, by a thread of their own
+
+A host sends each machine its datagram every tick, which was 27% of a
+48-machine host's game thread: the network service's time is per datagram,
+so sending them together (sendmmsg) asks it less often but takes as long.
+So the thread that presents the frames (host_net_frame_end) holds the
+datagrams it sends on a non-blocking datagram socket, up to DATAGRAM_BATCH
+of one socket, and hands them to the sender thread, which sends each batch
+with one sendmmsg while the game goes on: when that many are held, when it
+sends on another socket, when it makes any other socket call, and at the
+end of each frame. Batches are sent in the order handed over; closing a
+socket, and asking its address (which its first send may have bound), wait
+until the sender has sent what was handed over. A datagram the system has
+no room for is dropped, as one the game's send was refused would have been
+(they are the unreliable ones). */
+
+struct held_sends
+{
+	int socket;
+	int count;
+	struct
+	{
+		socklen_t address_length;
+		struct sockaddr_storage address;
+		int size;
+		unsigned char data[DATAGRAM_SLOT];
+	} datagrams[DATAGRAM_BATCH];
+};
+
+/* the batches handed to the sender thread (a ring: the next to send, and
+how many; one being sent keeps its place until it is) */
+#define SEND_BATCHES 8
+
+static __thread int frame_thread;
+static __thread struct held_sends *held_sends;
+static struct held_sends *send_ring;
+static int send_ring_next, send_ring_count;
+static pthread_mutex_t send_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t send_ready = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t send_done = PTHREAD_COND_INITIALIZER;
+static int sender_started;
+
+static void *sender_thread(void *unused)
+{
+	(void)unused;
+	pthread_mutex_lock(&send_lock);
+	for (;;)
+	{
+		struct held_sends *batch;
+		struct mmsghdr messages[DATAGRAM_BATCH];
+		struct iovec vectors[DATAGRAM_BATCH];
+		int index;
+
+		while (!send_ring_count)
+			pthread_cond_wait(&send_ready, &send_lock);
+		batch = &send_ring[send_ring_next];
+		pthread_mutex_unlock(&send_lock);
+		memset(messages, 0, sizeof(messages));
+		for (index = 0; index < batch->count; index++)
+		{
+			vectors[index].iov_base = batch->datagrams[index].data;
+			vectors[index].iov_len = (size_t)batch->datagrams[index].size;
+			messages[index].msg_hdr.msg_name = &batch->datagrams[index].address;
+			messages[index].msg_hdr.msg_namelen = batch->datagrams[index].address_length;
+			messages[index].msg_hdr.msg_iov = &vectors[index];
+			messages[index].msg_hdr.msg_iovlen = 1;
+		}
+		sendmmsg(batch->socket, messages, (unsigned int)batch->count, MSG_NOSIGNAL);
+		pthread_mutex_lock(&send_lock);
+		send_ring_next = (send_ring_next + 1) % SEND_BATCHES;
+		send_ring_count--;
+		pthread_cond_broadcast(&send_done);
+	}
+	return NULL;
+}
+
+/* what is held, handed to the sender thread (sent here if it has none) */
+static void sends_flush(void)
+{
+	int saved_errno = errno;
+	struct held_sends *batch;
+	int index;
+
+	if (!held_sends || !held_sends->count)
+		return;
+	pthread_mutex_lock(&send_lock);
+	if (!sender_started)
+	{
+		pthread_t thread;
+
+		send_ring = calloc(SEND_BATCHES, sizeof(*send_ring));
+		sender_started = send_ring && pthread_create(&thread, NULL, sender_thread, NULL) == 0 ? 1 : -1;
+		if (sender_started > 0)
+			pthread_detach(thread);
+		host_logf(HOST_LOG_INFO, "sockets: %s", sender_started > 0 ?
+			"datagrams are sent by a thread of their own" : "no thread to send datagrams: the game's sends them");
+	}
+	if (sender_started < 0)
+	{
+		struct mmsghdr messages[DATAGRAM_BATCH];
+		struct iovec vectors[DATAGRAM_BATCH];
+
+		pthread_mutex_unlock(&send_lock);
+		memset(messages, 0, sizeof(messages));
+		for (index = 0; index < held_sends->count; index++)
+		{
+			vectors[index].iov_base = held_sends->datagrams[index].data;
+			vectors[index].iov_len = (size_t)held_sends->datagrams[index].size;
+			messages[index].msg_hdr.msg_name = &held_sends->datagrams[index].address;
+			messages[index].msg_hdr.msg_namelen = held_sends->datagrams[index].address_length;
+			messages[index].msg_hdr.msg_iov = &vectors[index];
+			messages[index].msg_hdr.msg_iovlen = 1;
+		}
+		sendmmsg(held_sends->socket, messages, (unsigned int)held_sends->count, MSG_NOSIGNAL);
+		held_sends->count = 0;
+		errno = saved_errno;
+		return;
+	}
+	while (send_ring_count == SEND_BATCHES)
+		pthread_cond_wait(&send_done, &send_lock);
+	batch = &send_ring[(send_ring_next + send_ring_count) % SEND_BATCHES];
+	batch->socket = held_sends->socket;
+	batch->count = held_sends->count;
+	for (index = 0; index < held_sends->count; index++)
+	{
+		batch->datagrams[index].address_length = held_sends->datagrams[index].address_length;
+		batch->datagrams[index].address = held_sends->datagrams[index].address;
+		batch->datagrams[index].size = held_sends->datagrams[index].size;
+		memcpy(batch->datagrams[index].data, held_sends->datagrams[index].data,
+			(size_t)held_sends->datagrams[index].size);
+	}
+	send_ring_count++;
+	pthread_cond_signal(&send_ready);
+	pthread_mutex_unlock(&send_lock);
+	held_sends->count = 0;
+	errno = saved_errno;
+}
+
+/* until the sender thread has sent all it was handed */
+static void sends_wait(void)
+{
+	pthread_mutex_lock(&send_lock);
+	while (send_ring_count)
+		pthread_cond_wait(&send_done, &send_lock);
+	pthread_mutex_unlock(&send_lock);
+}
+
+/* (every socket call but a send that is held sends what is held first) */
+#define SENDS_FLUSH() do { if (held_sends && held_sends->count) sends_flush(); } while (0)
+
+/* a datagram held to send with others: 1 if it was */
+static int sends_hold(int socket, const void *buffer, int length, int flags, const struct sockaddr_storage *address,
+	socklen_t address_length)
+{
+	if (!frame_thread || flags || length <= 0 || length > DATAGRAM_SLOT || !address || socket < 0 ||
+		socket >= BATCHED_SOCKETS || !socket_nonblocking[socket])
+	{
+		return 0;
+	}
+	if (!held_sends)
+	{
+		held_sends = calloc(1, sizeof(*held_sends));
+		if (!held_sends)
+			return 0;
+	}
+	if (held_sends->count && held_sends->socket != socket)
+		sends_flush();
+	held_sends->socket = socket;
+	held_sends->datagrams[held_sends->count].address_length = address_length;
+	memcpy(&held_sends->datagrams[held_sends->count].address, address, sizeof(*address));
+	held_sends->datagrams[held_sends->count].size = length;
+	memcpy(held_sends->datagrams[held_sends->count].data, buffer, (size_t)length);
+	if (++held_sends->count == DATAGRAM_BATCH)
+		sends_flush();
+	return 1;
+}
+
+/* the end of a frame (host_sdl2.c's swap): what is held is sent, and the
+thread that calls this is the one whose sends are held */
+void host_net_frame_end(void)
+{
+	frame_thread = 1;
+	SENDS_FLUSH();
+}
+
 int posix_socket(int family, int type, int protocol)
 {
-	int result = socket(family, type, protocol);
+	int result;
+
+	SENDS_FLUSH();
+	result = socket(family, type, protocol);
 
 	sockets_opened(result, type == SOCK_STREAM ? "a TCP socket" : "a UDP socket");
 	return succeed(result);
@@ -269,8 +585,12 @@ int posix_socket(int family, int type, int protocol)
 
 int posix_socket_close(int socket)
 {
-	int result = close(socket);
+	int result;
 
+	SENDS_FLUSH();
+	sends_wait();
+	datagrams_forget(socket);
+	result = close(socket);
 	if (result == 0)
 		__atomic_sub_fetch(&sockets_open, 1, __ATOMIC_RELAXED);
 	return succeed(result);
@@ -280,14 +600,17 @@ int posix_socket_bind(int socket, const void *address, int address_length)
 {
 	struct sockaddr_storage converted;
 	socklen_t length = address_in(address, address_length, &converted);
+	int result;
 
-	int result = bind(socket, (struct sockaddr *)&converted, length);
+	SENDS_FLUSH();
+	result = bind(socket, (struct sockaddr *)&converted, length);
 
 	return succeed(result);
 }
 
 int posix_socket_connect(int socket, const void *address, int address_length)
 {
+	SENDS_FLUSH();
 	/* A non-blocking connect that is under way is EINPROGRESS here but
 	WSAEWOULDBLOCK in Winsock, which is what the game waits on before it
 	selects for the socket becoming writeable (connect_endpoint,
@@ -308,6 +631,7 @@ int posix_socket_connect(int socket, const void *address, int address_length)
 
 int posix_socket_listen(int socket, int backlog)
 {
+	SENDS_FLUSH();
 	return succeed(listen(socket, backlog));
 }
 
@@ -315,7 +639,10 @@ int posix_socket_accept(int socket, void *address, int *address_length)
 {
 	struct sockaddr_storage converted;
 	socklen_t length = sizeof(converted);
-	int result = accept(socket, (struct sockaddr *)&converted, &length);
+	int result;
+
+	SENDS_FLUSH();
+	result = accept(socket, (struct sockaddr *)&converted, &length);
 
 	if (result >= 0)
 		address_out(&converted, length, address, address_length);
@@ -325,6 +652,7 @@ int posix_socket_accept(int socket, void *address, int *address_length)
 
 int posix_socket_send(int socket, const void *buffer, int length, int flags)
 {
+	SENDS_FLUSH();
 	return succeed((int)send(socket, buffer, (size_t)length, flags | MSG_NOSIGNAL));
 }
 
@@ -345,6 +673,12 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 		if (directed)
 			((struct sockaddr_in *)&converted)->sin_addr.s_addr = directed;
 	}
+	if (!broadcast && address && sends_hold(socket, buffer, length, flags, &converted, converted_length))
+	{
+		last_error = 0;
+		return length;
+	}
+	SENDS_FLUSH();
 	result = (int)sendto(socket, buffer, (size_t)length, flags | MSG_NOSIGNAL,
 		address ? (struct sockaddr *)&converted : NULL, converted_length);
 	return succeed(result);
@@ -352,6 +686,22 @@ int posix_socket_sendto(int socket, const void *buffer, int length, int flags,
 
 int posix_socket_recv(int socket, void *buffer, int length, int flags)
 {
+	int truncated = 0;
+	int batched;
+	int result;
+
+	SENDS_FLUSH();
+	result = datagram_take(socket, buffer, length, flags, NULL, NULL, &truncated, &batched);
+
+	if (batched)
+	{
+		if (result >= 0 && truncated)
+		{
+			last_error = WSAEMSGSIZE;
+			return -1;
+		}
+		return succeed(result);
+	}
 	return succeed((int)recv(socket, buffer, (size_t)length, flags));
 }
 
@@ -362,7 +712,27 @@ int posix_socket_recvfrom(int socket, void *buffer, int length, int flags,
 	struct msghdr message;
 	struct sockaddr_storage converted;
 	int result;
+	int truncated = 0;
+	int batched;
 
+	SENDS_FLUSH();
+
+	{
+		socklen_t converted_length = sizeof(converted);
+
+		result = datagram_take(socket, buffer, length, flags, &converted, &converted_length, &truncated, &batched);
+		if (batched)
+		{
+			if (result >= 0 && address && address_length)
+				address_out(&converted, converted_length, address, address_length);
+			if (result >= 0 && truncated)
+			{
+				last_error = WSAEMSGSIZE;
+				return -1;
+			}
+			return succeed(result);
+		}
+	}
 	vector.iov_base = buffer;
 	vector.iov_len = (size_t)length;
 	memset(&message, 0, sizeof(message));
@@ -385,22 +755,42 @@ int posix_socket_recvfrom(int socket, void *buffer, int length, int flags,
 
 int posix_socket_shutdown(int socket, int how)
 {
+	SENDS_FLUSH();
 	return succeed(shutdown(socket, how));
 }
 
 int posix_socket_set_nonblocking(int socket, int nonblocking)
 {
-	int flags = fcntl(socket, F_GETFL);
+	int flags;
+
+	SENDS_FLUSH();
+	flags = fcntl(socket, F_GETFL);
 
 	if (flags < 0)
 		return fail();
 	flags = nonblocking ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
-	return succeed(fcntl(socket, F_SETFL, flags));
+	if (fcntl(socket, F_SETFL, flags) < 0)
+		return fail();
+	/* (a non-blocking datagram socket's datagrams are read in batches) */
+	if (socket >= 0 && socket < BATCHED_SOCKETS)
+	{
+		int type = 0;
+		socklen_t type_length = sizeof(type);
+
+		if (nonblocking && getsockopt(socket, SOL_SOCKET, SO_TYPE, &type, &type_length) < 0)
+			type = 0;
+		pthread_mutex_lock(&datagram_lock);
+		socket_nonblocking[socket] = nonblocking && type == SOCK_DGRAM;
+		pthread_mutex_unlock(&datagram_lock);
+	}
+	return succeed(0);
 }
 
 int posix_socket_set_nodelay(int socket)
 {
 	int value = 1;
+
+	SENDS_FLUSH();
 
 	return succeed(setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &value, sizeof(value)));
 }
@@ -408,8 +798,23 @@ int posix_socket_set_nodelay(int socket)
 int posix_socket_bytes_available(int socket, posix_ulong *count)
 {
 	int available = 0;
-	int result = ioctl(socket, FIONREAD, &available);
+	int result;
+	int held;
 
+	SENDS_FLUSH();
+	result = ioctl(socket, FIONREAD, &available);
+
+	/* (and the datagrams held: the next one's size, as FIONREAD gives) */
+	pthread_mutex_lock(&datagram_lock);
+	held = datagrams_held(socket);
+	if (held)
+	{
+		struct datagram_queue *queue = datagram_queues[socket];
+
+		available = queue->datagrams[queue->next].size;
+		result = 0;
+	}
+	pthread_mutex_unlock(&datagram_lock);
 	if (result >= 0)
 		*count = (posix_ulong)available;
 	return succeed(result);
@@ -443,6 +848,8 @@ int posix_socket_setsockopt(int socket, int level, int name, const void *value, 
 {
 	int host_level, host_name;
 
+	SENDS_FLUSH();
+
 	if (translate_option(level, name, &host_level, &host_name) != 0)
 	{
 		/* Xbox-only options such as SO_ENCRYPT have nothing to do here */
@@ -474,6 +881,7 @@ int posix_socket_getsockopt(int socket, int level, int name, void *value, int *l
 	socklen_t socket_length = (socklen_t)*length;
 	int result;
 
+	SENDS_FLUSH();
 	if (translate_option(level, name, &host_level, &host_name) != 0)
 	{
 		last_error = WSAENOPROTOOPT;
@@ -488,7 +896,11 @@ int posix_socket_getsockname(int socket, void *address, int *address_length)
 {
 	struct sockaddr_storage converted;
 	socklen_t length = sizeof(converted);
-	int result = getsockname(socket, (struct sockaddr *)&converted, &length);
+	int result;
+
+	SENDS_FLUSH();
+	sends_wait();
+	result = getsockname(socket, (struct sockaddr *)&converted, &length);
 
 	if (result >= 0)
 		address_out(&converted, length, address, address_length);
@@ -499,7 +911,10 @@ int posix_socket_getpeername(int socket, void *address, int *address_length)
 {
 	struct sockaddr_storage converted;
 	socklen_t length = sizeof(converted);
-	int result = getpeername(socket, (struct sockaddr *)&converted, &length);
+	int result;
+
+	SENDS_FLUSH();
+	result = getpeername(socket, (struct sockaddr *)&converted, &length);
 
 	if (result >= 0)
 		address_out(&converted, length, address, address_length);
@@ -528,6 +943,7 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 	int list, index;
 	int result;
 
+	SENDS_FLUSH();
 	for (list = 0; list < 3; list++)
 	{
 		if (!lists[list] || !counts[list])
@@ -561,8 +977,38 @@ int posix_socket_select(int *read, int *read_count, int *write, int *write_count
 			descriptors[total].revents = 0;
 		}
 	}
+	/* (a socket with datagrams held is ready to read: no wait then) */
+	{
+		int held = 0;
+
+		pthread_mutex_lock(&datagram_lock);
+		for (index = 0; lists[0] && index < *counts[0]; index++)
+		{
+			if (datagrams_held(lists[0][index]))
+				held = 1;
+		}
+		pthread_mutex_unlock(&datagram_lock);
+		if (held)
+		{
+			infinite = 0;
+			milliseconds = 0;
+		}
+	}
 	result = poll(descriptors, (nfds_t)total, infinite ? -1 :
 		(int)(milliseconds < 0 ? 0 : milliseconds > INT_MAX ? INT_MAX : milliseconds));
+	if (result >= 0)
+	{
+		pthread_mutex_lock(&datagram_lock);
+		for (index = 0; lists[0] && index < *counts[0]; index++)
+		{
+			if (datagrams_held(lists[0][index]) && !(descriptors[index].revents & POLLIN))
+			{
+				descriptors[index].revents |= POLLIN;
+				result++;
+			}
+		}
+		pthread_mutex_unlock(&datagram_lock);
+	}
 	for (index = 0; index < total && result > 0; index++)
 	{
 		/* (as select fails on a descriptor that is not open) */
