@@ -668,8 +668,8 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
     ])
     # The Android host's own files, with this port's replacements (the
     # three in port/switch/host take the place of port/android/host's) and
-    # posix_net.c and posix_upnp.c left out: host_net.c has the socket calls
-    # over libnx, and answers the desktop-only and UPnP ones itself.
+    # posix_net.c left out: host_net.c has the socket calls over libnx, and
+    # answers the desktop-only ones itself.
     host_sources = list(sorted((PORT_DIR / "host").glob("*.c")))
     # the stack switch into the guest, which has to be assembly: it moves the
     # stack pointer, which C cannot express
@@ -691,6 +691,17 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
     # PNGs, which the host decodes as a map loads (host_dk_hud.c)
     zlib_sources = [ZLIB_DIR / name for name in ZLIB_SOURCES]
     host_sources += zlib_sources
+    # internet play's UPnP: posix_upnp.c with the port's miniupnpc, as the
+    # desktop's and the PS5's (the library's own warnings are not ours)
+    upnp_sources = [LINUX_DIR / "src" / "posix_upnp.c", *miniupnpc_sources()]
+    host_sources += upnp_sources
+    upnp_cflags = " ".join([host_cflags, f"-I{MINIUPNPC_DIR / 'include'}", f"-I{MINIUPNPC_DIR / 'src'}",
+                            *MINIUPNPC_DEFINES,
+                            # (libnx has not these two: host_net.c's, which
+                            # answer as the IPv4 network has no scopes)
+                            "-Dif_nametoindex=switch_upnp_if_nametoindex",
+                            "-Dif_indextoname=switch_upnp_if_indextoname",
+                            f"-include {PORT_DIR / 'host' / 'host_upnp_names.h'}"])
     # the disc image reader, so a retail .iso on the card can be unpacked into
     # the maps folder by the port itself rather than copied there by hand. It is
     # the same source the desktop port and the guest use, built here without
@@ -712,6 +723,8 @@ def generate_switch_build(n: Writer, sln: Any) -> None:
             cflags = f'{host_cflags} -DHOST_DK_UAM_COMMIT=\\"{UAM_COMMIT[:12]}\\"'
         if source in zlib_sources:
             cflags = " ".join([host_cflags, f"-I{ZLIB_DIR}", *ZLIB_DEFINES])
+        if source in upnp_sources:
+            cflags = upnp_cflags + (" -w" if source.name != "posix_upnp.c" else "")
         if source.name == "host_dk_hud.c":
             cflags = f"{host_cflags} -I{ZLIB_DIR}"
         n.build(outputs=obj, rule="switch_host_cc", inputs=source, variables={"cflags": cflags},

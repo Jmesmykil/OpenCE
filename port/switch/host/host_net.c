@@ -7,7 +7,8 @@ libnx has BSD sockets over the console's bsd service - socket(), poll(),
 getaddrinfo() and the rest, with their headers in libnx's own include
 directory rather than newlib's, which is how an earlier version of this
 file came to believe there were none and answered every call with failure.
-host_main.c initialises them (socketInitializeDefault) at startup.
+host_main.c initialises them (socketInitialize, with twice the default
+buffer budget) at startup.
 
 The socket calls are posix_net.c's, which turns POSIX results into the
 Winsock ones the game expects, with three differences: no SOCK_CLOEXEC
@@ -15,9 +16,8 @@ Winsock ones the game expects, with three differences: no SOCK_CLOEXEC
 address found only by the route a UDP socket would take (there is no
 getifaddrs). posix_net.c itself is not compiled: the rest of it is the
 desktop's - command lines from /proc, a runtime directory, URL schemes,
-Discord's local socket - and UPnP (posix_upnp.c) needs miniupnpc, which
-devkitPro does not package. Those are answered below as having nothing to
-offer.
+Discord's local socket - which are answered below as having nothing to
+offer. UPnP is posix_upnp.c's, compiled here with the port's miniupnpc.
 */
 
 #include "host.h"
@@ -93,7 +93,8 @@ static __thread int last_error;
 
 /* Socket buffers on the console come out of one budget per process, which
 the bsd service is given when sockets are initialised (libnx's default: four
-times the largest TCP and UDP buffers, about 2.2 MB). Running out of it is
+times the largest TCP and UDP buffers, about 2.2 MB; host_main.c asks for
+eight times, about 4.4 MB). Running out of it is
 WSAENOBUFS to the game, which gives up whatever it was making - the first
 internet join failed that way, on creating its client - so it is always
 said. It is rare by nature, unlike the per-datagram failures, so saying it
@@ -629,23 +630,23 @@ posix_ulong posix_resolve_ipv4(const char *host)
 	return address;
 }
 
-/* ---------- UPnP */
+/* ---------- UPnP
 
-int posix_upnp_forward_udp(unsigned short port, unsigned short preferred_port, posix_ulong *external_address,
-	unsigned short *external_port, char *error, int error_size)
+posix_upnp.c's, with miniupnpc (tools/switch_build.py). libnx has neither
+of these, which miniupnpc names for an IPv6 address's scope: the console's
+network is IPv4's, which has none. */
+
+unsigned int switch_upnp_if_nametoindex(const char *name)
 {
-	(void)port;
-	(void)preferred_port;
-	(void)external_address;
-	(void)external_port;
-	if (error && error_size > 0)
-		snprintf(error, (size_t)error_size, "UPnP is not available on the Switch; forward the port on the router");
+	(void)name;
 	return 0;
 }
 
-void posix_upnp_stop_forwarding_udp(unsigned short external_port)
+char *switch_upnp_if_indextoname(unsigned int index, char *name)
 {
-	(void)external_port;
+	(void)index;
+	(void)name;
+	return NULL;
 }
 
 /* ---------- the Discord desktop client */
