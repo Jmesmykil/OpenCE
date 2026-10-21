@@ -7,8 +7,8 @@ libnx has BSD sockets over the console's bsd service - socket(), poll(),
 getaddrinfo() and the rest, with their headers in libnx's own include
 directory rather than newlib's, which is how an earlier version of this
 file came to believe there were none and answered every call with failure.
-host_main.c initialises them (socketInitialize, with twice the default
-buffer budget) at startup.
+host_main.c initialises them (socketInitialize, with four times the
+default buffer budget) at startup.
 
 The socket calls are posix_net.c's, which turns POSIX results into the
 Winsock ones the game expects, with three differences: no SOCK_CLOEXEC
@@ -93,15 +93,16 @@ static __thread int last_error;
 
 /* Socket buffers on the console come out of one budget per process, which
 the bsd service is given when sockets are initialised (libnx's default: four
-times the largest TCP and UDP buffers, about 2.2 MB; host_main.c asks for
-eight times, about 4.4 MB). Running out of it is
+times the largest TCP and UDP buffers, about 2.2 MB; host_main.c's is four
+times that). Running out of it is
 WSAENOBUFS to the game, which gives up whatever it was making - the first
 internet join failed that way, on creating its client - so it is always
 said. It is rare by nature, unlike the per-datagram failures, so saying it
 costs nothing in an ordinary run. */
 #define BUFFER_FAILURES_LOGGED 20
 /* the most a socket's buffer is set to (posix_socket_setsockopt): libnx's
-default tcp_tx_buf_max_size and tcp_rx_buf_max_size */
+default tcp_tx_buf_max_size and tcp_rx_buf_max_size (host_main.c's are
+larger only to make the budget larger) */
 #define SOCKET_BUFFER_LIMIT (256 * 1024)
 
 static int fail(void)
@@ -421,9 +422,9 @@ int posix_socket_setsockopt(int socket, int level, int name, const void *value, 
 	against the socket budget (fail(), above) when they are set, so two
 	sockets granted that much leave too little for the next one: joining
 	from the list opened the signalling brokers' connections as well, and
-	the game's own client then could not make its sockets. The console only
-	joins, and a joiner's traffic is the host's to one machine, so the
-	sizes are held to libnx's largest TCP buffer. */
+	the game's own client then could not make its sockets. A joiner's
+	traffic is the host's to one machine, and a host's to each machine is
+	less, so the sizes are held to libnx's default largest TCP buffer. */
 	if (host_level == SOL_SOCKET && (host_name == SO_SNDBUF || host_name == SO_RCVBUF) &&
 		value && length >= (int)sizeof(int) && *(const int *)value > SOCKET_BUFFER_LIMIT)
 	{

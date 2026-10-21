@@ -1216,17 +1216,23 @@ int main(int argc, char *argv[])
 	 * saw. That is the whole of why the previous attempts produced no output
 	 * despite deploying correctly.
 	 *
-	 * With twice libnx's socket buffer budget (sb_efficiency 8, the most:
-	 * about 4.4 MB rather than 2.2). Every socket's buffers come out of it
-	 * (host_net.c), and hosting an internet game did not have enough: the
-	 * four signalling brokers' connections, the tunnel, and the game's
-	 * server and client sockets left the server no room to take its own
-	 * client's connection, which the console answered with a reset
-	 * (WSAECONNRESET connecting to 127.0.0.1:5150). */
+	 * With four times libnx's socket buffer budget: sb_efficiency 8 (the
+	 * most) and TCP buffers up to 512 KB, about 8.8 MB rather than 2.2.
+	 * Every socket's buffers come out of it, and the console refuses a
+	 * connection it has no room for with a reset (WSAECONNRESET). Measured
+	 * with stand-in machines (tools/system_link_bots.py) joining a LAN game
+	 * the console hosted: libnx's default took 3 of them (hosting an
+	 * internet game failed outright, its own client reset connecting to
+	 * 127.0.0.1:5150, with the signalling brokers' connections open),
+	 * sb_efficiency 8 alone 22, and this 48 and more. The game's own
+	 * buffers stay held to 256 KB (host_net.c), so the larger maximum only
+	 * makes the budget larger. */
 	{
 		SocketInitConfig sockets = *socketGetDefaultInitConfig();
 
 		sockets.sb_efficiency = 8;
+		sockets.tcp_tx_buf_max_size = 0x80000;
+		sockets.tcp_rx_buf_max_size = 0x80000;
 		if (R_FAILED(socketInitialize(&sockets)))
 		{
 			host_logf(HOST_LOG_WARN, "sockets: the larger buffer budget was refused; using libnx's default");
