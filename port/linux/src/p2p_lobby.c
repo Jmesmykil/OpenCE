@@ -190,8 +190,9 @@ static struct
 	int republish_wanted;
 	unsigned long republish_time;
 
-	/* browsing */
+	/* browsing, and whether it just stopped (p2p_lobby_browse_ended) */
 	int browsing;
+	int browse_ended;
 	int query_wanted;
 	struct queued queue[MAXIMUM_QUEUED];
 	int queue_count;
@@ -911,6 +912,7 @@ void p2p_lobby_browse(int on)
 	if (on != lobby.browsing)
 	{
 		lobby.browsing = on;
+		lobby.browse_ended = !on;
 		if (!on)
 		{
 			memset(lobby.games, 0, sizeof(lobby.games));
@@ -942,6 +944,14 @@ void p2p_lobby_refresh(void)
 int p2p_lobby_browsing(void)
 {
 	return lobby.browsing;
+}
+
+int p2p_lobby_browse_ended(void)
+{
+	int ended = lobby.browse_ended;
+
+	lobby.browse_ended = 0;
+	return ended;
 }
 
 /* the order shown: the most players first; then those joining has not
