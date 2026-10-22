@@ -1,5 +1,21 @@
 # Changelog
 
+## Build 114
+
+- Switch: shaders compile on two threads, about three times as fast: a new console compiles the shared shaders in the background in a fraction of the time, and the menus stay at 60 frames a second meanwhile. (thelinkin3000)
+- Switch: a new console's first start waits about 3 seconds, not 30, before the menus. (thelinkin3000)
+- Switch: a level's first 10 seconds wait for its shaders instead of drawing the world a piece at a time; the first frames may hitch briefly, but every frame is whole. (thelinkin3000)
+- Switch: a faster start: the console's own shader list no longer holds the shaders the shared list has, so fewer are loaded before the menus. (thelinkin3000)
+- Switch: new shared shader keys, the campaign's and the stock multiplayer maps', so a new console compiles only what those maps need from its first start. (puginatux)
+- Android and PS5: shadows, dynamic lights, the sniper and pistol zoom's blur and cutscene blurs cost the GPU much less under Vulkan, as they already did on the Switch: shadows and lights are drawn only where they change the screen, and the blurs on a small copy of it. (thelinkin3000)
+- PS5: clicking the touch pad is Back, which the pad had none of (the scores in a match, Back in the menus). (thelinkin3000)
+
+### From OpenCE
+
+- Co-op: the Pillar of Autumn no longer softlocks. (eltanschauung)
+- Co-op: the gravity lift on The Silent Cartographer takes every player, not only the first two. (eltanschauung)
+- A little less work per frame: the high-res HUD setting is read once per change instead of at every texture. (bnunu)
+
 ## Build 113
 
 - Switch: hosting an internet game works: the console ran out of room for network connections and refused its own player's. (thelinkin3000)
