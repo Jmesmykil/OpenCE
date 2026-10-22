@@ -865,46 +865,119 @@ void halo_render_marker(char const *name)
 	(void)name;
 }
 
-/* (only the Switch's renderer clips: d3d8_dk.c) */
-void halo_texture_clip(unsigned char clip, float low, float high)
-{
-	(void)clip;
-	(void)low;
-	(void)high;
-}
+/* ---------- the GPU's savings the Switch's renderer made first (port/switch/guest/d3d8_dk.c)
+
+A shadow cast on the level and a dynamic light's pass draw the level's triangles again, much bigger than what they
+change: they are rasterized only inside the rectangle of the screen they can change (halo_draw_scissor), and the
+pixels left whose coordinates are outside the shadow's map or the light's box let go before the shader reads anything
+(halo_texture_clip, NV2A_PIXEL_KEY_CLIP in nv2a_psh_vk.c). The zoom's blur and a cutscene's blur are drawn on small
+copies of the screen (rasterizer_xbox_screen_effect.c), the zoom's blended over it by its own shader
+(NV2A_PIXEL_KEY_WARP_BLEND). The debug settings the Switch has turn each off: debug.gpu_draw_scissor,
+debug.gpu_texture_clip, debug.original_zoom and debug.original_blur. */
+
+/* the clip of the draws that follow: the lowest and highest coordinate as the stage samples it (0 to 1 across the
+texture), and whether to clip (the pixel parameters' alpha_reference.y to .w); the stage, and in three coordinates */
+static float texture_clip[3];
+static int texture_clip_stage;
+static int texture_clip_3d;
 
 void halo_texture_clip_stage(short stage, unsigned char three_dimensional, float low, float high)
 {
-	(void)stage;
-	(void)three_dimensional;
-	(void)low;
-	(void)high;
+	unsigned char clip = stage >= 0 && stage < 4;
+	/* debug.gpu_texture_clip: "on", "off" (never clipped), "wide" (clipped by limits nothing reaches: the clip's own
+	cost, apart from where), or "<low>,<high>": the limits to clip by, whatever the caller asks */
+	static int mode = -1;
+	static float set_low, set_high;
+
+	if (mode < 0)
+	{
+		const char *setting = config_string("debug.gpu_texture_clip");
+
+		mode = !strcmp(setting, "off") ? 0 : !strcmp(setting, "wide") ? 2 : 1;
+		if (mode == 1 && sscanf(setting, "%f,%f", &set_low, &set_high) == 2)
+			mode = 3;
+		if (mode != 1)
+			platform_log("texture clip: %s (debug.gpu_texture_clip)", setting);
+	}
+	if (mode == 0)
+		clip = FALSE;
+	else if (mode == 2)
+	{
+		low = -1000.0f;
+		high = 1000.0f;
+	}
+	else if (mode == 3)
+	{
+		low = set_low;
+		high = set_high;
+	}
+	texture_clip[0] = clip ? low : 0.0f;
+	texture_clip[1] = clip ? high : 0.0f;
+	texture_clip[2] = clip ? 1.0f : 0.0f;
+	texture_clip_stage = clip ? stage : 0;
+	texture_clip_3d = clip && three_dimensional;
 }
 
-/* (only the Switch's renderer narrows its scissor: d3d8_dk.c) */
+void halo_texture_clip(unsigned char clip, float low, float high)
+{
+	halo_texture_clip_stage(clip ? 0 : -1, FALSE, low, high);
+}
+
+/* the rectangle the draws that follow are rasterized in, if on (in the target's game pixels), as well as the
+viewport */
+static unsigned char draw_scissor_on;
+static float draw_scissor[4];
+
 void halo_draw_scissor(unsigned char on, float x0, float y0, float x1, float y1)
 {
-	(void)on;
-	(void)x0;
-	(void)y0;
-	(void)x1;
-	(void)y1;
+	static int enabled = -1;
+
+	if (enabled < 0)
+	{
+		enabled = config_boolean("debug.gpu_draw_scissor") != 0;
+		if (!enabled)
+			platform_log("draw scissor: off (debug.gpu_draw_scissor)");
+	}
+	draw_scissor_on = on && enabled;
+	draw_scissor[0] = x0;
+	draw_scissor[1] = y0;
+	draw_scissor[2] = x1;
+	draw_scissor[3] = y1;
 }
 
-/* (only the Switch's renderer draws the zoom's blur small: d3d8_dk.c) */
+/* the zoom's blend of its blur over the screen, for the draws that follow: the pixel key has
+NV2A_PIXEL_KEY_WARP_BLEND while it is on */
+static unsigned char warp_blend;
+
 unsigned char halo_screen_fast_warp(void)
 {
-	return 0;
+	static int on = -1;
+
+	if (on < 0)
+	{
+		on = !config_boolean("debug.original_zoom");
+		if (!on)
+			platform_log("zoom: as the game draws it (debug.original_zoom)");
+	}
+	return (unsigned char)on;
 }
 
 void halo_screen_warp_blend(unsigned char on)
 {
-	(void)on;
+	warp_blend = on;
 }
 
 unsigned char halo_screen_fast_blur(void)
 {
-	return 0;
+	static int on = -1;
+
+	if (on < 0)
+	{
+		on = !config_boolean("debug.original_blur");
+		if (!on)
+			platform_log("screen blur: as the game draws it (debug.original_blur)");
+	}
+	return (unsigned char)on;
 }
 
 /* display.anti_aliasing's FXAA over a window's 3D view (render.c calls this before the HUD and menus are drawn over it):
@@ -2203,6 +2276,11 @@ static void pixel_key_make(struct nv2a_pixel_shader_key *key)
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT0] = 0;
 	key->combiner_state[D3DRS_PSFINALCOMBINERCONSTANT1] = 0;
 	key->texture_modes = D3D__RenderState[D3DRS_PSTEXTUREMODES];
+	if (texture_clip[2] != 0.0f)
+		key->texture_modes |= NV2A_PIXEL_KEY_CLIP | ((unsigned long)texture_clip_stage << NV2A_PIXEL_KEY_CLIP_STAGE_SHIFT) |
+			(texture_clip_3d ? NV2A_PIXEL_KEY_CLIP_3D : 0);
+	if (warp_blend)
+		key->texture_modes |= NV2A_PIXEL_KEY_WARP_BLEND;
 	key_textures(key);
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
@@ -2737,6 +2815,22 @@ static void raster_state_make(struct vk_command_draw *draw, BOOL has_color, BOOL
 	draw->scissor[1] = (int32_t)y0;
 	draw->scissor[2] = (int32_t)(x1 - x0);
 	draw->scissor[3] = (int32_t)(y1 - y0);
+	/* (narrowed to the rectangle a draw changes anything in, if one is set: halo_draw_scissor; one with nothing left of
+	it on the screen is -1 wide, which the host draws nothing in, where 0 would be the GL's no scissor) */
+	if (draw_scissor_on)
+	{
+		long left = target_pixel(draw_scissor[0], 0), top = target_pixel(draw_scissor[1], 1);
+		long right = target_pixel(draw_scissor[2], 0), bottom = target_pixel(draw_scissor[3], 1);
+
+		left = left > x0 ? left : x0;
+		top = top > y0 ? top : y0;
+		right = right < x1 ? right : x1;
+		bottom = bottom < y1 ? bottom : y1;
+		draw->scissor[0] = (int32_t)left;
+		draw->scissor[1] = (int32_t)top;
+		draw->scissor[2] = right > left && bottom > top ? (int32_t)(right - left) : -1;
+		draw->scissor[3] = right > left && bottom > top ? (int32_t)(bottom - top) : -1;
+	}
 
 	state->color_format = has_color ? 1 : 0;
 	state->depth_format = has_depth ? 1 : 0;
@@ -2839,6 +2933,11 @@ static void pixel_parameters_make(struct vk_pixel_parameters *p, const float tex
 	p->fog_parameters[1] = dword_to_float(D3D__RenderState[D3DRS_FOGEND]);
 	p->fog_parameters[2] = dword_to_float(D3D__RenderState[D3DRS_FOGDENSITY]);
 	p->alpha_reference[0] = (float)(D3D__RenderState[D3DRS_ALPHAREF] & 0xff);
+	/* (the clip, which the pixel shader makes before anything else: its limits in the units the stage is sampled in,
+	0 to 1) */
+	p->alpha_reference[1] = texture_clip[0];
+	p->alpha_reference[2] = texture_clip[1];
+	p->alpha_reference[3] = texture_clip[2];
 	for (stage = 0; stage < D3DTSS_MAXSTAGES; stage++)
 	{
 		DWORD *state = D3D__TextureState[stage];
