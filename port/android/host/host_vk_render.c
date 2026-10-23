@@ -1891,6 +1891,16 @@ void host_vk_submit(uint32_t commands, uint32_t size)
 			if (header->size >= sizeof(struct vk_command_marker))
 				host_vk_profile_mark((const struct vk_command_marker *)header);
 			break;
+		case VK_COMMAND_HUD_PREPARE:
+			host_vk_hud_prepare_command((const struct vk_command_hud_prepare *)header, header->size);
+			break;
+		case VK_COMMAND_HUD_FORGET:
+			host_vk_hud_forget_command();
+			break;
+		case VK_COMMAND_HUD_IMAGE:
+			if (header->size >= sizeof(struct vk_command_hud_image))
+				host_vk_hud_image_command((const struct vk_command_hud_image *)header);
+			break;
 		default:
 			if (!said_unknown)
 				host_logf(HOST_LOG_ERROR, "vk: an unknown command, type %u, at offset %u; the rest of the hand-over is "

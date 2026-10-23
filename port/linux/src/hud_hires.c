@@ -706,11 +706,28 @@ static void *decode_thread_main(void *unused)
 }
 #endif
 
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+/* Android's Vulkan renderer has its sheets decoded by the host as a map loads (port/android/guest/xbox_textures_vk.c,
+port/android/host/host_vk_hud.c), and defines these; the OpenGL ES renderer's image, sharing this file, decodes each
+when first drawn, as before, and has these do nothing */
+void __attribute__((weak)) textures_hud_prepare(const long *assets, long count)
+{
+	(void)assets;
+	(void)count;
+}
+
+void __attribute__((weak)) textures_hud_forget(void)
+{
+}
+#endif
+
 void hud_hires_map_unloaded(void)
 {
 #ifdef HALO_SWITCH
 	/* (the host's sheets decoded for the map and not drawn) */
 	dk_hud_forget();
+#elif defined(HALO_ANDROID)
+	textures_hud_forget();
 #endif
 #ifdef HUD_HIRES_DECODE_AHEAD
 	long asset;
@@ -729,7 +746,7 @@ void hud_hires_map_unloaded(void)
 #endif
 }
 
-#if defined(HALO_SWITCH) && !defined(HUD_HIRES_DECODE_AHEAD)
+#if (defined(HALO_SWITCH) || defined(HALO_ANDROID)) && !defined(HUD_HIRES_DECODE_AHEAD)
 static long assets_queued[MAXIMUM_TEXTURES];
 #endif
 
@@ -784,6 +801,20 @@ void hud_hires_map_loaded(const long *assets, long count)
 			assets_queued[queued++] = assets[index];
 	}
 	dk_hud_prepare(assets_queued, queued);
+#elif defined(HALO_ANDROID)
+	/* (the Vulkan renderer's host decodes them: textures_hud_prepare. The titles' are decoded when first drawn) */
+	long index, queued = 0;
+
+	textures_hud_forget();
+	if (!config_boolean("display.high_res_hud"))
+		return;
+	for (index = 0; index < count; index++)
+	{
+		if (assets[index] >= 0 && assets[index] < hud_hires_asset_count() &&
+			!hud_hires_embedded[assets[index]].title)
+			assets_queued[queued++] = assets[index];
+	}
+	textures_hud_prepare(assets_queued, queued);
 #else
 	(void)assets;
 	(void)count;

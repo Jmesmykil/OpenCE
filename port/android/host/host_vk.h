@@ -263,6 +263,17 @@ void host_vk_profile_rendering_end(VkCommandBuffer command);
 /* the slot's command buffer about to end; presented: it is a frame shown */
 void host_vk_profile_frame_end(unsigned slot, VkCommandBuffer command, int presented);
 
+/* host_vk_hud.c: the high-res HUD's sheets, decoded by the host */
+void host_vk_hud_prepare_command(const struct vk_command_hud_prepare *command, uint32_t size);
+void host_vk_hud_forget_command(void);
+void host_vk_hud_image_command(const struct vk_command_hud_image *command);
+/* (host_vk_texture.c) a 2D BGRA image of id made with all its levels, from host memory (the largest first, one after
+another); 0 if it could not be */
+int host_vk_texture_from_levels(uint32_t id, unsigned width, unsigned height, unsigned levels, const unsigned char *texels);
+/* (host_vk_data.c) size bytes placed in the frame's upload ring, for a copy the frame makes: where they are to be written,
+and the buffer and offset the GPU reads them from; NULL if none can be made */
+unsigned char *host_vk_data_place(VkDeviceSize size, VkBuffer *buffer, VkDeviceSize *offset);
+
 /* host_vk_visibility.c (phase 6): the visibility tests, as occlusion queries */
 void host_vk_visibility_start(void);
 void host_vk_visibility_begin(void);

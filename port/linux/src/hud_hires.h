@@ -103,6 +103,10 @@ unsigned long hud_hires_placeholder_serial(void);
 /* whether its red holds exact segment thresholds, read unfiltered (d3d8_gl.c,
 nv2a_psh.c: point_threshold) */
 int hud_hires_override_point_threshold(long asset);
+/* Android's Vulkan renderer: a map's sheets handed to its host to decode (port/android/guest/xbox_textures_vk.c), and
+those not drawn let go; nothing in the OpenGL ES renderer's image (weak defaults, hud_hires.c) */
+void textures_hud_prepare(const long *assets, long count);
+void textures_hud_forget(void);
 
 #if defined(HALO_SWITCH) || defined(HALO_ANDROID) || defined(HALO_PS5)
 /* the deko3d and Vulkan renderers': an 8-bit RGBA PNG's pixels (malloc'd, red first,

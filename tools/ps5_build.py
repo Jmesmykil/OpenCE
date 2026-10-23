@@ -52,6 +52,7 @@ from typing import Any, Dict, List, Optional
 
 from .android_build import GLSLANG_DIR as ANDROID_GLSLANG_DIR
 from .android_build import GLSLANG_TAG, GLSLANG_URL, MUSL_URL, MUSL_VERSION, fetch_third_party, generate_guest_image
+from .android_build import ZLIB_DEFINES, ZLIB_DIR, ZLIB_SOURCES
 from .guest_arch import X32
 from .linux_build import MBEDTLS_DIR, MINIUPNPC_DEFINES, MINIUPNPC_DIR, miniupnpc_sources, updater_defines
 from .ninja_syntax import Writer, escape
@@ -97,7 +98,7 @@ SHARED_HOST_FILES = ("host_arch.c", "host_common.c", "host_loader.c", "host_thre
 # host_vk_driver.c (port/ps5/host/host_vk_driver_ps5.c is the console's) and
 # the probe, host_vk_probe.c
 SHARED_RENDERER_FILES = ("host_vk.c", "host_vk_data.c", "host_vk_draw.c", "host_vk_post.c", "host_vk_present.c",
-                         "host_vk_profile.c", "host_vk_render.c", "host_vk_shaders.c", "host_vk_texture.c",
+                         "host_vk_hud.c", "host_vk_profile.c", "host_vk_render.c", "host_vk_shaders.c", "host_vk_texture.c",
                          "host_vk_visibility.c")
 # posix.h's helpers (port/linux/src) the game imports, as the Linux host
 # compiles them (port/ps5/PS5.md, phases 2 and 5), and the Linux updater's
@@ -662,6 +663,8 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
         # calls in the shared files bind to SDL2's of the same names)
         f"-isystem {mesa / 'include'}", *sdl2_flags, f"-isystem {root / THIRD_PARTY / 'SDL3' / 'include'}",
         f"-I{glslang_source}",
+        # (the port's zlib, its names z_: the high-res HUD's sheets, host_vk_hud.c)
+        f"-I{root / ZLIB_DIR}",
     ])
     miniupnpc_cflags = " ".join([f"-I{root / MINIUPNPC_DIR / 'include'}", f"-I{root / MINIUPNPC_DIR / 'src'}",
                                  *MINIUPNPC_DEFINES, "-DNO_GETADDRINFO", "-Dgethostbyname=ps5_upnp_gethostbyname",
@@ -731,6 +734,12 @@ def _generate(n: Writer, sln: Any, config_path: Path) -> None:
     # if_nametoindex, if_indextoname, getnameinfo and gai_strerror, which no
     # module a title loads exports, answered by host_net_ps5.c; Mbed TLS with the PS5's configuration added
     # (mbedtls_config_ps5.h: the console's random numbers)
+    # the port's zlib, for the high-res HUD's sheets the renderer's host half decodes (host_vk_hud.c), as Android's host
+    for name in ZLIB_SOURCES:
+        obj = obj_dir / "zlib" / (name + ".o")
+        n.build(outputs=obj, rule="ps5_host_cc", inputs=root / ZLIB_DIR / name,
+                variables={"cflags": " ".join([host_cflags, *ZLIB_DEFINES, "-w"])})
+        objects.append(obj)
     for source in miniupnpc_sources():
         obj = obj_dir / "miniupnpc" / (source.name + ".o")
         n.build(outputs=obj, rule="ps5_host_cc", inputs=root / source,
