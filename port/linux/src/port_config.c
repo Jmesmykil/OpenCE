@@ -958,6 +958,14 @@ static const struct config_setting config_settings[] =
 		"(the screen's own), \"2160\", \"1440\", \"1080\", \"720\" or \"480\" (the game's\n"
 		"own), in the screen's shape. More lines are sharper and work the GPU\n"
 		"harder. Changes at once." },
+	{ "debug.profile_run", _config_boolean, "false", "HALO_PROFILE_RUN", _environment_set_is_true, _platform_android,
+		"Profile each run, to send to the developers: a folder of its own in the\n"
+		"phone's Download/halo_profiles (named for the day and time it started:\n"
+		"DDMMYYYY_HHMMSS) gets where the game's threads spend their time\n"
+		"(profile.bin, sampled debug.profile_hz times a second, 500 if that is\n"
+		"0), the GPU's time by part of the frame (gpu.txt, under Vulkan), the\n"
+		"log and the phone's details (run.txt). Android 9 and 10 ask for storage\n"
+		"once. Costs a little speed. Takes effect the next start." },
 #endif
 #ifdef HALO_SWITCH
 	/* (720 by default: a handheld console's own lines, 1280x720) */

@@ -858,11 +858,30 @@ static BOOL targets_bind(BOOL *has_depth)
 	return TRUE;
 }
 
-/* the part of a frame being drawn: only the Switch's renderer keeps it
-(port/switch/guest/d3d8_dk.c) */
+/* the part of a frame being drawn, for the GPU's time by part (host_vk_profile.c): told the host only while a profile
+is recorded (debug.profile_run, Android's), as the Switch's renderer keeps it (port/switch/guest/d3d8_dk.c) */
 void halo_render_marker(char const *name)
 {
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+	static int profiling = -1;
+	struct vk_command_marker *command;
+	size_t length = 0;
+
+	if (profiling < 0)
+		profiling = config_boolean("debug.profile_run") ? 1 : 0;
+	if (!profiling)
+		return;
+	command = stream_command(VK_COMMAND_MARKER, sizeof(*command));
+	while (name[length] && length < sizeof(command->name) - 1)
+	{
+		command->name[length] = name[length];
+		length++;
+	}
+	while (length < sizeof(command->name))
+		command->name[length++] = 0;
+#else
 	(void)name;
+#endif
 }
 
 /* ---------- the GPU's savings the Switch's renderer made first (port/switch/guest/d3d8_dk.c)

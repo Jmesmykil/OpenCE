@@ -146,7 +146,10 @@ VkCommandBuffer host_vk_frame_command(void)
 		HOST_VK_CHECK(vkResetCommandPool(B.device, frame->pool, 0));
 		begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		if (HOST_VK_CHECK(vkBeginCommandBuffer(frame->command, &begin)))
+		{
 			frame->recording = 1;
+			host_vk_profile_frame_begin((unsigned)(frame - B.frames), frame->command);
+		}
 	}
 	return frame->command;
 }
@@ -160,6 +163,7 @@ static void frame_submit(uint32_t wait_image)
 
 	if (!frame->recording)
 		return;
+	host_vk_profile_frame_end((unsigned)(frame - B.frames), frame->command, wait_image != UINT32_MAX);
 	frame->recording = 0;
 	if (!HOST_VK_CHECK(vkEndCommandBuffer(frame->command)))
 		return;
@@ -1718,6 +1722,7 @@ static int device_create(void)
 	B.state = 1;
 	host_vk_services_start();
 	host_vk_visibility_start();
+	host_vk_profile_initialize();
 	if (host_vk_self_test)
 		clears_selftest();
 	host_logf(HOST_LOG_INFO, "vk: device ready: queue family %u, colour targets %s, depth targets %s, blit filter %s, "
@@ -1861,6 +1866,10 @@ void host_vk_submit(uint32_t commands, uint32_t size)
 		case VK_COMMAND_TEST_DRAW:
 			if (header->size >= sizeof(struct vk_command_test_draw))
 				command_test_draw((const struct vk_command_test_draw *)header);
+			break;
+		case VK_COMMAND_MARKER:
+			if (header->size >= sizeof(struct vk_command_marker))
+				host_vk_profile_mark((const struct vk_command_marker *)header);
 			break;
 		default:
 			if (!said_unknown)

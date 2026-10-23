@@ -96,7 +96,7 @@ as a Vulkan function */
 	X(vkCmdSetBlendConstants) X(vkCmdSetStencilCompareMask) X(vkCmdSetStencilWriteMask) X(vkCmdSetStencilReference) \
 	X(vkCreateSampler) X(vkDestroySampler) X(vkCmdCopyBufferToImage) X(vkCmdCopyImage) \
 	X(vkCreateQueryPool) X(vkDestroyQueryPool) X(vkCmdResetQueryPool) X(vkCmdBeginQuery) X(vkCmdEndQuery) \
-	X(vkCmdCopyQueryPoolResults)
+	X(vkCmdCopyQueryPoolResults) X(vkCmdWriteTimestamp) X(vkGetQueryPoolResults)
 
 #define X(name) extern PFN_##name name __attribute__((visibility("hidden")));
 HOST_VK_DEVICE_FUNCTIONS(X)
@@ -242,6 +242,16 @@ void host_vk_texture_frame_reset(unsigned slot);
 struct host_vk_image *host_vk_image_get(uint32_t id);
 unsigned host_vk_texture_images(void);
 unsigned host_vk_texture_megabytes(void);
+
+/* host_vk_profile.c: the GPU's time by part of the frame, while a profile is recorded (debug.profile_run: the folder
+gpu.txt goes in, set before the device is made; empty, off). Each is nothing while it is off. */
+extern char host_vk_profile_folder[512];
+void host_vk_profile_initialize(void);
+/* the slot's command buffer just begun (its fence passed): its last frame read, its queries reset */
+void host_vk_profile_frame_begin(unsigned slot, VkCommandBuffer command);
+void host_vk_profile_mark(const struct vk_command_marker *command);
+/* the slot's command buffer about to end; presented: it is a frame shown */
+void host_vk_profile_frame_end(unsigned slot, VkCommandBuffer command, int presented);
 
 /* host_vk_visibility.c (phase 6): the visibility tests, as occlusion queries */
 void host_vk_visibility_start(void);

@@ -248,6 +248,12 @@ void host_debug_start_sampler(const char *setting);
 /* config.toml's debug.profile_hz: samples of every guest thread a second, into
 profile.bin in data_root; 0 does nothing */
 void host_debug_start_profiler(int hz, const char *data_root);
+/* a frame shown, `nanoseconds` after the last (the Vulkan renderer's present: host_vk_profile.c), for the profile's
+slow frames; nothing unless the profiler runs */
+void host_debug_profile_frame(uint64_t nanoseconds);
+/* the run's profile folder, for the Vulkan renderer's gpu.txt (host_vk_profile.c); empty when no profile is
+recorded (debug.profile_run: host_main.c) */
+extern char host_vk_profile_folder[512];
 
 /* ---------- the Vulkan probe (host_vk_probe.c; port/android/VULKAN.md, phase 0) */
 

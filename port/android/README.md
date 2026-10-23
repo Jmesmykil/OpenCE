@@ -238,6 +238,7 @@ These settings are only for Android:
 | `debug.sample_seconds` | Refer to "Find problems". |
 | `debug.memory_watch` | `true` (the default): the app notices the game's writes to textures and vertices by page protection. `false`: it compares page contents once a frame instead, which is slower. Refer to "Limits". |
 | `debug.profile_hz` | Refer to "Find problems". |
+| `debug.profile_run` | `true`: each start records a profile of the run into its own folder, `Download/halo_profiles/DDMMYYYY_HHMMSS` (the day and time it started), to send as it is. Refer to "Find problems". `false` (the default): none. Takes effect the next time the game starts. |
 | `display.renderer` | How the game draws: `"vulkan"` (the default; OpenGL ES if Vulkan cannot start) or `"gl"` (OpenGL ES over the phone's driver). Takes effect the next time the game starts. The line below the version number in the main menu shows the renderer that runs. VIDEO SETUP's GRAPHICS BACKEND sets it. Refer to "Graphics: OpenGL ES and Vulkan". |
 | `display.vk_driver` | The Vulkan driver of the Vulkan renderer (and of the Vulkan probe). Empty (the default): the phone's own. `"auto"`: Turnip on an Adreno, which the app downloads (refer to "Turn on Turnip"). Otherwise the file name of a driver archive in the data folder. VIDEO SETUP's VULKAN DRIVER sets `""` (STOCK) or `"auto"` (TURNIP). |
 | `debug.vk_probe` | Refer to "Find problems". |
@@ -747,6 +748,27 @@ assembly of the port is necessary:
   driver and everything else, and the milliseconds of CPU for each frame.
   `--from` and `--to` select seconds of the run. Set `gpu_stats = true` too,
   for the frames per second.
+- Set `profile_run = true` in `[debug]` of `config.toml` to profile a
+  player's run without adb. Each start then makes a folder,
+  `Download/halo_profiles/DDMMYYYY_HHMMSS`, that a file manager or a USB
+  cable reaches, and the game writes into it:
+  - `profile.bin`: the samples of `profile_hz` (500 a second if it is `0`),
+    and the length of each frame shown;
+  - `gpu.txt`: under Vulkan, every 300 frames, the GPU's time for each part
+    of the frame (the sky, the objects, the HUD...) and the time between
+    presents;
+  - `halo.log`: the log of the run, as logcat has it;
+  - `run.txt` and `config.toml`: the build, the phone, its GPU and driver,
+    and the settings.
+
+  Android 9 and 10 ask once for access to the storage; without it, the
+  folder is `files/halo_profiles/` in the data folder. The player sends
+  the folder, and `tools/android_profile_report.py <folder>` prints the
+  same report as for `profile.bin`, with the slowest frames and where each
+  thread was during each. It needs the game image of the same build:
+  `--apk` takes it from that build's APK (a release's, from its zip), or
+  `--elf` names it (`halo_guest_vk.elf`, or `halo_guest.elf` for OpenGL ES). The
+  profile costs some speed: compare runs with it on.
 - Set `vk_probe = "all"` in `[debug]` of `config.toml` to run the Vulkan
   probe (port/android/VULKAN.md, phase 0) instead of the game. The value
   can be a list of `caps`, `memory`, `compile`, `pipelines`, `draw` and `present`.

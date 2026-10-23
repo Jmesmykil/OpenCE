@@ -41,6 +41,7 @@ enum
 	VK_COMMAND_VISIBILITY_END,
 	VK_COMMAND_ANTI_ALIAS,
 	VK_COMMAND_BLIT,
+	VK_COMMAND_MARKER,
 };
 
 /* a surface's kind, as the host makes its image */
@@ -119,6 +120,16 @@ struct vk_command_blit
 	struct vk_surface destination;
 	uint32_t from[4];
 	uint32_t to[4];
+};
+
+/* the part of the frame the game draws from here on (halo_render_marker: "sky", "objects", "hud"...), for the GPU's time
+by part (host_vk_profile.c); sent only while a profile is recorded (debug.profile_run) */
+#define VK_MARKER_NAME_SIZE 32
+
+struct vk_command_marker
+{
+	struct vk_command_header header;
+	char name[VK_MARKER_NAME_SIZE];
 };
 
 /* shows the back buffer, letterboxed to the display */
