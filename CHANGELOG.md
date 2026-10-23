@@ -1,5 +1,18 @@
 # Changelog
 
+## Build 117
+
+- Switch: 64-player matches run much faster: Damnation from 44 to about 60 frames a second, Chill Out from 38 to about 59, Blood Gulch from 51 to 60, with far fewer stutters (Chill Out's frames over 33 ms from 90 to 5 in a 45-second fight). (thelinkin3000)
+- Android: busy matches are faster too: Chill Out with 64 players from 92 to 109 frames a second on a Galaxy Z Fold. (thelinkin3000)
+- Particles that are not attached to anything (sparks, casings, debris) move 30 times a second, as on the Xbox, drawn smoothly between their steps, and those off the screen less often: their collision tests were the largest cost of a big firefight on every platform. debug.original_particles moves them every frame. (thelinkin3000)
+- At most 4096 particles are alive at once (2048 on the Switch), the oldest making way for the new ones, so fresh impacts always have their sparks; the Xbox's limit was 1024. display.particle_limit sets it, 0 for the full 8192. (thelinkin3000)
+- The 8 biggest dynamic lights on the screen (muzzle flashes, plasma, explosions) light the level, and the 2 biggest add their shine to it, the first-person weapon's first; every light still lights the players and objects near it. display.dynamic_light_limit and display.specular_light_limit set them, 0 for every light as on the Xbox. (thelinkin3000)
+- Switch: online and local games ask the console's network service far less often: the game no longer waits on it once or twice a frame to learn there is nothing to read. (thelinkin3000)
+- The game no longer waits for the sound mixer every frame, nor for long when a sound starts or stops, which made busy fights hitch. (thelinkin3000)
+- A bullet's mark on a wall no longer costs a check of every mark in the game, which only debug builds now make. (thelinkin3000)
+- Player names over heads test their line of sight once a tick, and only for players in range and on the screen. (thelinkin3000)
+- Switch: Custom Edition maps no longer fail to load now and then at startup ("Custom Edition's tag cache range is taken"). (thelinkin3000)
+
 ## Build 116
 
 - Android: anti-aliasing (MSAA) costs much less on phones whose driver can keep the samples in the GPU's own tile memory (Adreno, Mali): with MSAA 4x, busy multiplayer maps run about 15% faster (Damnation 85 → 97 frames a second, Chill Out 64 → 73, with 64 players on a Galaxy Z Fold). debug.original_multisample turns it off. (thelinkin3000)
