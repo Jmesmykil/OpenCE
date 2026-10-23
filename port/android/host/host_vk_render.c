@@ -148,6 +148,7 @@ VkCommandBuffer host_vk_frame_command(void)
 		if (HOST_VK_CHECK(vkBeginCommandBuffer(frame->command, &begin)))
 		{
 			frame->recording = 1;
+			host_vk_visibility_frame_begin((unsigned)(frame - B.frames), frame->command);
 			host_vk_profile_frame_begin((unsigned)(frame - B.frames), frame->command);
 		}
 	}

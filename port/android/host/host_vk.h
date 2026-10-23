@@ -275,6 +275,8 @@ void host_vk_visibility_close(VkCommandBuffer command);
 void host_vk_visibility_frame_end(VkCommandBuffer command);
 /* the frame slot's fence has passed: its tests' counts become the slots' latest */
 void host_vk_visibility_retired(unsigned slot);
+/* the frame slot's command buffer just begun: its tests' queries reset, outside any rendering */
+void host_vk_visibility_frame_begin(unsigned slot, VkCommandBuffer command);
 
 /* host_vk_draw.c (phase 6): the mip composites */
 void host_vk_composite_command(const struct vk_command_composite *command);

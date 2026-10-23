@@ -94,6 +94,8 @@ struct benchmark_stage
 	double average_fps, low_fps, median_ms, p99_ms, longest_ms;
 	long over_33;
 	boolean timed_out;
+	/* why it was not measured (its game ended before it was, or never began), or empty */
+	char failed[64];
 };
 
 static struct
@@ -270,6 +272,11 @@ static void benchmark_write(void)
 	{
 		struct benchmark_stage const *stage = &benchmark.stages[index];
 
+		if (stage->failed[0])
+		{
+			fprintf(file, "%-12s not measured: %s\n", stage->map, stage->failed);
+			continue;
+		}
 		fprintf(file, "%-12s %7.1f %7ld %8.1f %8.1f %9.2f %8.2f %8.2f %8ld%s\n", stage->map, stage->seconds,
 			stage->frames, stage->average_fps, stage->low_fps, stage->median_ms, stage->p99_ms, stage->longest_ms,
 			stage->over_33, stage->timed_out ? "  (the player had no control: measured anyway)" : "");
@@ -415,6 +422,21 @@ void benchmark_update(
 		benchmark.state_seconds = 0.0;
 		break;
 	case _benchmark_loading:
+		/* (a game that ended before it was measured, as a local game whose host went down, or one that never began:
+		the next map, this one's line saying so) */
+		if (main_menu_loaded && ((!stage->campaign && benchmark.started && benchmark.state_seconds >= 10.0) ||
+			benchmark.state_seconds >= CONTROL_TIMEOUT_SECONDS))
+		{
+			snprintf(stage->failed, sizeof(stage->failed), "%s", benchmark.started ?
+				"its game ended at the main menu before it was measured" : "it did not begin");
+			platform_log("benchmark: %s: %s", stage->map, stage->failed);
+			/* (at the main menu already: nothing to leave; the next map's start sets its own game up) */
+			bots_set_count_override(-1);
+			benchmark.stage++;
+			benchmark.state = _benchmark_menu;
+			benchmark.state_seconds = 0.0;
+			break;
+		}
 		if (!stage->campaign && main_menu_loaded)
 			benchmark_multiplayer_setup(stage);
 		/* (each cinematic skipped while it can be, as a button press would) */
