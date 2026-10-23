@@ -1,5 +1,13 @@
 # Changelog
 
+## Build 115
+
+- Switch: a console whose clock is wrong is told so at the start and in the server browser, with how far off it is: the server browser shows no internet games while the clock is more than an hour off, which homebrew consoles that never reach Nintendo often are. (thelinkin3000)
+- The server browser says how many games it hears but does not show, and why: on a newer or test version, or with a wrong clock. (thelinkin3000)
+- The maps and Custom Edition maps can be read from other folders: game.maps.path and game.custom_maps.path in config.toml. On the Switch, a maps folder named there without the maps stops the game at the start with an error. (thelinkin3000)
+- The map lists open much faster with many Custom Edition maps, and opened again, they only look at the maps that are new or changed. (thelinkin3000)
+- Switch: a start that cleans up a large shader cache takes a fraction of a second instead of half a minute. (thelinkin3000)
+
 ## Build 114
 
 - Switch: shaders compile on two threads, about three times as fast: a new console compiles the shared shaders in the background in a fraction of the time, and the menus stay at 60 frames a second meanwhile. (thelinkin3000)
