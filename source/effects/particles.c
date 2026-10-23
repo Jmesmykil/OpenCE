@@ -227,12 +227,20 @@ Switch's game thread. Each such particle keeps where it was at the tick
 before, and is drawn between the two by the time into the tick
 (particle_render_position): a tick behind, as the objects are drawn
 (render_interpolation.c). A new particle stands at its start until its
-first tick, as on the Xbox. debug.original_particles moves them each frame,
-as before. The slots are by the particle's absolute index, with its whole
-datum index to tell a reused slot; none of it is game state. */
+first tick, as on the Xbox. One not drawn since the tick before (off the
+screen, behind a wall, too small to draw) moves once every
+PARTICLE_UNSEEN_TICKS ticks instead, by all the time it was owed: unseen
+for MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT ticks it is deleted anyway, and
+in a 64-player game most of a match's sparks and casings are another
+player's. debug.original_particles moves them each frame, as before. The
+slots are by the particle's absolute index, with its whole datum index to
+tell a reused slot; none of it is game state. */
+#define PARTICLE_UNSEEN_TICKS 4
+
 static boolean particles_each_frame;
 static long particle_tick_owner[HALO_PORT_MAXIMUM_PARTICLES];
 static real_point3d particle_tick_previous[HALO_PORT_MAXIMUM_PARTICLES];
+static short particle_tick_owed[HALO_PORT_MAXIMUM_PARTICLES];
 
 static char const *particle_effect_marker_names[NUMBER_OF_PARTICLE_EFFECT_MARKERS] =
 {
@@ -1085,10 +1093,30 @@ void particles_update(
 					drawn between the two ticks' positions) */
 					else if (particles_update_ticks > 0)
 					{
-						particle_tick_previous[slot] = particle->position;
-						particle_tick_owner[slot] = particle_index;
-						particle_update_physics(particle_index,
-							(real)particles_update_ticks / (real)TICKS_PER_SECOND);
+						/* (drawn since the tick before this frame's: the frame index
+						drawn at that tick, particles_tick_frame_indices, past the
+						ticks this frame has recorded) */
+						long seen_since = particles_tick_frame_indices[
+							(particles_tick_frame_head + NUMBEROF(particles_tick_frame_indices) -
+								MIN(particles_update_ticks, (long)NUMBEROF(particles_tick_frame_indices) - 1)) %
+							NUMBEROF(particles_tick_frame_indices)];
+						long ticks = particles_update_ticks;
+
+						if (particle_tick_owner[slot] == particle_index)
+							ticks += particle_tick_owed[slot];
+						if (particle_tick_owner[slot] == particle_index &&
+							particle->last_rendered_frame_index < seen_since &&
+							ticks < PARTICLE_UNSEEN_TICKS)
+						{
+							particle_tick_owed[slot] = (short)ticks;
+						}
+						else
+						{
+							particle_tick_previous[slot] = particle->position;
+							particle_tick_owner[slot] = particle_index;
+							particle_tick_owed[slot] = 0;
+							particle_update_physics(particle_index, (real)ticks / (real)TICKS_PER_SECOND);
+						}
 					}
 				}
 			}
