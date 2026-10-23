@@ -780,6 +780,11 @@ static const struct config_setting config_settings[] =
 		"Sentry project (port/windows/src/win32_crash.c): \"yes\" sends them, \"no\"\n"
 		"never does, \"ask\" asks at the next crash and writes the answer here." },
 
+	{ "display.particle_limit", _config_integer, "2048", "HALO_PARTICLE_LIMIT", _environment_value, _platform_all,
+		"The most particles (sparks, smoke, casings, debris) alive at once; a new\n"
+		"one past it is not made, as on the Xbox, whose limit was 1024. 0 for the\n"
+		"port's own 8192 (a 64-player firefight fills them, and every one costs\n"
+		"the processor and the GPU). Changes at once." },
 	{ "debug.original_particles", _config_boolean, "false", "HALO_ORIGINAL_PARTICLES", _environment_value, _platform_all,
 		"Move the particles that are not attached to an object (sparks, casings,\n"
 		"debris) at every frame drawn, as before, rather than once a 30 Hz tick\n"

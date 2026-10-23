@@ -237,6 +237,14 @@ slots are by the particle's absolute index, with its whole datum index to
 tell a reused slot; none of it is game state. */
 #define PARTICLE_UNSEEN_TICKS 4
 
+/* port: display.particle_limit, the most particles alive at once (0: the
+pool's, HALO_PORT_MAXIMUM_PARTICLES; the Xbox's was 1024): a new one past it
+is not made, as the Xbox's pool, full, made none. With 64 players in a small
+map the pool's 8192 filled, and the particles were 30% of the Switch's game
+thread. Read each frame; how many lived is said every 10 s of play. */
+static long particles_limit;
+static long particles_refused;
+
 static boolean particles_each_frame;
 static long particle_tick_owner[HALO_PORT_MAXIMUM_PARTICLES];
 static real_point3d particle_tick_previous[HALO_PORT_MAXIMUM_PARTICLES];
@@ -893,6 +901,11 @@ void particle_new(
 		return;
 	}
 
+	if (particles_limit > 0 && particle_data->actual_count >= particles_limit)
+	{
+		particles_refused++;
+		return;
+	}
 	particle_index = datum_new(particle_data);
 
 	if (particle_index == NONE)
@@ -1036,6 +1049,28 @@ void particles_update(
 	long particle_index;
 
 	profile_enter(particles_update_section);
+
+	{
+		extern long config_integer(const char *name);
+		extern void platform_log(const char *format, ...);
+		static long counted_frames, counted_alive, counted_most;
+		static real counted_seconds;
+
+		particles_limit = config_integer("display.particle_limit");
+		counted_frames++;
+		counted_alive += particle_data->actual_count;
+		counted_most = MAX(counted_most, (long)particle_data->actual_count);
+		counted_seconds += dt;
+		if (counted_seconds >= 10.0f)
+		{
+			if (counted_most > 0)
+				platform_log("particles: %.0f alive on average, %ld the most; %ld not made past display.particle_limit (%ld)",
+					(double)counted_alive / counted_frames, counted_most, particles_refused, particles_limit);
+			counted_frames = counted_alive = counted_most = 0;
+			particles_refused = 0;
+			counted_seconds = 0.0f;
+		}
+	}
 
 	{
 		long tick;
