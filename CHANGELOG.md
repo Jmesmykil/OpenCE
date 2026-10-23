@@ -1,5 +1,30 @@
 # Changelog
 
+## Build 116
+
+- Android: anti-aliasing (MSAA) costs much less on phones whose driver can keep the samples in the GPU's own tile memory (Adreno, Mali): with MSAA 4x, busy multiplayer maps run about 15% faster (Damnation 85 → 97 frames a second, Chill Out 64 → 73, with 64 players on a Galaxy Z Fold). debug.original_multisample turns it off. (thelinkin3000)
+- Android and PS5: lens flares and the sun's glow no longer stall the GPU under Vulkan: the opening of The Pillar of Autumn, which ran at about 10 frames a second on a Galaxy Z Fold, now runs at 120. (thelinkin3000)
+- Android: the frame breaks off less often under Vulkan, each break costing a phone's GPU about a millisecond: the sun's glow and the water's ripples are made at the end of the frame, screen clears come free with the next drawing, and a shadow map is made readable as soon as it is drawn. (thelinkin3000)
+- Android and PS5: the GPU savings of Build 114 (shadows and lights drawn only where they change the screen) now fully take effect; a missing setting had left part of them off. (thelinkin3000)
+- Android: the high-res HUD is prepared while a map loads, as on the Switch, instead of during play. (thelinkin3000)
+- The steam from the cryo tube at the start of the campaign, and other blurs drawn on a small copy of the screen, are smooth again instead of blocky. (thelinkin3000)
+- Up to 63 bots in a local game. (thelinkin3000)
+- A built-in benchmark on every platform: debug.benchmark = "standard" in config.toml plays five campaign levels and four multiplayer maps with 63 bots, and writes the frame rates to benchmark.txt. (thelinkin3000)
+- Android: debug.profile_run = true records a profile of each run (CPU, GPU time, logs, benchmark) into its own folder in Download/halo_profiles, ready to send with a report. (thelinkin3000)
+
+### From OpenCE
+
+- Network version 36: this build plays online only with other builds of this version or newer. (bnunu)
+- New gametypes: SWAT, Infection, Gun Game and Hardcore, in Select Gametype's OPENCE bank, and an OPENCE OPTIONS screen in the gametype editor. (MrBruh)
+- In network games, the shield effects are the host's choice. (bnunu)
+- Co-op: the host can make the players' AI allies immune to their fire. (Guven)
+- Co-op: clients break, and see broken, the map's scenery shields as the host does, and their tripmine hits and explosions count on the host. (Guven)
+- Co-op: a client taken by a teleport lands with their feet on the floor. (Jonas Volman)
+- Custom Edition HUDs: replacements, ammo counters, meters and prompts are drawn right, with or without the high-res HUD (OpenGL renderers). (chestahh)
+- Android, OpenGL ES: no more stretched or missing geometry on affected phones, and Custom Edition maps keep their textures. (chestahh)
+- Android, OpenGL ES: phones without DXT1 texture support get those textures as ASTC. (Jonas Volman)
+- The PC vehicle set shows its name and help instead of <missing string>. (bnunu)
+
 ## Build 115
 
 - Switch: a console whose clock is wrong is told so at the start and in the server browser, with how far off it is: the server browser shows no internet games while the clock is more than an hour off, which homebrew consoles that never reach Nintendo often are. (thelinkin3000)
