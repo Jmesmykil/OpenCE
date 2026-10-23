@@ -1816,11 +1816,94 @@ static void light_get_bounding_sphere(
 	return;
 }
 
+/* port: display.dynamic_light_limit, the most dynamic lights (muzzle
+flashes, plasma bolts, explosions) whose light the level is drawn again for
+in a frame, diffuse and specular (0: as the Xbox, every one rendered). Each
+redraws the level's surfaces it reaches twice: with 64 players firing in a
+small map, the Switch's GPU spent 7.6 of its 15.5 ms a frame on them. The
+ones kept are the largest as seen from the camera (radius over distance);
+the first-person weapon's own are always. The objects' lighting, which the
+rasterizer is given every light for, is not changed. */
+static boolean port_dynamic_light_kept[MAXIMUM_RENDERED_LIGHTS];
+
+static void port_dynamic_lights_choose(
+	void)
+{
+	extern long config_integer(const char *name);
+	static long chosen_frame = NONE;
+	real sizes[MAXIMUM_RENDERED_LIGHTS];
+	real threshold = -1.0f;
+	long limit;
+	short light_index, count = 0;
+
+	if (chosen_frame == render.frame_index)
+		return;
+	chosen_frame = render.frame_index;
+	limit = config_integer("display.dynamic_light_limit");
+	for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
+	{
+		struct light_datum *light = light_get(lights_globals.scene_point_lights[light_index]);
+		real_point3d center;
+		real radius;
+
+		port_dynamic_light_kept[light_index] = TRUE;
+		sizes[light_index] = -1.0f;
+		if (limit <= 0 || !TEST_FLAG(light->flags, _point_light_dynamic_bit) ||
+			light->rasterizer_light_index == NONE ||
+			TEST_FLAG(light->flags, _point_light_attached_to_first_person_weapon_bit))
+		{
+			continue;
+		}
+		light_compute_bounding_sphere(lights_globals.scene_point_lights[light_index], FALSE, FALSE, FALSE,
+			&center, &radius);
+		sizes[light_index] = radius / MAX(distance3d(&render.camera.position, &center), 0.01f);
+		count++;
+	}
+	if (limit <= 0 || count <= limit)
+		return;
+	/* (the limit-th largest, by a partial selection of a copy) */
+	{
+		real ranked[MAXIMUM_RENDERED_LIGHTS];
+		short ranked_count = 0, rank, index;
+
+		for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
+		{
+			if (sizes[light_index] >= 0.0f)
+				ranked[ranked_count++] = sizes[light_index];
+		}
+		for (rank = 0; rank < limit; rank++)
+		{
+			short largest = rank;
+
+			for (index = (short)(rank + 1); index < ranked_count; index++)
+			{
+				if (ranked[index] > ranked[largest])
+					largest = index;
+			}
+			{
+				real swap = ranked[rank];
+
+				ranked[rank] = ranked[largest];
+				ranked[largest] = swap;
+			}
+		}
+		threshold = ranked[limit - 1];
+	}
+	/* (the ones past it let go; a tie at the threshold kept, so at most a few more than the limit) */
+	for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
+	{
+		if (sizes[light_index] >= 0.0f && sizes[light_index] < threshold)
+			port_dynamic_light_kept[light_index] = FALSE;
+	}
+}
+
 void lights_render_diffuse(
 	void)
 {
 	short cluster_indices[MAXIMUM_CLUSTERS_PER_LIGHT];
 	short light_index;
+
+	port_dynamic_lights_choose();
 
 	rasterizer_environment_diffuse_lights_begin();
 	if (should_render_lights())
@@ -1833,7 +1916,8 @@ void lights_render_diffuse(
 				lights_globals.scene_point_lights[light_index]);
 
 			if (TEST_FLAG(light->flags, _point_light_dynamic_bit)
-				&& light->rasterizer_light_index != NONE)
+				&& light->rasterizer_light_index != NONE
+				&& port_dynamic_light_kept[light_index])
 			{
 				boolean skip_clusters = TEST_FLAG(light->flags,
 						_point_light_attached_to_first_person_weapon_bit)
@@ -1877,6 +1961,7 @@ void lights_render_specular(
 	short cluster_indices[MAXIMUM_CLUSTERS_PER_LIGHT];
 	short light_index;
 
+	port_dynamic_lights_choose();
 	rasterizer_environment_specular_lights_begin();
 	if (should_render_lights())
 	{
@@ -1889,6 +1974,7 @@ void lights_render_specular(
 
 			if (TEST_FLAG(light->flags, _point_light_dynamic_bit)
 				&& light->rasterizer_light_index != NONE
+				&& port_dynamic_light_kept[light_index]
 				&& !TEST_FLAG(light_definition_get(light->definition_index)->flags,
 					_light_definition_no_specular_bit))
 			{
