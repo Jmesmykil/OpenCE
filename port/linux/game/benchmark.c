@@ -450,6 +450,15 @@ void benchmark_update(
 			benchmark.control_seconds += seconds;
 		else
 			benchmark.control_seconds = 0.0;
+		/* (what is waited for, every 10 seconds: a level that does not reach play says why) */
+		if (!main_menu_loaded && game_in_progress() &&
+			(long)(benchmark.state_seconds / 10.0) != (long)((benchmark.state_seconds - seconds) / 10.0))
+		{
+			platform_log("benchmark: %s: %.0f s in: a cinematic %s%s, the player %s, the game engine %s", stage->map,
+				benchmark.state_seconds, cinematic_in_progress() ? "playing" : "not playing",
+				cinematic_can_be_skipped() ? " (can be skipped)" : "", benchmark_unit() != NONE ? "has a unit" : "has no unit",
+				game_engine_running() ? "running" : "not running");
+		}
 		if (benchmark.control_seconds >= 1.0 ||
 			(benchmark.state_seconds >= CONTROL_TIMEOUT_SECONDS && !main_menu_loaded && game_in_progress()))
 		{
