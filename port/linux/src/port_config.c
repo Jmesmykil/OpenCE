@@ -978,6 +978,10 @@ static const struct config_setting config_settings[] =
 		"(which spares the GPU storing the screen and loading it back; the\n"
 		"glow follows what is in front of the sun a frame later). Takes effect\n"
 		"the next start." },
+	{ "debug.original_blur", _config_boolean, "false", "HALO_ORIGINAL_BLUR", _environment_value, _platform_android,
+		"Draw a blur screen effect (the cryo bay's waking up, cutscenes) as the\n"
+		"game does, in passes over the whole screen, rather than its passes on a\n"
+		"smaller copy of it. Takes effect the next start." },
 	{ "debug.original_water", _config_boolean, "false", "HALO_ORIGINAL_WATER", _environment_value, _platform_android,
 		"Make the water's ripples in the middle of each frame, as the game does,\n"
 		"rather than at the frame's end for the next frame (which spares the\n"
