@@ -877,6 +877,23 @@ int halo_render_defer_sun_glow(void)
 #endif
 }
 
+int halo_render_defer_water(void)
+{
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+	static int deferred = -1;
+
+	if (deferred < 0)
+	{
+		deferred = !config_boolean("debug.original_water");
+		if (!deferred)
+			platform_log("water: its ripples made in the middle of the frame, as the game does (debug.original_water)");
+	}
+	return deferred;
+#else
+	return 0;
+#endif
+}
+
 void halo_render_marker(char const *name)
 {
 #if defined(HALO_ANDROID) && !defined(HALO_SWITCH)

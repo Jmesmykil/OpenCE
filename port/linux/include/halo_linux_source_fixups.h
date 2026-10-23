@@ -93,6 +93,10 @@ screen made in the middle of the frame (source/rasterizer/xbox/rasterizer_xbox_l
 whose phones' GPUs pay for that copy by storing the screen out of their tile memory and loading it back
 (debug.original_sun_glow turns it off); not elsewhere */
 int halo_render_defer_sun_glow(void);
+/* the same for the water's ripples' bump map (source/rasterizer/xbox/rasterizer_xbox_water.c): the water drawn with
+the one the frame before made at its end, rather than one made in the middle of the frame, its 128 by 128 target
+ending the screen's rendering; Android's Vulkan renderer (debug.original_water turns it off), not elsewhere */
+int halo_render_defer_water(void);
 /* the draws that follow drawn only where texture coordinate 0's u and v are
 in [low, high], or (clip FALSE) everywhere: a shadow cast on the level
 (source/rasterizer/xbox/rasterizer_xbox_shadows.c), which changes nothing

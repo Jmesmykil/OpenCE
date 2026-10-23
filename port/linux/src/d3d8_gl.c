@@ -6231,6 +6231,11 @@ int halo_render_defer_sun_glow(void)
 	return 0;
 }
 
+int halo_render_defer_water(void)
+{
+	return 0;
+}
+
 /* (only the Switch's renderer clips: d3d8_dk.c) */
 void halo_texture_clip(unsigned char clip, float low, float high)
 {

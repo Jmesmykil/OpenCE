@@ -487,6 +487,11 @@ int halo_render_defer_sun_glow(void)
 	return 0;
 }
 
+int halo_render_defer_water(void)
+{
+	return 0;
+}
+
 void halo_render_marker(char const *name)
 {
 	struct dk_command_marker *command = stream_command(DK_COMMAND_MARKER, sizeof(*command));
