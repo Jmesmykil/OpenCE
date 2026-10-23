@@ -238,12 +238,56 @@ tell a reused slot; none of it is game state. */
 #define PARTICLE_UNSEEN_TICKS 4
 
 /* port: display.particle_limit, the most particles alive at once (0: the
-pool's, HALO_PORT_MAXIMUM_PARTICLES; the Xbox's was 1024): a new one past it
-is not made, as the Xbox's pool, full, made none. With 64 players in a small
-map the pool's 8192 filled, and the particles were 30% of the Switch's game
-thread. Read each frame; how many lived is said every 10 s of play. */
+pool's, HALO_PORT_MAXIMUM_PARTICLES; the Xbox's was 1024). With 64 players in
+a small map the pool's 8192 filled, and the particles were 30% of the
+Switch's game thread. Past the limit the oldest particle goes to make room
+for the new one - a fresh spark rather than old smoke, which is fading
+anyway - found in a ring of the particles in the order they were made; the
+first-person weapon's are never the ones let go. Read each frame; how many
+lived is said every 10 s of play. */
 static long particles_limit;
 static long particles_refused;
+static long particles_retired;
+static long particles_made_order[HALO_PORT_MAXIMUM_PARTICLES];
+static long particles_made_oldest, particles_made_count;
+/* the particle particles_update is updating, which the effects of its own
+collision may make room for others with: never the one let go */
+static long particles_updating_index = NONE;
+
+/* (room for one more under the limit: the oldest that is still alive let go) */
+static boolean particles_make_room(
+	void)
+{
+	while (particles_made_count > 0)
+	{
+		long particle_index = particles_made_order[particles_made_oldest];
+		struct particle_datum *particle = datum_try_and_get(particle_data, particle_index);
+
+		particles_made_oldest = (particles_made_oldest + 1) % HALO_PORT_MAXIMUM_PARTICLES;
+		particles_made_count--;
+		if (particle && particle_index != particles_updating_index &&
+			!TEST_FLAG(particle->flags, _particle_datum_attached_to_local_player_bit))
+		{
+			datum_delete(particle_data, particle_index);
+			particles_retired++;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* (the particle made, the newest in the ring: a full ring forgets its oldest) */
+static void particles_made(
+	long particle_index)
+{
+	if (particles_made_count == HALO_PORT_MAXIMUM_PARTICLES)
+	{
+		particles_made_oldest = (particles_made_oldest + 1) % HALO_PORT_MAXIMUM_PARTICLES;
+		particles_made_count--;
+	}
+	particles_made_order[(particles_made_oldest + particles_made_count) % HALO_PORT_MAXIMUM_PARTICLES] = particle_index;
+	particles_made_count++;
+}
 
 static boolean particles_each_frame;
 static long particle_tick_owner[HALO_PORT_MAXIMUM_PARTICLES];
@@ -279,6 +323,7 @@ void particles_initialize_for_new_map(
 
 	data_make_valid(particle_data);
 	particles_each_frame = config_boolean("debug.original_particles") != 0;
+	particles_made_oldest = particles_made_count = 0;
 	for (slot = 0; slot < HALO_PORT_MAXIMUM_PARTICLES; slot++)
 		particle_tick_owner[slot] = NONE;
 
@@ -901,7 +946,7 @@ void particle_new(
 		return;
 	}
 
-	if (particles_limit > 0 && particle_data->actual_count >= particles_limit)
+	if (particles_limit > 0 && particle_data->actual_count >= particles_limit && !particles_make_room())
 	{
 		particles_refused++;
 		return;
@@ -910,6 +955,7 @@ void particle_new(
 
 	if (particle_index == NONE)
 		return;
+	particles_made(particle_index);
 
 	particle = particle_get(particle_index);
 
@@ -1064,10 +1110,11 @@ void particles_update(
 		if (counted_seconds >= 10.0f)
 		{
 			if (counted_most > 0)
-				platform_log("particles: %.0f alive on average, %ld the most; %ld not made past display.particle_limit (%ld)",
-					(double)counted_alive / counted_frames, counted_most, particles_refused, particles_limit);
+				platform_log("particles: %.0f alive on average, %ld the most; past display.particle_limit (%ld), %ld of the "
+					"oldest let go for new ones, %ld not made", (double)counted_alive / counted_frames, counted_most,
+					particles_limit, particles_retired, particles_refused);
 			counted_frames = counted_alive = counted_most = 0;
-			particles_refused = 0;
+			particles_refused = particles_retired = 0;
 			counted_seconds = 0.0f;
 		}
 	}
@@ -1096,6 +1143,7 @@ void particles_update(
 		struct particle_definition *definition = particle_definition_get(particle->definition_index);
 		boolean was_new = (particle->age == 0.0f);
 
+		particles_updating_index = particle_index;
 		if (render.frame_index - particle->last_rendered_frame_index >
 			MAXIMUM_PARTICLE_UNRENDERED_FRAME_COUNT &&
 			particle->last_rendered_frame_index < particles_tick_frame_indices[
@@ -1158,6 +1206,7 @@ void particles_update(
 		}
 	}
 
+	particles_updating_index = NONE;
 	profile_exit(particles_update_section);
 
 	return;
