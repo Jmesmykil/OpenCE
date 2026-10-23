@@ -63,6 +63,8 @@ void platform_log(char const *format, ...);
 const char *platform_data_root(void);
 void platform_request_quit(void);
 void halo_render_marker(char const *name);
+/* (fopen here takes an Xbox path: msvc_crt.c) */
+FILE *platform_fopen_host(char const *path, char const *mode);
 
 #define STANDARD_STAGES "a10:30,a30:30,b30:30,c10:30,bloodgulch:15,damnation:15"
 #define MAXIMUM_STAGES 16
@@ -241,7 +243,7 @@ static void benchmark_write(void)
 	short index;
 
 	snprintf(path, sizeof(path), "%s/benchmark.txt", folder && *folder ? folder : platform_data_root());
-	file = fopen(path, "w");
+	file = platform_fopen_host(path, "w");
 	if (!file)
 	{
 		platform_log("benchmark: cannot write %s", path);

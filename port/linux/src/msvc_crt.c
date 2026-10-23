@@ -637,6 +637,13 @@ FILE *halo_linux_fopen(const char *path, const char *mode)
 	return fopen(translated(path, host_path, sizeof(host_path)), mode);
 }
 
+/* a file by the host's own path, untranslated (the port's game code, whose fopen takes Xbox paths: a path the platform
+names, platform_data_root's or a profile folder's, as port/linux/game/benchmark.c writes its results to) */
+FILE *platform_fopen_host(const char *path, const char *mode)
+{
+	return fopen(path, mode);
+}
+
 FILE *halo_linux_freopen(const char *path, const char *mode, FILE *stream)
 {
 	char host_path[1024];
