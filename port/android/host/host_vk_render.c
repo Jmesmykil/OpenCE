@@ -365,6 +365,9 @@ struct host_vk_target *host_vk_target_get(const struct vk_surface *surface)
 	info.samples = VK_SAMPLE_COUNT_1_BIT;
 	info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	info.usage = depth ? depth_usage : color_usage;
+	/* (drawn multisampled into this image itself, VK_EXT_multisampled_render_to_single_sampled) */
+	if (B.msrtss_counts)
+		info.flags = VK_IMAGE_CREATE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_BIT_EXT;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if (!HOST_VK_CHECK(vkCreateImage(B.device, &info, NULL, &target->image)))
@@ -419,7 +422,21 @@ the target's image as each rendering ends, so that everything else - a draw samp
 anti-aliasing pass, the present - reads the target's image as before. A depth buffer is not resolved: nothing samples a
 depth buffer, and the game clears the screen's at the start of each frame. A multisampled image is cleared when it is
 made (black; depth 1, stencil 0), as the OpenGL ES renderer clears its multisampled renderbuffers: the setting changes
-between frames, and the frame clears the screen's targets before it draws. */
+between frames, and the frame clears the screen's targets before it draws.
+
+Where the device has VK_EXT_multisampled_render_to_single_sampled (a tiled GPU's: Adreno, Mali), there is no image of
+samples: a rendering draws into the target's own image, the samples living only in the GPU's tile memory, resolved as the
+tile is stored and spread from the pixel again as it is loaded. A rendering's end then stores a pixel rather than its
+samples, which on a phone is most of what an end costs; what is lost is the samples of an edge drawn before the end, which
+a later draw in another rendering meets resolved (its depth, sample zero's). debug.original_multisample keeps the images. */
+
+int host_vk_original_multisample;
+
+/* whether the targets are drawn with samples a pixel through the extension, rather than into images of samples */
+static int msrtss_for(uint32_t samples)
+{
+	return samples > 1 && (B.msrtss_counts & samples);
+}
 
 uint32_t host_vk_samples_usable(uint32_t samples)
 {
@@ -484,6 +501,11 @@ static void multisample_retire(struct host_vk_target *target)
 {
 	if (!target->samples)
 		return;
+	if (!target->multisample_image)
+	{
+		target->samples = 0;
+		return;
+	}
 	multisamples_destroy_retired(0);
 	if (retired_multisample_count == RETIRED_MULTISAMPLES)
 	{
@@ -531,6 +553,14 @@ static int multisample_set(struct host_vk_target *target, uint32_t samples)
 	multisample_retire(target);
 	if (!samples)
 		return 1;
+	if (msrtss_for(samples))
+	{
+		target->samples = samples;
+		host_logf(HOST_LOG_INFO, "vk: %s target %08x, %ux%u, drawn with %u samples a pixel in tile memory",
+			depth ? "depth" : "colour", (unsigned)target->key.data, (unsigned)target->key.pixel_width,
+			(unsigned)target->key.pixel_height, (unsigned)samples);
+		return 1;
+	}
 	info.imageType = VK_IMAGE_TYPE_2D;
 	info.format = depth ? B.depth_format : B.color_format;
 	info.extent.width = target->key.pixel_width;
@@ -637,9 +667,11 @@ int host_vk_rendering_begin(void)
 	VkRenderingAttachmentInfo depth = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 	VkRenderingAttachmentInfo stencil = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
 	VkRenderingInfo info = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+	VkMultisampledRenderToSingleSampledInfoEXT single = { VK_STRUCTURE_TYPE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_INFO_EXT };
 	VkViewport viewport;
 	VkRect2D scissor;
 	uint32_t width = UINT32_MAX, height = UINT32_MAX;
+	int in_tiles = msrtss_for(B.samples);
 
 	if (B.rendering)
 		return 1;
@@ -656,7 +688,12 @@ int host_vk_rendering_begin(void)
 		color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		/* multisampled: drawn into its samples, kept for the next rendering, and resolved into the target's image as
 		this one ends */
-		if (B.samples)
+		if (in_tiles)
+		{
+			/* (into the target's image, resolved into it as each tile is stored) */
+			color.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
+		}
+		else if (B.samples)
 		{
 			multisample_transition(command, B.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 			color.imageView = B.color->multisample_view;
@@ -679,7 +716,11 @@ int host_vk_rendering_begin(void)
 		depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		depth.clearValue.depthStencil.depth = B.clear_depth;
 		depth.clearValue.depthStencil.stencil = B.clear_stencil;
-		if (B.samples)
+		if (in_tiles)
+		{
+			depth.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
+		}
+		else if (B.samples)
 		{
 			multisample_transition(command, B.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 			depth.imageView = B.depth->multisample_view;
@@ -698,16 +739,22 @@ int host_vk_rendering_begin(void)
 	info.renderArea.extent.width = width;
 	info.renderArea.extent.height = height;
 	info.layerCount = 1;
+	if (in_tiles)
+	{
+		single.multisampledRenderToSingleSampledEnable = VK_TRUE;
+		single.rasterizationSamples = (VkSampleCountFlagBits)B.samples;
+		info.pNext = &single;
+	}
 	if (B.clear_color_pending || B.clear_depth_pending || B.clear_stencil_pending)
 		B.counts.clears_loaded++;
 	B.clear_color_pending = B.clear_depth_pending = B.clear_stencil_pending = 0;
 	if (host_vk_profile_folder[0])
 	{
 		/* (named by its size and attachments, for the GPU profile's rendering by rendering) */
-		char what[48];
+		char what[64];
 
 		snprintf(what, sizeof(what), "%ux%u %s%s", (unsigned)width, (unsigned)height,
-			B.color && B.depth ? "colour+depth" : B.color ? "colour" : "depth", B.samples ? " multisampled" : "");
+			B.color && B.depth ? "colour+depth" : B.color ? "colour" : "depth", in_tiles ? " multisampled in tiles" : B.samples ? " multisampled" : "");
 		host_vk_profile_rendering_begin(command, what);
 	}
 	host_vk_cmd_begin_rendering(command, &info);
@@ -1594,6 +1641,9 @@ static int device_create(void)
 	VkPhysicalDeviceVulkan13Features features13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 	VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering =
 		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR };
+	VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT single =
+		{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_FEATURES_EXT };
+	void **chain_end;
 	const char *names[8];
 	uint32_t name_count = 0, index, family_count = 0;
 	VkQueueFamilyProperties *families;
@@ -1687,6 +1737,7 @@ static int device_create(void)
 	{
 		features13.dynamicRendering = VK_TRUE;
 		features.pNext = &features13;
+		chain_end = &features13.pNext;
 	}
 	else
 	{
@@ -1703,6 +1754,7 @@ static int device_create(void)
 		}
 		dynamic_rendering.dynamicRendering = VK_TRUE;
 		features.pNext = &dynamic_rendering;
+		chain_end = &dynamic_rendering.pNext;
 	}
 	/* the optional features the draws use, where the device has them: anisotropic filtering, non-solid fill (wireframe and
 	point fill), precise occlusion queries (visibility tests) and the block-compressed textures (BC1 to BC3) */
@@ -1718,6 +1770,44 @@ static int device_create(void)
 		B.fill_mode_non_solid = available.features.fillModeNonSolid != 0;
 		B.occlusion_query_precise = available.features.occlusionQueryPrecise != 0;
 		B.texture_compression_bc = available.features.textureCompressionBC != 0;
+	}
+	/* multisampling in the GPU's tile memory (VK_EXT_multisampled_render_to_single_sampled), where the device has it
+	for both target formats, and debug.original_multisample does not keep the images of samples: the counts it can */
+	B.msrtss_counts = 0;
+	if (!host_vk_original_multisample && enabled_add(names, &name_count, VK_EXT_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_EXTENSION_NAME))
+	{
+		VkPhysicalDeviceFeatures2 available = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		VkPhysicalDeviceMultisampledRenderToSingleSampledFeaturesEXT supported =
+			{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_FEATURES_EXT };
+		const VkPhysicalDeviceLimits *limits = &host_vk.properties.limits;
+		VkImageFormatProperties color_properties, depth_properties;
+		VkSampleCountFlags counts = 0;
+
+		available.pNext = &supported;
+		host_vk.vkGetPhysicalDeviceFeatures2(host_vk.physical, &available);
+		if (supported.multisampledRenderToSingleSampled &&
+			host_vk.vkGetPhysicalDeviceImageFormatProperties(host_vk.physical, B.color_format, VK_IMAGE_TYPE_2D,
+				VK_IMAGE_TILING_OPTIMAL, color_usage, VK_IMAGE_CREATE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_BIT_EXT,
+				&color_properties) == VK_SUCCESS &&
+			host_vk.vkGetPhysicalDeviceImageFormatProperties(host_vk.physical, B.depth_format, VK_IMAGE_TYPE_2D,
+				VK_IMAGE_TILING_OPTIMAL, depth_usage, VK_IMAGE_CREATE_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_BIT_EXT,
+				&depth_properties) == VK_SUCCESS)
+			counts = color_properties.sampleCounts & depth_properties.sampleCounts & limits->framebufferColorSampleCounts &
+				limits->framebufferDepthSampleCounts & limits->framebufferStencilSampleCounts & ~(VkSampleCountFlags)VK_SAMPLE_COUNT_1_BIT;
+		if (counts)
+		{
+			single.multisampledRenderToSingleSampled = VK_TRUE;
+			*chain_end = &single;
+			B.msrtss_counts = counts;
+			host_logf(HOST_LOG_INFO, "vk: multisampling in tile memory, at sample counts 0x%x", (unsigned)counts);
+		}
+		else
+		{
+			name_count--;
+			host_logf(HOST_LOG_INFO, "vk: %s cannot draw the targets' formats multisampled (feature %u); images of samples "
+				"instead", VK_EXT_MULTISAMPLED_RENDER_TO_SINGLE_SAMPLED_EXTENSION_NAME,
+				(unsigned)supported.multisampledRenderToSingleSampled);
+		}
 	}
 	for (index = 0; index < name_count; index++)
 		host_logf(HOST_LOG_INFO, "vk: device extension %s", names[index]);

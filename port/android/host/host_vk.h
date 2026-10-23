@@ -29,6 +29,7 @@ instance is 1.0-level and the extension stands in for it */
 	X(vkGetPhysicalDeviceFeatures2) X(vkGetPhysicalDeviceProperties2) X(vkGetDeviceProcAddr) \
 	HOST_VK_SURFACE_FUNCTIONS(X) X(vkDestroySurfaceKHR) X(vkCreateDevice) \
 	X(vkGetPhysicalDeviceMemoryProperties) X(vkGetPhysicalDeviceFormatProperties) \
+	X(vkGetPhysicalDeviceImageFormatProperties) \
 	X(vkGetPhysicalDeviceSurfaceSupportKHR) X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
 	X(vkGetPhysicalDeviceSurfaceFormatsKHR)
 #ifdef HALO_PS5
@@ -176,6 +177,9 @@ struct host_vk_backend
 	VkFilter blit_filter;
 	/* the optional device features that were enabled */
 	int sampler_anisotropy, fill_mode_non_solid, occlusion_query_precise, texture_compression_bc;
+	/* VK_EXT_multisampled_render_to_single_sampled: a multisampled rendering draws into the targets' own images, its samples
+	kept in the GPU's tile memory and resolved as they are stored (the sample counts it can, 0 when it is off) */
+	VkSampleCountFlags msrtss_counts;
 	VkFormatFeatureFlags swapchain_features;
 
 	struct host_vk_frame frames[HOST_VK_FRAMES];
@@ -265,6 +269,9 @@ goes in, set before the device is made; empty, off). Each is nothing while it is
 extern char host_vk_profile_folder[512];
 /* debug.gpu_split_parts: a rendering ended at each of the game's parts, to time each on its own (host_main.c) */
 extern int host_vk_profile_split;
+/* debug.original_multisample: multisampled targets get images of their samples beside their own, as before
+VK_EXT_multisampled_render_to_single_sampled (host_main.c) */
+extern int host_vk_original_multisample;
 void host_vk_profile_initialize(void);
 /* the slot's command buffer just begun (its fence passed): its last frame read, its queries reset */
 void host_vk_profile_frame_begin(unsigned slot, VkCommandBuffer command);

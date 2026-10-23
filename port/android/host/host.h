@@ -255,6 +255,8 @@ void host_debug_profile_frame(uint64_t nanoseconds);
 recorded (debug.profile_run: host_main.c) */
 extern char host_vk_profile_folder[512];
 extern int host_vk_profile_split;
+/* debug.original_multisample: images of samples rather than VK_EXT_multisampled_render_to_single_sampled */
+extern int host_vk_original_multisample;
 
 /* ---------- the Vulkan probe (host_vk_probe.c; port/android/VULKAN.md, phase 0) */
 

@@ -983,6 +983,13 @@ static const struct config_setting config_settings[] =
 		"rather than at the frame's end for the next frame (which spares the\n"
 		"GPU storing the screen and loading it back; the ripples move a frame\n"
 		"later). Takes effect the next start." },
+	{ "debug.original_multisample", _config_boolean, "false", "HALO_ORIGINAL_MULTISAMPLE", _environment_value, _platform_android,
+		"Under Vulkan with display.anti_aliasing's multisampling: draw into images\n"
+		"of the samples beside the screen's, resolved as each rendering ends,\n"
+		"rather than keeping the samples in the GPU's tile memory only (where the\n"
+		"phone's driver can, VK_EXT_multisampled_render_to_single_sampled), which\n"
+		"spares storing and loading them at every break of the frame. Takes\n"
+		"effect the next start." },
 	{ "debug.gpu_split_parts", _config_boolean, "false", "HALO_GPU_SPLIT_PARTS", _environment_value, _platform_android,
 		"With debug.profile_run under Vulkan: end the GPU's rendering at each part\n"
 		"of the frame the game names (the sky, the objects, the particles...), so\n"
