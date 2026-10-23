@@ -482,6 +482,11 @@ unsigned char halo_screen_fast_blur(void)
 
 /* the part of a frame the game is about to draw, for the host's record of
 the commands it ran (DK_COMMAND_MARKER) */
+int halo_render_defer_sun_glow(void)
+{
+	return 0;
+}
+
 void halo_render_marker(char const *name)
 {
 	struct dk_command_marker *command = stream_command(DK_COMMAND_MARKER, sizeof(*command));

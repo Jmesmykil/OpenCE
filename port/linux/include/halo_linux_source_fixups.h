@@ -88,6 +88,11 @@ void halo_screen_anti_alias(short x0, short y0, short x1, short y1);
 the Switch's renderer keeps it in its record of the commands it ran, for
 the log after a GPU fault (port/switch/host/host_dk.c); nothing elsewhere */
 void halo_render_marker(char const *name);
+/* whether the sun's glow is drawn from the glow the frame before made at its end, rather than from a copy of the
+screen made in the middle of the frame (source/rasterizer/xbox/rasterizer_xbox_lights.c): Android's Vulkan renderer,
+whose phones' GPUs pay for that copy by storing the screen out of their tile memory and loading it back
+(debug.original_sun_glow turns it off); not elsewhere */
+int halo_render_defer_sun_glow(void);
 /* the draws that follow drawn only where texture coordinate 0's u and v are
 in [low, high], or (clip FALSE) everywhere: a shadow cast on the level
 (source/rasterizer/xbox/rasterizer_xbox_shadows.c), which changes nothing

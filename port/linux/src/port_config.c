@@ -971,6 +971,12 @@ static const struct config_setting config_settings[] =
 		"(the screen's own), \"2160\", \"1440\", \"1080\", \"720\" or \"480\" (the game's\n"
 		"own), in the screen's shape. More lines are sharper and work the GPU\n"
 		"harder. Changes at once." },
+	{ "debug.original_sun_glow", _config_boolean, "false", "HALO_ORIGINAL_SUN_GLOW", _environment_value, _platform_android,
+		"Make the sun's glow from a copy of the screen in the middle of each frame,\n"
+		"as the game does, rather than at the frame's end for the next frame\n"
+		"(which spares the GPU storing the screen and loading it back; the\n"
+		"glow follows what is in front of the sun a frame later). Takes effect\n"
+		"the next start." },
 	{ "debug.profile_run", _config_boolean, "false", "HALO_PROFILE_RUN", _environment_set_is_true, _platform_android,
 		"Profile each run, to send to the developers: a folder of its own in the\n"
 		"phone's Download/halo_profiles (named for the day and time it started:\n"

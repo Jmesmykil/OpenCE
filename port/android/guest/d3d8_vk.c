@@ -860,6 +860,23 @@ static BOOL targets_bind(BOOL *has_depth)
 
 /* the part of a frame being drawn, for the GPU's time by part (host_vk_profile.c): told the host only while a profile
 is recorded (debug.profile_run, Android's), as the Switch's renderer keeps it (port/switch/guest/d3d8_dk.c) */
+int halo_render_defer_sun_glow(void)
+{
+#if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
+	static int deferred = -1;
+
+	if (deferred < 0)
+	{
+		deferred = !config_boolean("debug.original_sun_glow");
+		if (!deferred)
+			platform_log("sun glow: made in the middle of the frame, as the game does (debug.original_sun_glow)");
+	}
+	return deferred;
+#else
+	return 0;
+#endif
+}
+
 void halo_render_marker(char const *name)
 {
 #if defined(HALO_ANDROID) && !defined(HALO_SWITCH)
