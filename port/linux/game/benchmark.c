@@ -18,8 +18,9 @@ multiplayer map, by name), separated by commas. The standard list:
   snowfield, and a small arena where the fighting fills the screen.
 
 A campaign level starts as the Solo menu starts one (normal difficulty, no saved game), each cinematic skipped as a
-button press would while it can be (the skippable ones: a scripted stretch that cannot be skipped, as a10's waking up,
-plays), and is measured from the first second the player has a unit and nothing can be skipped. A multiplayer map
+button press would while it plays and can be, once each SKIP_SECONDS (a scripted stretch that cannot be skipped, as
+a10's waking up, plays), and is measured from the first second the player has a unit and no skippable cinematic
+plays (a skippable stretch with none playing, as The Library's opening, is the player's). A multiplayer map
 starts as debug.network_test's local games do (network_test.c). Either way the player cannot be hurt (as
 cheat_deathless_player), WARM_UP_SECONDS go by unmeasured (a level's first textures and shaders), and while it is
 measured the player's view turns at TURN_DEGREES a second, a little down: every run sees the same views in the same
@@ -76,6 +77,8 @@ FILE *platform_fopen_host(char const *path, char const *mode);
 /* the most a level takes to load and play its cinematics before it is measured anyway */
 #define CONTROL_TIMEOUT_SECONDS 180.0
 #define MAXIMUM_FRAMES 32768
+/* the least time between two skips of a level's cinematics (a skip takes a moment to take) */
+#define SKIP_SECONDS 5.0
 
 enum
 {
@@ -110,8 +113,9 @@ static struct
 	short stage_count, stage;
 	LARGE_INTEGER frequency, last;
 	boolean clock_started;
-	/* the state's seconds so far, and the seconds the player has had control (nothing to skip) */
-	double state_seconds, control_seconds;
+	/* the state's seconds so far, and the seconds the player has had control (nothing to skip); when a cinematic was last
+	skipped (state seconds) */
+	double state_seconds, control_seconds, skipped_at;
 	/* the multiplayer setup's steps done */
 	boolean map_set, player_added, started;
 	double yaw, measured_seconds;
@@ -300,6 +304,7 @@ static void benchmark_start_stage(struct benchmark_stage const *stage)
 {
 	benchmark.map_set = benchmark.player_added = benchmark.started = FALSE;
 	benchmark.control_seconds = 0.0;
+	benchmark.skipped_at = -SKIP_SECONDS;
 	if (stage->campaign)
 	{
 		char path[64];
@@ -365,8 +370,10 @@ static boolean benchmark_in_control(struct benchmark_stage const *stage)
 {
 	if (!game_in_progress() || benchmark_unit() == NONE)
 		return FALSE;
+	/* (a cinematic that is playing and can be skipped is waited for, skipped; a skippable stretch with none playing, as
+	The Library's opening, is the player's: its skip, a revert to where it began, would only begin it again) */
 	if (stage->campaign)
-		return !cinematic_can_be_skipped();
+		return !(cinematic_in_progress() && cinematic_can_be_skipped());
 	return game_engine_running();
 }
 
@@ -443,9 +450,16 @@ void benchmark_update(
 		}
 		if (!stage->campaign && main_menu_loaded)
 			benchmark_multiplayer_setup(stage);
-		/* (each cinematic skipped while it can be, as a button press would) */
-		if (stage->campaign && game_in_progress() && !main_menu_loaded && cinematic_can_be_skipped())
+		/* (each cinematic skipped while it plays and can be, as a button press would; once each SKIP_SECONDS: a skip
+		reverts the game to where the skippable stretch began, each a fade through black, and skipped every frame, The
+		Library's opening was reverted over and over in black for three minutes) */
+		if (stage->campaign && game_in_progress() && !main_menu_loaded && cinematic_in_progress() &&
+			cinematic_can_be_skipped() && benchmark.state_seconds - benchmark.skipped_at >= SKIP_SECONDS)
+		{
+			benchmark.skipped_at = benchmark.state_seconds;
 			main_skip_cinematic();
+			platform_log("benchmark: %s: skipped a cinematic, %.0f s in", stage->map, benchmark.state_seconds);
+		}
 		if (!main_menu_loaded && benchmark_in_control(stage))
 			benchmark.control_seconds += seconds;
 		else
