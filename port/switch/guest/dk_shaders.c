@@ -134,7 +134,9 @@ size whatever it holds. The vertex key's own bytes are the program hash
 then the packed mask, in that order - not the struct's, which has four
 bytes of padding at its end that would otherwise have to be promised zero
 by every caller */
-#define DK_KEY_DATA_SIZE ((unsigned long)sizeof(struct nv2a_pixel_shader_key))
+#define DK_KEY_DATA_SIZE 256UL
+/* (the pixel key's fields past them - ce_meter_channels, which deko3d never sets - are left 0 in a key read back) */
+typedef char dk_key_data_within_pixel_key[sizeof(struct nv2a_pixel_shader_key) >= DK_KEY_DATA_SIZE ? 1 : -1];
 #define DK_VERTEX_KEY_BYTES 12UL
 
 struct dk_key_record
@@ -226,7 +228,7 @@ typedef char dk_pixel_key_per_pixel_lighting_after_hashed[
 	offsetof(struct nv2a_pixel_shader_key, per_pixel_lighting) == DK_PIXEL_KEY_HASHED_BYTES ? 1 : -1];
 typedef char dk_pixel_key_alpha_test_samples_where_hashed[
 	offsetof(struct nv2a_pixel_shader_key, alpha_test_samples) == 254 ? 1 : -1];
-typedef char dk_pixel_key_size_as_hashed[sizeof(struct nv2a_pixel_shader_key) == 256 ? 1 : -1];
+typedef char dk_pixel_key_size_as_hashed[offsetof(struct nv2a_pixel_shader_key, ce_meter_channels) == DK_KEY_DATA_SIZE ? 1 : -1];
 
 /* the debug options that change the pixel shaders' GLSL (nv2a_psh_dk.c):
 mixed into their hash when any is set, so a debug run compiles its own
@@ -289,7 +291,7 @@ static uint64_t key_hash(uint32_t stage, const void *data)
 /* how many bytes of a record a stage's key takes */
 static unsigned long key_data_size(uint32_t stage)
 {
-	return stage == DK_SHADER_STAGE_VERTEX ? DK_VERTEX_KEY_BYTES : sizeof(struct nv2a_pixel_shader_key);
+	return stage == DK_SHADER_STAGE_VERTEX ? DK_VERTEX_KEY_BYTES : DK_KEY_DATA_SIZE;
 }
 
 /* ---------- the key store */

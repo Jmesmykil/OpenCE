@@ -26,6 +26,7 @@ VK_HIRES says whether they are on).
 #include "menu_files.h"
 #include "text_hires.h"
 #include "../../linux/game/cache_file_formats.h"
+#include "../../linux/game/android_ce_texture_cache.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1390,3 +1391,28 @@ void halo_custom_edition_texels_forget(void)
 	custom_edition_texel_count = 0;
 	custom_edition_texel_capacity = 0;
 }
+
+/* ---------- upstream's OpenGL ES pieces this image has not: Custom Edition's map pixels stay in the texture cache, at their
+Xbox addresses, which this renderer reads (android_ce_texture_cache.h), and the CE meters' draw scope is xbox_textures.c's */
+
+void halo_custom_edition_hud_meter(int active)
+{
+	(void)active;
+}
+
+#ifdef HALO_ANDROID
+int android_ce_texture_enabled(void)
+{
+	return 0;
+}
+
+void android_ce_texture_gpu_forget(const void *resource)
+{
+	(void)resource;
+}
+
+void android_ce_texture_unbind(const void *resource)
+{
+	(void)resource;
+}
+#endif
