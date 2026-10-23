@@ -397,6 +397,9 @@ static void *game_main(void *unused)
 	config_read(path, &settings);
 	if (settings.profile_run)
 		profile_run_begin(data_root, &settings.profile_hz);
+	/* (the benchmark's results go there too: port/linux/game/benchmark.c) */
+	if (profile_folder[0])
+		host_environment_set(&environment, "HALO_PROFILE_FOLDER", profile_folder);
 	/* (before the image's imports are resolved: the GL ES image's calls are
 	counted on the way, host_gl.c) */
 	host_gl_statistics = settings.gpu_stats;

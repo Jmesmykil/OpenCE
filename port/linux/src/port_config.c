@@ -745,6 +745,18 @@ static const struct config_setting config_settings[] =
 		"Sentry project (port/windows/src/win32_crash.c): \"yes\" sends them, \"no\"\n"
 		"never does, \"ask\" asks at the next crash and writes the answer here." },
 
+	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
+		"A benchmark run, the same each time (port/linux/game/benchmark.c):\n"
+		"\"standard\" plays a10, a30, b30 and c10 30 seconds each and Blood\n"
+		"Gulch and Damnation 15 seconds each with bots, the view turning, and\n"
+		"writes the frame rates to benchmark.txt (in the data folder, or the\n"
+		"run's profile folder: debug.profile_run); or a list of map:seconds\n"
+		"(\"a30:30,bloodgulch:15\"). Empty: none, the game as it is." },
+	{ "debug.benchmark_bots", _config_integer, "3", "HALO_BENCHMARK_BOTS", _environment_value, _platform_all,
+		"The computer players in the benchmark's multiplayer games." },
+	{ "debug.benchmark_quit", _config_boolean, "true", "HALO_BENCHMARK_QUIT", _environment_value, _platform_all,
+		"Quit the game once the benchmark is done; false goes back to the main\n"
+		"menu." },
 	{ "debug.network_test", _config_string, "\"\"", "HALO_NETWORK_TEST", _environment_value, _platform_all,
 		"Automated system link sessions for testing (port/linux/game/network_test.c):\n"
 		"\"host:<map>\" hosts a game on that map, \"local:<map>\" plays a local (split\n"

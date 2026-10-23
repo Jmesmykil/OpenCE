@@ -28,6 +28,8 @@ enum
 
 /* the settings (bots.count, bots.skill, bots.teams) */
 long bots_wanted_count(void);
+/* the count wanted in place of bots.count's (the benchmark's games: benchmark.c), or bots.count's again (-1) */
+void bots_set_count_override(long count);
 short bots_skill(void);
 short bots_teams(void);
 

@@ -682,6 +682,7 @@ typedef char screenshot_and_framerate_globals_size_assert[
 	sizeof(struct _screenshot_and_framerate_globals) == 0x38B ? 1 : -1];
 
 void network_test_update(boolean main_menu_loaded, real seconds);
+void benchmark_update(boolean main_menu_loaded);
 
 /* ---------- prototypes */
 
@@ -3584,6 +3585,8 @@ static boolean main_loop_iteration(
 
 			/* automated system link tests (port/linux/game/network_test.c) */
 			network_test_update(main_globals.main_menu_scenario_loaded, main_globals.seconds_elapsed);
+			/* port: the benchmark run (port/linux/game/benchmark.c) */
+			benchmark_update(main_globals.main_menu_scenario_loaded);
 			/* port: voice chat, in the lobby and in game (port/linux/game/network_voice.c) */
 			network_voice_update();
 			/* port: apply and replicate the host's mouse aim-assist policy. */

@@ -18,7 +18,8 @@ the parts are not told apart.
 A frame slot's timestamps are read once its fence has passed (host_vk_profile_frame_begin, as the slot is recorded
 again). Every PROFILE_FRAMES frames the averages go into gpu.txt in the profile's folder: the GPU's frame, the time from
 one present to the next (the CPU's and GPU's together, as the player sees it), the renderings a frame, then the time
-by target and by part and target, the longest first. */
+by target and by part and target, the longest first. A benchmark's map (port/linux/game/benchmark.c: the markers
+"benchmark <map>" and "benchmark end") is one window of its own, named for it, whatever its frames. */
 
 #include "host.h"
 #include "host_vk.h"
@@ -71,6 +72,8 @@ static struct
 	uint64_t present_last_ns, present_total_ns, present_longest_ns;
 	uint32_t presents, presents_slow;
 	uint32_t window, lost;
+	/* the benchmark's map being measured (its window ends at "benchmark end"), or empty */
+	char title[VK_MARKER_NAME_SIZE];
 	FILE *file;
 } profile;
 
@@ -192,6 +195,8 @@ static void window_write(void)
 	double frames = profile.gpu_frames ? (double)profile.gpu_frames : 1.0;
 
 	profile.window++;
+	if (profile.title[0])
+		fprintf(profile.file, "%s, ", profile.title);
 	fprintf(profile.file, "window %u: %u frames timed; the GPU %.2f ms a frame on average, %.2f the longest, %u over "
 		"33 ms; %.1f renderings a frame", (unsigned)profile.window, (unsigned)profile.gpu_frames,
 		(double)profile.gpu_total_ns / frames / 1e6, (double)profile.gpu_longest_ns / 1e6, (unsigned)profile.gpu_slow,
@@ -278,7 +283,7 @@ void host_vk_profile_frame_begin(unsigned slot, VkCommandBuffer command)
 		}
 		else
 			profile.lost += count;
-		if (profile.gpu_frames >= PROFILE_FRAMES)
+		if (profile.gpu_frames >= PROFILE_FRAMES && !profile.title[0])
 			window_write();
 	}
 	profile.count[slot] = 0;
@@ -295,6 +300,17 @@ void host_vk_profile_mark(const struct vk_command_marker *command)
 		return;
 	memcpy(name, command->name, sizeof(name));
 	name[sizeof(name) - 1] = 0;
+	/* (a benchmark's map: its frames a window of their own, the frames before it written as they are) */
+	if (!strncmp(name, "benchmark ", 10))
+	{
+		if (profile.gpu_frames)
+			window_write();
+		if (strcmp(name, "benchmark end"))
+			snprintf(profile.title, sizeof(profile.title), "%s", name);
+		else
+			profile.title[0] = 0;
+		return;
+	}
 	profile.part = name_index(profile.parts, &profile.part_count, name);
 }
 

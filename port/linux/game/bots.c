@@ -303,9 +303,16 @@ static struct
 
 /* ---------- settings */
 
+static long bots_count_override = -1;
+
+void bots_set_count_override(long count)
+{
+	bots_count_override = count;
+}
+
 long bots_wanted_count(void)
 {
-	long count = config_integer("bots.count");
+	long count = bots_count_override >= 0 ? bots_count_override : config_integer("bots.count");
 
 	return count < 0 ? 0 : count > BOTS_MAXIMUM ? BOTS_MAXIMUM : count;
 }
