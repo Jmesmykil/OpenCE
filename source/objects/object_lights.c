@@ -1836,10 +1836,38 @@ static void port_dynamic_lights_choose(
 	long limit;
 	short light_index, count = 0;
 
+	static long counted_frames, counted_dynamic, counted_dropped, counted_first_person, counted_most;
+	long frame_dynamic = 0, frame_first_person = 0;
+
 	if (chosen_frame == render.frame_index)
 		return;
 	chosen_frame = render.frame_index;
 	limit = config_integer("display.dynamic_light_limit");
+	/* (counted: every 300 frames the log says how many there were) */
+	for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
+	{
+		struct light_datum *light = light_get(lights_globals.scene_point_lights[light_index]);
+
+		if (TEST_FLAG(light->flags, _point_light_dynamic_bit) && light->rasterizer_light_index != NONE)
+		{
+			frame_dynamic++;
+			if (TEST_FLAG(light->flags, _point_light_attached_to_first_person_weapon_bit))
+				frame_first_person++;
+		}
+	}
+	counted_frames++;
+	counted_dynamic += frame_dynamic;
+	counted_first_person += frame_first_person;
+	counted_most = MAX(counted_most, frame_dynamic);
+	if (counted_frames >= 300)
+	{
+		extern void platform_log(const char *format, ...);
+
+		platform_log("lights: %.1f dynamic lights a frame (%ld the most), %.1f of them the first-person weapon's, %.1f let "
+			"go by display.dynamic_light_limit (%ld)", (double)counted_dynamic / counted_frames, counted_most,
+			(double)counted_first_person / counted_frames, (double)counted_dropped / counted_frames, limit);
+		counted_frames = counted_dynamic = counted_dropped = counted_first_person = counted_most = 0;
+	}
 	for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
 	{
 		struct light_datum *light = light_get(lights_globals.scene_point_lights[light_index]);
@@ -1893,7 +1921,10 @@ static void port_dynamic_lights_choose(
 	for (light_index = 0; light_index < lights_globals.scene_point_light_count; light_index++)
 	{
 		if (sizes[light_index] >= 0.0f && sizes[light_index] < threshold)
+		{
 			port_dynamic_light_kept[light_index] = FALSE;
+			counted_dropped++;
+		}
 	}
 }
 
