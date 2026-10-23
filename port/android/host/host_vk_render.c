@@ -611,6 +611,13 @@ fail:
 
 void host_vk_rendering_end(void)
 {
+	/* (a clear waiting for the next rendering, and something else wanting the targets as they are: a rendering of the
+	clear alone) */
+	if (!B.rendering && (B.clear_color_pending || B.clear_depth_pending || B.clear_stencil_pending))
+	{
+		B.counts.clears_waited++;
+		host_vk_rendering_begin();
+	}
 	if (B.rendering)
 	{
 		/* a query may not span the rendering's end */
@@ -644,7 +651,8 @@ int host_vk_rendering_begin(void)
 		host_vk_target_transition(command, B.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 		color.imageView = B.color->view;
 		color.imageLayout = B.color->layout;
-		color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		color.loadOp = B.clear_color_pending ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+		color.clearValue.color = B.clear_color;
 		color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		/* multisampled: drawn into its samples, kept for the next rendering, and resolved into the target's image as
 		this one ends */
@@ -667,8 +675,10 @@ int host_vk_rendering_begin(void)
 		host_vk_target_transition(command, B.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 		depth.imageView = B.depth->view;
 		depth.imageLayout = B.depth->layout;
-		depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		depth.loadOp = B.clear_depth_pending ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 		depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		depth.clearValue.depthStencil.depth = B.clear_depth;
+		depth.clearValue.depthStencil.stencil = B.clear_stencil;
 		if (B.samples)
 		{
 			multisample_transition(command, B.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
@@ -676,6 +686,7 @@ int host_vk_rendering_begin(void)
 			depth.imageLayout = B.depth->multisample_layout;
 		}
 		stencil = depth;
+		stencil.loadOp = B.clear_stencil_pending ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
 		info.pDepthAttachment = &depth;
 		info.pStencilAttachment = &stencil;
 		/* the render area is within every attachment */
@@ -687,6 +698,9 @@ int host_vk_rendering_begin(void)
 	info.renderArea.extent.width = width;
 	info.renderArea.extent.height = height;
 	info.layerCount = 1;
+	if (B.clear_color_pending || B.clear_depth_pending || B.clear_stencil_pending)
+		B.counts.clears_loaded++;
+	B.clear_color_pending = B.clear_depth_pending = B.clear_stencil_pending = 0;
 	if (host_vk_profile_folder[0])
 	{
 		/* (named by its size and attachments, for the GPU profile's rendering by rendering) */
@@ -907,6 +921,28 @@ static void command_blit(const struct vk_command_blit *command)
 	destination->bound = ++B.target_clock;
 }
 
+/* whether a clear's rectangle (x, y, width, height) covers the whole of the bound targets' area */
+static int clear_covers(const uint32_t *rectangle)
+{
+	uint32_t width = UINT32_MAX, height = UINT32_MAX;
+
+	if (B.color)
+	{
+		width = B.color->key.pixel_width;
+		height = B.color->key.pixel_height;
+	}
+	if (B.depth)
+	{
+		if (B.depth->key.pixel_width < width)
+			width = B.depth->key.pixel_width;
+		if (B.depth->key.pixel_height < height)
+			height = B.depth->key.pixel_height;
+	}
+	return (int32_t)rectangle[0] <= 0 && (int32_t)rectangle[1] <= 0 &&
+		(int64_t)(int32_t)rectangle[0] + (int32_t)rectangle[2] >= (int64_t)width &&
+		(int64_t)(int32_t)rectangle[1] + (int32_t)rectangle[3] >= (int64_t)height;
+}
+
 static void command_clear(const struct vk_command_clear *command, uint32_t size)
 {
 	uint32_t mask = command->flags & 0xf;
@@ -938,6 +974,30 @@ static void command_clear(const struct vk_command_clear *command, uint32_t size)
 		mask = 0;
 		if (!depth && !stencil)
 			return;
+	}
+	/* (no rendering open, and one rectangle the whole of the targets: the next rendering's load clears them, as a
+	phone's GPU clears its tiles, instead of loading what the targets held only to clear it - at 2464x1848 with 4x
+	MSAA, some 145 MB of colour and depth samples read each frame for nothing; a clear of some channels only is drawn) */
+	if (!B.rendering && count == 1 && !partial && clear_covers(command->rectangles[0]))
+	{
+		if (whole)
+		{
+			B.clear_color_pending = 1;
+			memcpy(B.clear_color.float32, command->color, sizeof(B.clear_color.float32));
+		}
+		if (depth)
+		{
+			float z = command->depth < 0.0f ? 0.0f : command->depth > 1.0f ? 1.0f : command->depth;
+
+			B.clear_depth_pending = 1;
+			B.clear_depth = z == z ? z : 0.0f;
+		}
+		if (stencil)
+		{
+			B.clear_stencil_pending = 1;
+			B.clear_stencil = command->stencil & 0xff;
+		}
+		return;
 	}
 	if (!count || !host_vk_rendering_begin())
 		return;
@@ -1386,10 +1446,10 @@ static void log_statistics(void)
 
 	host_logf(HOST_LOG_INFO, "vk: %u frames: %u hand-overs; commands: %u targets, %u clears, %u presents; clears: %u drawn, "
 		"%u by vkCmdClearAttachments; %u target changes; %u renderings ended to read a target, %u targets made readable "
-		"as they were left; %u images; submissions %llu, retired %u; %u swapchain "
+		"as they were left; %u clears made by a rendering's load (%u alone); %u images; submissions %llu, retired %u; %u swapchain "
 		"re-creations; validation errors %u; data: %u records, %u KB a frame, %u ring buffers", c->frames, c->hand_overs,
 		c->targets, c->clears, c->presents, c->clears_drawn, c->clears_attachments, c->target_changes, c->sample_splits,
-		c->read_ahead, B.images,
+		c->read_ahead, c->clears_loaded, c->clears_waited, B.images,
 		(unsigned long long)B.submission, retired_locked(), c->recreations, host_vk_validation_errors(), c->data_records,
 		c->data_bytes / 1024 / (c->frames ? c->frames : 1), host_vk_data_buffers());
 	host_logf(HOST_LOG_INFO, "vk: draws in %u frames: %u made; skipped %u for a shader, %u for a pipeline, %u no target, %u data "
@@ -1411,7 +1471,7 @@ static void log_statistics(void)
 	c->draws_made = c->draws_skipped_target = c->draws_skipped_data = c->draws_skipped_other = c->draws_texture_missing = 0;
 	c->textures_skipped = c->texture_bytes = 0;
 	c->frames = c->hand_overs = c->targets = c->clears = c->presents = c->clears_drawn = c->clears_attachments = 0;
-	c->target_changes = c->sample_splits = c->read_ahead = 0;
+	c->target_changes = c->sample_splits = c->read_ahead = c->clears_loaded = c->clears_waited = 0;
 	c->data_records = c->data_bytes = 0;
 }
 

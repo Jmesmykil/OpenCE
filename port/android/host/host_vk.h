@@ -191,6 +191,13 @@ struct host_vk_backend
 	uint64_t target_clock;
 	struct host_vk_target *last_color, *last_depth; /* the pair a command last named, for the statistics */
 	int rendering; /* a rendering is open on them */
+	/* a clear of the whole of the bound targets not made yet: the next rendering on them begins with it (its attachments'
+	load: VK_ATTACHMENT_LOAD_OP_CLEAR), rather than loading what they held and then clearing it (host_vk_render.c's
+	command_clear); its colour, depth and stencil, and which of them */
+	int clear_color_pending, clear_depth_pending, clear_stencil_pending;
+	VkClearColorValue clear_color;
+	float clear_depth;
+	uint32_t clear_stencil;
 	uint32_t area_width, area_height; /* its render area */
 
 	struct host_vk_swapchain chain;
@@ -217,6 +224,9 @@ struct host_vk_backend
 		/* renderings ended to make a target readable for a draw (host_vk_draw.c), and targets made readable as
 		they were left instead (command_targets) */
 		unsigned sample_splits, read_ahead;
+		/* whole-target clears made by a rendering's load, and those that had to be made alone (the targets wanted
+		before a draw: command_clear) */
+		unsigned clears_loaded, clears_waited;
 		unsigned recreations;
 		unsigned data_records, data_bytes;
 		unsigned draws_ready, draws_skipped_shader, draws_skipped_pipeline;
