@@ -424,11 +424,13 @@ depth buffer, and the game clears the screen's at the start of each frame. A mul
 made (black; depth 1, stencil 0), as the OpenGL ES renderer clears its multisampled renderbuffers: the setting changes
 between frames, and the frame clears the screen's targets before it draws.
 
-Where the device has VK_EXT_multisampled_render_to_single_sampled (a tiled GPU's: Adreno, Mali), there is no image of
-samples: a rendering draws into the target's own image, the samples living only in the GPU's tile memory, resolved as the
-tile is stored and spread from the pixel again as it is loaded. A rendering's end then stores a pixel rather than its
-samples, which on a phone is most of what an end costs; what is lost is the samples of an edge drawn before the end, which
-a later draw in another rendering meets resolved (its depth, sample zero's). debug.original_multisample keeps the images. */
+Where the device has VK_EXT_multisampled_render_to_single_sampled (a tiled GPU's: Adreno, Mali), a colour target has no
+image of samples: a rendering draws into its own image, the samples living only in the GPU's tile memory, resolved as the
+tile is stored and spread from the pixel again as it is loaded. A rendering's end then stores a pixel of colour rather than
+its samples; what is lost is the samples of an edge drawn before the end, which a later draw in another rendering blends
+onto resolved. A depth buffer keeps its image of samples: resolved, its samples would all hold sample zero's depth, and the
+level's later passes, drawn where the depth is equal to the first's, would miss three in four of them on any slope after a
+break (the textures came and went with the frame's breaks). debug.original_multisample keeps the colour's images too. */
 
 int host_vk_original_multisample;
 
@@ -553,7 +555,7 @@ static int multisample_set(struct host_vk_target *target, uint32_t samples)
 	multisample_retire(target);
 	if (!samples)
 		return 1;
-	if (msrtss_for(samples))
+	if (!depth && msrtss_for(samples))
 	{
 		target->samples = samples;
 		host_logf(HOST_LOG_INFO, "vk: %s target %08x, %ux%u, drawn with %u samples a pixel in tile memory",
@@ -671,7 +673,8 @@ int host_vk_rendering_begin(void)
 	VkViewport viewport;
 	VkRect2D scissor;
 	uint32_t width = UINT32_MAX, height = UINT32_MAX;
-	int in_tiles = msrtss_for(B.samples);
+	/* (the colour's samples in tile memory: a depth buffer's are always in their image) */
+	int in_tiles = B.color && msrtss_for(B.samples);
 
 	if (B.rendering)
 		return 1;
@@ -716,11 +719,7 @@ int host_vk_rendering_begin(void)
 		depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		depth.clearValue.depthStencil.depth = B.clear_depth;
 		depth.clearValue.depthStencil.stencil = B.clear_stencil;
-		if (in_tiles)
-		{
-			depth.resolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT;
-		}
-		else if (B.samples)
+		if (B.samples)
 		{
 			multisample_transition(command, B.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 			depth.imageView = B.depth->multisample_view;
@@ -1799,7 +1798,7 @@ static int device_create(void)
 			single.multisampledRenderToSingleSampled = VK_TRUE;
 			*chain_end = &single;
 			B.msrtss_counts = counts;
-			host_logf(HOST_LOG_INFO, "vk: multisampling in tile memory, at sample counts 0x%x", (unsigned)counts);
+			host_logf(HOST_LOG_INFO, "vk: colour multisampled in tile memory (depth in images of samples), at sample counts 0x%x", (unsigned)counts);
 		}
 		else
 		{
