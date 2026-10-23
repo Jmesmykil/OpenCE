@@ -243,13 +243,16 @@ struct host_vk_image *host_vk_image_get(uint32_t id);
 unsigned host_vk_texture_images(void);
 unsigned host_vk_texture_megabytes(void);
 
-/* host_vk_profile.c: the GPU's time by part of the frame, while a profile is recorded (debug.profile_run: the folder
-gpu.txt goes in, set before the device is made; empty, off). Each is nothing while it is off. */
+/* host_vk_profile.c: the GPU's time by rendering, while a profile is recorded (debug.profile_run: the folder gpu.txt
+goes in, set before the device is made; empty, off). Each is nothing while it is off. */
 extern char host_vk_profile_folder[512];
 void host_vk_profile_initialize(void);
 /* the slot's command buffer just begun (its fence passed): its last frame read, its queries reset */
 void host_vk_profile_frame_begin(unsigned slot, VkCommandBuffer command);
 void host_vk_profile_mark(const struct vk_command_marker *command);
+/* just before a rendering begins (outside it: what it draws into, "1042x480 colour+depth"), and just after it ends */
+void host_vk_profile_rendering_begin(VkCommandBuffer command, const char *what);
+void host_vk_profile_rendering_end(VkCommandBuffer command);
 /* the slot's command buffer about to end; presented: it is a frame shown */
 void host_vk_profile_frame_end(unsigned slot, VkCommandBuffer command, int presented);
 

@@ -754,9 +754,13 @@ assembly of the port is necessary:
   cable reaches, and the game writes into it:
   - `profile.bin`: the samples of `profile_hz` (500 a second if it is `0`),
     and the length of each frame shown;
-  - `gpu.txt`: under Vulkan, every 300 frames, the GPU's time for each part
-    of the frame (the sky, the objects, the HUD...) and the time between
-    presents;
+  - `gpu.txt`: under Vulkan, every 300 frames, the GPU's time for each
+    rendering, by what it draws into (its size, colour and depth) and by
+    the part of the frame it began in (the sky, the objects, the HUD...),
+    the time between renderings (copies and barriers), the renderings a
+    frame and the time between presents. A phone's GPU gives every
+    timestamp inside a rendering the same time, so the parts within one
+    are not told apart;
   - `halo.log`: the log of the run, as logcat has it;
   - `run.txt` and `config.toml`: the build, the phone, its GPU and driver,
     and the settings.

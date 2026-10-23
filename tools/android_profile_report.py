@@ -29,6 +29,7 @@ renderer's "frame N:" lines (debug.gpu_stats). The slowest frames are listed wit
 """
 
 import argparse
+import bisect
 import os
 import tempfile
 import zipfile
@@ -126,7 +127,7 @@ def symbolize(addresses, elf):
     result = {}
     if not addresses:
         return result
-    tools = ["llvm-symbolizer", "llvm-symbolizer-18", "llvm-symbolizer-19"]
+    tools = ["llvm-symbolizer", "llvm-symbolizer-22", "llvm-symbolizer-18", "llvm-symbolizer-19"]
     ndk = os.environ.get("ANDROID_NDK_HOME")
     if ndk:  # the NDK's own, which every Android build here has
         tools += [str(p) for p in Path(ndk).glob("toolchains/llvm/prebuilt/*/bin/llvm-symbolizer")]
@@ -142,12 +143,41 @@ def symbolize(addresses, elf):
         print("llvm-symbolizer not found: guest samples are all counted as 'game'", file=sys.stderr)
         return result
     blocks = process.stdout.strip().split("\n\n")
+    nearest = None
     for address, block in zip(addresses, blocks):
         lines = block.strip().splitlines()
         function = lines[0] if lines else "?"
         location = lines[1] if len(lines) > 1 else "?"
+        # (the image's symbols have no size, so the symbolizer seldom places an address in one: the nearest symbol
+        # at or below it, which is the function for code laid out one function after another)
+        if function in ("??", "?"):
+            if nearest is None:
+                nearest = symbol_table(tool, elf)
+            index = bisect.bisect_right(nearest[0], address) - 1
+            if index >= 0:
+                function = nearest[1][index]
         result[address] = (function, location.rsplit(":", 2)[0].split("/")[-1])
     return result
+
+
+def symbol_table(symbolizer, elf):
+    """(addresses, names) of the image's code symbols, sorted, from llvm-nm beside the symbolizer that worked."""
+    nm = str(Path(symbolizer).with_name(Path(symbolizer).name.replace("llvm-symbolizer", "llvm-nm")))
+    addresses, names = [], []
+    for tool in (nm, "llvm-nm", "llvm-nm-22", "llvm-nm-18", "nm"):
+        try:
+            output = subprocess.run([tool, "-n", "--defined-only", elf], capture_output=True, text=True,
+                                    check=True).stdout
+            break
+        except (OSError, subprocess.CalledProcessError):
+            output = ""
+    for line in output.splitlines():
+        parts = line.split()
+        # (code only: a data symbol or a literal's label is never a function)
+        if len(parts) == 3 and parts[1] in "TtNn" and not parts[2].startswith("."):
+            addresses.append(int(parts[0], 16))
+            names.append(parts[2])
+    return addresses, names
 
 
 def parse_linker_map(path):

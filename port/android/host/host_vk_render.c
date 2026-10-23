@@ -615,6 +615,7 @@ void host_vk_rendering_end(void)
 		/* a query may not span the rendering's end */
 		host_vk_visibility_close(B.frames[B.frame].command);
 		host_vk_cmd_end_rendering(B.frames[B.frame].command);
+		host_vk_profile_rendering_end(B.frames[B.frame].command);
 		B.rendering = 0;
 	}
 }
@@ -685,6 +686,15 @@ int host_vk_rendering_begin(void)
 	info.renderArea.extent.width = width;
 	info.renderArea.extent.height = height;
 	info.layerCount = 1;
+	if (host_vk_profile_folder[0])
+	{
+		/* (named by its size and attachments, for the GPU profile's rendering by rendering) */
+		char what[48];
+
+		snprintf(what, sizeof(what), "%ux%u %s%s", (unsigned)width, (unsigned)height,
+			B.color && B.depth ? "colour+depth" : B.color ? "colour" : "depth", B.samples ? " multisampled" : "");
+		host_vk_profile_rendering_begin(command, what);
+	}
 	host_vk_cmd_begin_rendering(command, &info);
 	B.rendering = 1;
 	B.area_width = width;
