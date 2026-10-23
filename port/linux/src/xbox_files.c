@@ -16,7 +16,13 @@ data root), read once, at the first path translated.
 Every other drive letter X:\ is the subdirectory X/ of the save root (z:\ holds the persistent cache and saves,
 u:\ user data, t:\ title data): paths.saves, else
 $XDG_DATA_HOME/halo-linux or ~/.local/share/halo-linux. Path components are
-matched case-insensitively, like the Xbox's FATX volumes.
+matched case-insensitively, like the Xbox's FATX volumes: each is looked for
+as it is spelt first, one stat, and only if that is not there is its folder
+read for another spelling - on a file system that ignores case itself (the
+Switch's card, Windows), not even then. A folder read for each name looked
+up in it made a folder of many files cost the square of their number: the
+custom maps' scan, which looks up each map and its description, took
+seconds.
 */
 
 #include "platform.h"
@@ -33,6 +39,14 @@ matched case-insensitively, like the Xbox's FATX volumes.
 #include <unistd.h>
 
 /* ---------- paths */
+
+/* whether the file system tells names apart by case (else a name not there
+as it is spelt is not there in any spelling) */
+#if defined(HALO_SWITCH) || defined(_WIN32)
+#define FILE_SYSTEM_HAS_CASE 0
+#else
+#define FILE_SYSTEM_HAS_CASE 1
+#endif
 
 static BOOL directory_exists(const char *path)
 {
@@ -317,19 +331,16 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 			}
 		}
 
-		if (posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk)))
+		/* (as it is spelt first, which also wins when several spellings
+		are there; the folder read for another only where case counts) */
 		{
-			/* prefer an exact match when several spellings exist */
 			char exact[1100];
 			struct posix_file_information information;
 
-			snprintf(exact, sizeof(exact), "%s/%s", resolved, component);
-			if (posix_stat(exact, &information) == 0)
-				snprintf(on_disk, sizeof(on_disk), "%s", component);
-		}
-		else
-		{
 			snprintf(on_disk, sizeof(on_disk), "%s", component);
+			snprintf(exact, sizeof(exact), "%s/%s", resolved, component);
+			if (posix_stat(exact, &information) != 0 && FILE_SYSTEM_HAS_CASE)
+				posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk));
 		}
 		length = strlen(resolved);
 		snprintf(resolved + length, sizeof(resolved) - length, "/%s", on_disk);
