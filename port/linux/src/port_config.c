@@ -500,7 +500,7 @@ static const struct config_setting config_settings[] =
 		"as the game's own maps' are before they run; false refuses them\n"
 		"(docs/custom_edition_caches.md)." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
-		"Computer players (bots) in a local (split screen) Slayer game: 0 to 15\n"
+		"Computer players (bots) in a local (split screen) Slayer game: 0 to 63\n"
 		"join its lobby with the players, as far as the game has room. Not in\n"
 		"system link or internet games. 0: none, as in the stock game." },
 	{ "bots.skill", _config_string, "\"normal\"", "HALO_BOT_SKILL", _environment_value, _platform_all,
@@ -748,12 +748,13 @@ static const struct config_setting config_settings[] =
 	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
 		"A benchmark run, the same each time (port/linux/game/benchmark.c):\n"
 		"\"standard\" plays a10, a30, b30 and c10 30 seconds each and Blood\n"
-		"Gulch and Damnation 15 seconds each with bots, the view turning, and\n"
+		"Gulch and Damnation 15 seconds each with 63 bots, the view turning, and\n"
 		"writes the frame rates to benchmark.txt (in the data folder, or the\n"
 		"run's profile folder: debug.profile_run); or a list of map:seconds\n"
 		"(\"a30:30,bloodgulch:15\"). Empty: none, the game as it is." },
-	{ "debug.benchmark_bots", _config_integer, "3", "HALO_BENCHMARK_BOTS", _environment_value, _platform_all,
-		"The computer players in the benchmark's multiplayer games." },
+	{ "debug.benchmark_bots", _config_integer, "63", "HALO_BENCHMARK_BOTS", _environment_value, _platform_all,
+		"The computer players in the benchmark's multiplayer games: 63, with the\n"
+		"player 64 in all; 0 to 63." },
 	{ "debug.benchmark_quit", _config_boolean, "true", "HALO_BENCHMARK_QUIT", _environment_value, _platform_all,
 		"Quit the game once the benchmark is done; false goes back to the main\n"
 		"menu." },
