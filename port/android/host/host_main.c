@@ -28,7 +28,10 @@ debug.profile_run records a profile of each run into a folder of its own,
 which the launcher makes (Download/halo_profiles/DDMMYYYY_HHMMSS, with the
 build and the phone in run.txt: LauncherActivity.java) and names in
 profile_folder.txt; without it, one is made in the data folder's
-halo_profiles. The log goes there too (halo.log), and the CPU profiler
+halo_profiles. The log goes there too (halo.log: the host's lines and the
+game's, host_syscall.c), this run's part of the game's debug.txt (copied as
+it grows, from where it ended when the run began: the file keeps every
+run's), and the CPU profiler
 (profile.bin: host_debug.c, at debug.profile_hz, 500 if that is 0) and the
 Vulkan renderer's GPU times (gpu.txt: host_vk_profile.c) write there.
 */
@@ -46,6 +49,7 @@ Vulkan renderer's GPU times (gpu.txt: host_vk_profile.c) write there.
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/system_properties.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
@@ -115,6 +119,71 @@ static int folder_writable(const char *path)
 	return stat(path, &information) == 0 && S_ISDIR(information.st_mode) && access(path, W_OK) == 0;
 }
 
+/* this run's part of the game's debug.txt (the data folder's, which every run adds to): what it adds past where it
+ended as the run began, copied into the profile folder's debug.txt every DEBUG_COPY_SECONDS, so that a run that is
+killed loses no more than that */
+#define DEBUG_COPY_SECONDS 2
+
+static char debug_source[600], debug_copy[600];
+static long debug_copied;
+
+static void debug_copy_new(void)
+{
+	FILE *source = fopen(debug_source, "rb");
+	FILE *copy;
+	char buffer[16384];
+	long size;
+	size_t got;
+
+	if (!source)
+		return;
+	fseek(source, 0, SEEK_END);
+	size = ftell(source);
+	/* (a file begun again: from its start) */
+	if (size < debug_copied)
+		debug_copied = 0;
+	if (size == debug_copied)
+	{
+		fclose(source);
+		return;
+	}
+	copy = fopen(debug_copy, "ab");
+	if (copy)
+	{
+		fseek(source, debug_copied, SEEK_SET);
+		while (debug_copied < size && (got = fread(buffer, 1, sizeof(buffer), source)) > 0)
+		{
+			fwrite(buffer, 1, got, copy);
+			debug_copied += (long)got;
+		}
+		fclose(copy);
+	}
+	fclose(source);
+}
+
+static void *debug_copier(void *unused)
+{
+	(void)unused;
+	for (;;)
+	{
+		sleep(DEBUG_COPY_SECONDS);
+		debug_copy_new();
+	}
+	return NULL;
+}
+
+static void debug_copy_begin(const char *data_root_path)
+{
+	struct stat information;
+	pthread_t thread;
+
+	snprintf(debug_source, sizeof(debug_source), "%s/debug.txt", data_root_path);
+	snprintf(debug_copy, sizeof(debug_copy), "%s/debug.txt", profile_folder);
+	debug_copied = stat(debug_source, &information) == 0 ? (long)information.st_size : 0;
+	if (pthread_create(&thread, NULL, debug_copier, NULL) == 0)
+		pthread_detach(thread);
+}
+
 /* the run's profile folder, its log, and what the profilers need: the launcher's folder, or one in the data folder */
 static void profile_run_begin(const char *data_root_path, int *profile_hz)
 {
@@ -155,6 +224,7 @@ static void profile_run_begin(const char *data_root_path, int *profile_hz)
 	if (profile_log >= 0)
 		host_log_set_sink(log_to_logcat_and_profile);
 	snprintf(host_vk_profile_folder, sizeof(host_vk_profile_folder), "%s", profile_folder);
+	debug_copy_begin(data_root_path);
 	if (*profile_hz <= 0)
 		*profile_hz = 500;
 	host_logf(HOST_LOG_INFO, "profile: this run's profile goes to %s (debug.profile_run)", profile_folder);
