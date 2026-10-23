@@ -978,10 +978,6 @@ static const struct config_setting config_settings[] =
 		"(which spares the GPU storing the screen and loading it back; the\n"
 		"glow follows what is in front of the sun a frame later). Takes effect\n"
 		"the next start." },
-	{ "debug.original_blur", _config_boolean, "false", "HALO_ORIGINAL_BLUR", _environment_value, _platform_android,
-		"Draw a blur screen effect (the cryo bay's waking up, cutscenes) as the\n"
-		"game does, in passes over the whole screen, rather than its passes on a\n"
-		"smaller copy of it. Takes effect the next start." },
 	{ "debug.original_water", _config_boolean, "false", "HALO_ORIGINAL_WATER", _environment_value, _platform_android,
 		"Make the water's ripples in the middle of each frame, as the game does,\n"
 		"rather than at the frame's end for the next frame (which spares the\n"
@@ -1001,6 +997,31 @@ static const struct config_setting config_settings[] =
 		"0), the GPU's time by part of the frame (gpu.txt, under Vulkan), the\n"
 		"log and the phone's details (run.txt). Android 9 and 10 ask for storage\n"
 		"once. Costs a little speed. Takes effect the next start." },
+#endif
+#if (defined(HALO_ANDROID) || defined(HALO_PS5)) && !defined(HALO_SWITCH)
+	/* the Vulkan renderer's (port/android/guest/d3d8_vk.c), Android's and the PS5's: the GPU's savings the Switch's
+	renderer made first, which the Switch's own rows below name for it. Declared only there, these were not settings
+	here, and the draw scissor, false when a setting is not one, was off */
+	{ "debug.gpu_draw_scissor", _config_boolean, "true", "HALO_GPU_DRAW_SCISSOR", _environment_value,
+		PLATFORM_VULKAN,
+		"Rasterize an object's shadow and a dynamic light's pass only inside the\n"
+		"rectangle of the screen they can change; false rasterizes their whole\n"
+		"triangles, to compare. Takes effect the next start." },
+	{ "debug.gpu_texture_clip", _config_string, "\"on\"", "HALO_GPU_TEXTURE_CLIP", _environment_value,
+		PLATFORM_VULKAN,
+		"Shadows cast on the level drawn only over their map: \"on\", \"off\", or\n"
+		"\"wide\" (clipped by limits nothing reaches, to tell the clip's own effect).\n"
+		"Takes effect the next start." },
+	{ "debug.original_zoom", _config_boolean, "false", "HALO_ORIGINAL_ZOOM", _environment_value,
+		PLATFORM_VULKAN,
+		"Draw the zoom's blur as the game does, in passes over the whole screen,\n"
+		"rather than on a small copy blended over it once. Takes effect the next\n"
+		"start." },
+	{ "debug.original_blur", _config_boolean, "false", "HALO_ORIGINAL_BLUR", _environment_value,
+		PLATFORM_VULKAN,
+		"Draw a blur screen effect (the cryo bay's waking up, cutscenes) as the\n"
+		"game does, in passes over the whole screen, rather than its passes on\n"
+		"smaller copies of it. Takes effect the next start." },
 #endif
 #ifdef HALO_SWITCH
 	/* (720 by default: a handheld console's own lines, 1280x720) */
