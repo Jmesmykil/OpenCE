@@ -747,7 +747,7 @@ static const struct config_setting config_settings[] =
 
 	{ "debug.benchmark", _config_string, "\"\"", "HALO_BENCHMARK", _environment_value, _platform_all,
 		"A benchmark run, the same each time (port/linux/game/benchmark.c):\n"
-		"\"standard\" plays a10, a30, b30 and c10 30 seconds each and Blood\n"
+		"\"standard\" plays a10, a30, b30, c10 and c40 30 seconds each and Blood\n"
 		"Gulch, Damnation, Sidewinder and Chill Out 15 seconds each with 63\n"
 		"bots, the view turning, and\n"
 		"writes the frame rates to benchmark.txt (in the data folder, or the\n"
