@@ -983,6 +983,12 @@ static const struct config_setting config_settings[] =
 		"rather than at the frame's end for the next frame (which spares the\n"
 		"GPU storing the screen and loading it back; the ripples move a frame\n"
 		"later). Takes effect the next start." },
+	{ "debug.gpu_split_parts", _config_boolean, "false", "HALO_GPU_SPLIT_PARTS", _environment_value, _platform_android,
+		"With debug.profile_run under Vulkan: end the GPU's rendering at each part\n"
+		"of the frame the game names (the sky, the objects, the particles...), so\n"
+		"that gpu.txt times each part on its own. The stores and loads it adds\n"
+		"make every frame slower: for ranking the parts, in a run of its own.\n"
+		"Takes effect the next start." },
 	{ "debug.profile_run", _config_boolean, "false", "HALO_PROFILE_RUN", _environment_set_is_true, _platform_android,
 		"Profile each run, to send to the developers: a folder of its own in the\n"
 		"phone's Download/halo_profiles (named for the day and time it started:\n"

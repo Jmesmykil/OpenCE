@@ -254,6 +254,7 @@ void host_debug_profile_frame(uint64_t nanoseconds);
 /* the run's profile folder, for the Vulkan renderer's gpu.txt (host_vk_profile.c); empty when no profile is
 recorded (debug.profile_run: host_main.c) */
 extern char host_vk_profile_folder[512];
+extern int host_vk_profile_split;
 
 /* ---------- the Vulkan probe (host_vk_probe.c; port/android/VULKAN.md, phase 0) */
 

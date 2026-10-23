@@ -40,6 +40,7 @@ by target and by part and target, the longest first. A benchmark's map (port/lin
 #define BETWEEN "between renderings"
 
 char host_vk_profile_folder[512];
+int host_vk_profile_split;
 
 /* an interval's name: the game's part (parts[]) and what it is (whats[]: a rendering's target, or BETWEEN) */
 struct label
@@ -159,8 +160,10 @@ void host_vk_profile_initialize(void)
 	profile.on = 1;
 	fprintf(profile.file, "GPU %s, %u timestamp bits, %.3f ns a tick; every %u frames, the GPU's time by rendering "
 		"(host_vk_profile.c): each named for the part of the frame it began in and what it draws into; \""
-		BETWEEN "\" is the copies, blits, uploads and barriers between them\n\n", host_vk.properties.deviceName,
-		(unsigned)bits, profile.ns_per_tick, (unsigned)PROFILE_FRAMES);
+		BETWEEN "\" is the copies, blits, uploads and barriers between them%s\n\n", host_vk.properties.deviceName,
+		(unsigned)bits, profile.ns_per_tick, (unsigned)PROFILE_FRAMES, host_vk_profile_split ?
+		". debug.gpu_split_parts: a rendering ends at each part, so each part's time is its own; the stores and loads "
+		"that adds make every frame longer than it is" : "");
 	fflush(profile.file);
 	host_logf(HOST_LOG_INFO, "vk: the GPU's time by rendering goes to %s", path);
 }
@@ -311,6 +314,10 @@ void host_vk_profile_mark(const struct vk_command_marker *command)
 			profile.title[0] = 0;
 		return;
 	}
+	/* (debug.gpu_split_parts: the rendering ended at each part, so that its timestamps tell the parts apart - the stores
+and loads it adds make the frame longer: for ranking the parts, not for the frame's time) */
+	if (host_vk_profile_split)
+		host_vk_rendering_end();
 	profile.part = name_index(profile.parts, &profile.part_count, name);
 }
 

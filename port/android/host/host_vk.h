@@ -263,6 +263,8 @@ unsigned host_vk_texture_megabytes(void);
 /* host_vk_profile.c: the GPU's time by rendering, while a profile is recorded (debug.profile_run: the folder gpu.txt
 goes in, set before the device is made; empty, off). Each is nothing while it is off. */
 extern char host_vk_profile_folder[512];
+/* debug.gpu_split_parts: a rendering ended at each of the game's parts, to time each on its own (host_main.c) */
+extern int host_vk_profile_split;
 void host_vk_profile_initialize(void);
 /* the slot's command buffer just begun (its fence passed): its last frame read, its queries reset */
 void host_vk_profile_frame_begin(unsigned slot, VkCommandBuffer command);

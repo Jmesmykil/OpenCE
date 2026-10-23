@@ -346,6 +346,7 @@ struct host_settings
 {
 	int profile_hz;
 	int profile_run; /* debug.profile_run */
+	int gpu_split_parts; /* debug.gpu_split_parts */
 	char vk_probe[128]; /* empty: the game runs */
 	char vk_driver[256]; /* display.vk_driver: empty (the default) for the phone's own driver, "auto", or an archive */
 	char renderer[32]; /* display.renderer: "vulkan" (the default, also when empty) or "gl" */
@@ -377,6 +378,7 @@ static void config_read(const char *path, struct host_settings *settings)
 		toml_datum_t marker = toml_seek(result.toptab, "debug.vk_present_marker");
 		toml_datum_t self_test = toml_seek(result.toptab, "debug.vk_self_test");
 		toml_datum_t profile_run = toml_seek(result.toptab, "debug.profile_run");
+		toml_datum_t split = toml_seek(result.toptab, "debug.gpu_split_parts");
 
 		if (hz.type == TOML_INT64 && hz.u.int64 > 0)
 			settings->profile_hz = hz.u.int64 > 10000 ? 10000 : (int)hz.u.int64;
@@ -391,6 +393,7 @@ static void config_read(const char *path, struct host_settings *settings)
 		settings->vk_present_marker = marker.type == TOML_BOOLEAN && marker.u.boolean;
 		settings->vk_self_test = self_test.type == TOML_BOOLEAN && self_test.u.boolean;
 		settings->profile_run = profile_run.type == TOML_BOOLEAN && profile_run.u.boolean;
+		settings->gpu_split_parts = split.type == TOML_BOOLEAN && split.u.boolean;
 	}
 	toml_free(result);
 }
@@ -467,6 +470,7 @@ static void *game_main(void *unused)
 	config_read(path, &settings);
 	if (settings.profile_run)
 		profile_run_begin(data_root, &settings.profile_hz);
+	host_vk_profile_split = settings.profile_run && settings.gpu_split_parts;
 	/* (the benchmark's results go there too: port/linux/game/benchmark.c) */
 	if (profile_folder[0])
 		host_environment_set(&environment, "HALO_PROFILE_FOLDER", profile_folder);
