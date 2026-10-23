@@ -440,6 +440,104 @@ const char *host_save_root(void)
 	return save_root;
 }
 
+/* config.toml's game.maps.path and game.custom_maps.path (the game's own
+reading of them: port/linux/src/xbox_files.c), read once: the folder each
+names, a relative one under the data root, or empty */
+static char maps_folder[PATH_MAX], custom_maps_folder[PATH_MAX];
+
+static void configured_folders(void)
+{
+	static int read;
+	char path[PATH_MAX + 32];
+	toml_result_t result;
+	int which;
+
+	if (read)
+		return;
+	read = 1;
+	roots_resolve();
+	snprintf(path, sizeof(path), "%s/config.toml", data_root);
+	result = toml_parse_file_ex(path);
+	if (!result.ok)
+		return;
+	for (which = 0; which < 2; which++)
+	{
+		toml_datum_t setting = toml_seek(result.toptab, which ? "game.custom_maps.path" : "game.maps.path");
+		char *folder = which ? custom_maps_folder : maps_folder;
+		size_t length;
+
+		if (setting.type != TOML_STRING || !setting.u.s[0])
+			continue;
+		if (setting.u.s[0] == '/' || strstr(setting.u.s, ":/"))
+			snprintf(folder, PATH_MAX, "%s", setting.u.s);
+		else
+			snprintf(folder, PATH_MAX, "%s/%s", data_root, setting.u.s);
+		length = strlen(folder);
+		while (length > 1 && folder[length - 1] == '/')
+			folder[--length] = 0;
+		host_logf(HOST_LOG_INFO, "%s: %s", which ? "game.custom_maps.path" : "game.maps.path", folder);
+	}
+	toml_free(result);
+}
+
+/* a folder the settings name, checked: on the screens (host_ui_open), a
+maps folder without maps stops the game, a custom_maps folder that is not
+there is said and the game goes on */
+static void configured_folders_check(PadState *pad)
+{
+	char path[PATH_MAX + 32];
+	char message[PATH_MAX + 512];
+	struct stat information;
+
+	configured_folders();
+	if (maps_folder[0])
+	{
+		snprintf(path, sizeof(path), "%s/ui.map", maps_folder);
+		if (stat(maps_folder, &information) != 0 || !S_ISDIR(information.st_mode) || stat(path, &information) != 0)
+		{
+			int missing = stat(maps_folder, &information) != 0;
+
+			host_logf(HOST_LOG_ERROR, "game.maps.path: %s %s", maps_folder,
+				missing ? "is not there" : "has no maps (no ui.map)");
+			snprintf(message, sizeof(message), "config.toml's game.maps.path is %s, which %s. The game's maps are "
+				"only unpacked into %s/maps: put the maps in that folder, or empty game.maps.path.", maps_folder,
+				missing ? "is not there" : "has no maps in it (no ui.map)", data_root);
+			host_ui_message("THE MAPS FOLDER IS MISSING", message, (const char *const[]){ "A", "Quit", NULL });
+			for (;;)
+			{
+				if (!appletMainLoop())
+					break;
+				padUpdate(pad);
+				if (padGetButtonsDown(pad) & HidNpadButton_A)
+					break;
+				svcSleepThread(16666667);
+			}
+			host_ui_close();
+			host_exit(0);
+		}
+	}
+	if (custom_maps_folder[0] &&
+		(stat(custom_maps_folder, &information) != 0 || !S_ISDIR(information.st_mode)))
+	{
+		host_logf(HOST_LOG_WARN, "game.custom_maps.path: %s is not there", custom_maps_folder);
+		snprintf(message, sizeof(message), "config.toml's game.custom_maps.path is %s, which is not there, so no "
+			"Custom Edition maps are found. Make that folder, or empty game.custom_maps.path.", custom_maps_folder);
+		host_ui_message("THE CUSTOM MAPS FOLDER IS MISSING", message, (const char *const[]){ "A", "Continue", NULL });
+		for (;;)
+		{
+			if (!appletMainLoop())
+			{
+				host_ui_close();
+				host_exit(0);
+			}
+			padUpdate(pad);
+			if (padGetButtonsDown(pad) & HidNpadButton_A)
+				break;
+			svcSleepThread(16666667);
+		}
+	}
+}
+
 static struct timespec extraction_started;
 
 static int directory_has_maps(const char *root)
@@ -527,6 +625,7 @@ static void offer_an_update(void)
 		return;
 	}
 	host_update_offer(&pad);
+	configured_folders_check(&pad);
 	/* the window goes back to SDL, for the game */
 	host_ui_close();
 }
@@ -589,6 +688,11 @@ static void ensure_game_data(const char *root)
 	char error[512];
 	const char *name;
 
+	/* (maps a setting moved are used where they are, never unpacked:
+	configured_folders_check found them) */
+	configured_folders();
+	if (maps_folder[0])
+		return;
 	if (directory_has_maps(root))
 	{
 		/* (maps extracted before the extraction wrote the loading screen's picture: it from the image, if it is

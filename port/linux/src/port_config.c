@@ -547,6 +547,16 @@ static const struct config_setting config_settings[] =
 		"settings or other players' games (debug.txt names what they were\n"
 		"refused)." },
 
+	{ "game.maps.path", _config_string, "\"\"", "HALO_MAPS_PATH", _environment_value, _platform_all,
+		"The folder the game's maps are read from; empty for the maps folder in\n"
+		"the data folder. A relative path is under the data folder. Read once,\n"
+		"at the start. The disc's maps are only ever unpacked into the data\n"
+		"folder's maps, so a folder named here must hold them already." },
+	{ "game.custom_maps.path", _config_string, "\"\"", "HALO_CUSTOM_MAPS_PATH", _environment_value, _platform_all,
+		"The folder Custom Edition maps are read from (and map sharing's\n"
+		"downloads go to); empty for the custom_maps folder in the data folder.\n"
+		"A relative path is under the data folder. Read once, at the start." },
+
 	{ "paths.data", _config_string, "\"\"", "HALO_DATA_ROOT", _environment_value, _platform_desktop,
 		"The folder holding the game data's maps folder; empty looks in the\n"
 		"working directory and its assets folder. Windows paths are easiest in\n"
@@ -1698,11 +1708,28 @@ static void config_report_unknown_keys(toml_datum_t table)
 		}
 		for (key_index = 0; key_index < section.u.tab.size; key_index++)
 		{
+			toml_datum_t value = section.u.tab.value[key_index];
 			char name[128];
 
 			snprintf(name, sizeof(name), "%s.%s", table.u.tab.key[section_index], section.u.tab.key[key_index]);
+			/* (a dotted key, game.maps.path's maps.path: the table it makes,
+			each of its keys a setting's or not) */
+			if (value.type == TOML_TABLE)
+			{
+				int inner_index;
+
+				for (inner_index = 0; inner_index < value.u.tab.size; inner_index++)
+				{
+					char inner[192];
+
+					snprintf(inner, sizeof(inner), "%s.%s", name, value.u.tab.key[inner_index]);
+					if (config_setting_index(inner) < 0)
+						config_report_unknown_key(value.u.tab.value[inner_index].lineno, inner);
+				}
+				continue;
+			}
 			if (config_setting_index(name) < 0)
-				config_report_unknown_key(section.u.tab.value[key_index].lineno, name);
+				config_report_unknown_key(value.lineno, name);
 		}
 	}
 }

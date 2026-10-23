@@ -10,6 +10,9 @@ levels above the executable (the repository root for build/linux/halo).
 h:\ is the Halo Custom Edition install paths.custom_edition names, if any
 (its maps folder holds the resource maps Custom Edition maps need, and more
 maps).
+d:\maps and d:\custom_maps are the folders game.maps.path and
+game.custom_maps.path name, when they name one (a relative one under the
+data root), read once, at the first path translated.
 Every other drive letter X:\ is the subdirectory X/ of the save root (z:\ holds the persistent cache and saves,
 u:\ user data, t:\ title data): paths.saves, else
 $XDG_DATA_HOME/halo-linux or ~/.local/share/halo-linux. Path components are
@@ -205,16 +208,69 @@ const char *platform_custom_edition_root(void)
 	return root;
 }
 
+/* the folder a setting names (game.maps.path, game.custom_maps.path) into
+folder, a relative one under the data root; empty if it names none */
+static void configured_folder(const char *setting, char *folder, unsigned long size)
+{
+	const char *path = config_string(setting);
+
+	folder[0] = 0;
+	if (!path || !*path)
+		return;
+	/* (absolute: /..., a drive's C:\... or C:/..., the Switch's sdmc:/...) */
+	if (path[0] == '/' || path[0] == '\\' || strstr(path, ":/") || strstr(path, ":\\"))
+		snprintf(folder, size, "%s", path);
+	else
+		snprintf(folder, size, "%s/%s", platform_data_root(), path);
+	trim_separators(folder);
+	platform_log("%s: %s", setting, folder);
+}
+
+/* whether two names are the same, whatever their case */
+static BOOL same_name(const char *first, const char *second)
+{
+	while (*first && tolower((unsigned char)*first) == tolower((unsigned char)*second))
+	{
+		first++;
+		second++;
+	}
+	return !*first && !*second;
+}
+
+/* d:\'s maps and custom_maps folders, if game.maps.path or
+game.custom_maps.path moves them (the path's first name, which is matched
+whatever its case): the folder, else NULL */
+static const char *moved_folder(const char *name)
+{
+	static char maps[MAX_PATH], custom_maps[MAX_PATH];
+	static int read;
+
+	if (!read)
+	{
+		read = 1;
+		configured_folder("game.maps.path", maps, sizeof(maps));
+		configured_folder("game.custom_maps.path", custom_maps, sizeof(custom_maps));
+	}
+	if (maps[0] && same_name(name, "maps"))
+		return maps;
+	if (custom_maps[0] && same_name(name, "custom_maps"))
+		return custom_maps;
+	return NULL;
+}
+
 void platform_translate_path(const char *xbox_path, char *host_path, unsigned long host_path_size)
 {
 	char resolved[1024];
 	const char *cursor = xbox_path;
 	unsigned long length;
+	BOOL on_data_root = TRUE;
 
 	snprintf(resolved, sizeof(resolved), "%s", platform_data_root());
 	if (((cursor[0] >= 'a' && cursor[0] <= 'z') || (cursor[0] >= 'A' && cursor[0] <= 'Z')) && cursor[1] == ':')
 	{
 		char drive = (char)(cursor[0] | 0x20);
+
+		on_data_root = drive == 'd';
 
 		if (drive == 'h' && platform_custom_edition_root()[0])
 		{
@@ -248,6 +304,18 @@ void platform_translate_path(const char *xbox_path, char *host_path, unsigned lo
 		leave the root */
 		if (!component_length || strspn(component, ". ") == component_length)
 			continue;
+		/* (d:\'s first name, if it is a folder a setting moved) */
+		if (on_data_root)
+		{
+			const char *moved = moved_folder(component);
+
+			on_data_root = FALSE;
+			if (moved)
+			{
+				snprintf(resolved, sizeof(resolved), "%s", moved);
+				continue;
+			}
+		}
 
 		if (posix_find_entry_case_insensitive(resolved, component, on_disk, sizeof(on_disk)))
 		{
