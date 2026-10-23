@@ -833,6 +833,13 @@ static void command_targets(const struct vk_command_targets *command)
 	if (color != B.color || depth != B.depth || samples != B.samples)
 	{
 		host_vk_rendering_end();
+		/* (a colour target a draw has sampled, left: readable now, between renderings, rather than at that draw,
+		which would end the rendering it is in - on a phone's GPU, the screen's, stored and loaded again) */
+		if (B.color && B.color != color && B.color->sampled && B.color->layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+		{
+			host_vk_target_transition(host_vk_frame_command(), B.color, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			B.counts.read_ahead++;
+		}
 		B.color = color;
 		B.depth = depth;
 		B.samples = samples;
@@ -1377,9 +1384,11 @@ static void log_statistics(void)
 	struct host_vk_counts *c = &B.counts;
 
 	host_logf(HOST_LOG_INFO, "vk: %u frames: %u hand-overs; commands: %u targets, %u clears, %u presents; clears: %u drawn, "
-		"%u by vkCmdClearAttachments; %u target changes; %u images; submissions %llu, retired %u; %u swapchain "
+		"%u by vkCmdClearAttachments; %u target changes; %u renderings ended to read a target, %u targets made readable "
+		"as they were left; %u images; submissions %llu, retired %u; %u swapchain "
 		"re-creations; validation errors %u; data: %u records, %u KB a frame, %u ring buffers", c->frames, c->hand_overs,
-		c->targets, c->clears, c->presents, c->clears_drawn, c->clears_attachments, c->target_changes, B.images,
+		c->targets, c->clears, c->presents, c->clears_drawn, c->clears_attachments, c->target_changes, c->sample_splits,
+		c->read_ahead, B.images,
 		(unsigned long long)B.submission, retired_locked(), c->recreations, host_vk_validation_errors(), c->data_records,
 		c->data_bytes / 1024 / (c->frames ? c->frames : 1), host_vk_data_buffers());
 	host_logf(HOST_LOG_INFO, "vk: draws in %u frames: %u made; skipped %u for a shader, %u for a pipeline, %u no target, %u data "
@@ -1401,7 +1410,7 @@ static void log_statistics(void)
 	c->draws_made = c->draws_skipped_target = c->draws_skipped_data = c->draws_skipped_other = c->draws_texture_missing = 0;
 	c->textures_skipped = c->texture_bytes = 0;
 	c->frames = c->hand_overs = c->targets = c->clears = c->presents = c->clears_drawn = c->clears_attachments = 0;
-	c->target_changes = 0;
+	c->target_changes = c->sample_splits = c->read_ahead = 0;
 	c->data_records = c->data_bytes = 0;
 }
 

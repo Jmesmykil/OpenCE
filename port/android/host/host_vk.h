@@ -128,6 +128,10 @@ struct host_vk_target
 	VkDeviceMemory multisample_memory;
 	VkImageView multisample_view;
 	VkImageLayout multisample_layout;
+	/* a draw has sampled it: made readable as soon as it is no longer drawn into (command_targets), so that the
+	rendering of the next draw that samples it need not end to make it so - an object's shadow map, cast onto the
+	level in the screen's rendering */
+	int sampled;
 	struct host_vk_target *next_in_bucket;
 };
 
@@ -210,6 +214,9 @@ struct host_vk_backend
 	struct host_vk_counts
 	{
 		unsigned frames, hand_overs, targets, clears, presents, clears_drawn, clears_attachments, target_changes;
+		/* renderings ended to make a target readable for a draw (host_vk_draw.c), and targets made readable as
+		they were left instead (command_targets) */
+		unsigned sample_splits, read_ahead;
 		unsigned recreations;
 		unsigned data_records, data_bytes;
 		unsigned draws_ready, draws_skipped_shader, draws_skipped_pipeline;
