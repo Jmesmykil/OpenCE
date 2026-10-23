@@ -12,8 +12,9 @@ multiplayer map, by name), separated by commas. The standard list:
 - a30 (Halo): the cliffs by the lifepod, the waterfall with its fog and mist;
 - b30 (The Silent Cartographer): the beach, its water, terrain and the fight on it;
 - c10 (343 Guilty Spark): the swamp, its fog, rain and plants;
-- bloodgulch and damnation, 15 seconds each, a local Slayer game with debug.benchmark_bots computer players, who
-  fight with what they find.
+- bloodgulch, damnation, sidewinder and chillout, 15 seconds each, a local Slayer game with debug.benchmark_bots
+  computer players, who fight with what they find: an open canyon, an enclosed hall of lights and effects, a wide
+  snowfield, and a small arena where the fighting fills the screen.
 
 A campaign level starts as the Solo menu starts one (normal difficulty, no saved game), each cinematic skipped as a
 button press would while it can be (the skippable ones: a scripted stretch that cannot be skipped, as a10's waking up,
@@ -66,7 +67,7 @@ void halo_render_marker(char const *name);
 /* (fopen here takes an Xbox path: msvc_crt.c) */
 FILE *platform_fopen_host(char const *path, char const *mode);
 
-#define STANDARD_STAGES "a10:30,a30:30,b30:30,c10:30,bloodgulch:15,damnation:15"
+#define STANDARD_STAGES "a10:30,a30:30,b30:30,c10:30,bloodgulch:15,damnation:15,sidewinder:15,chillout:15"
 #define MAXIMUM_STAGES 16
 #define WARM_UP_SECONDS 3.0
 #define TURN_DEGREES 18.0
