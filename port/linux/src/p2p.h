@@ -164,9 +164,14 @@ int p2p_joined_listed_host(void);
 /* a copy of the public games found, in the order shown (the most players
 first; then those not failed, the open ones, by name); returns their count */
 int p2p_lobby_games(struct p2p_listing *games, int maximum_count);
-/* how many hosts list a game of a newer network version, which is not
-shown (an old build sees none of the games) */
-int p2p_lobby_newer_games(void);
+/* how many hosts list a game that is not shown: of a newer network version
+(an old build sees none of the games), or at a time far from this
+machine's clock (a wrong clock sees none of them); returns both together */
+int p2p_lobby_hidden_games(int *newer, int *wrong_clock);
+/* how many seconds this machine's clock is behind the right time (ahead if
+negative), if the platform learned it (the Switch: GitHub's, before the
+game starts); 0 if it did not */
+int p2p_lobby_clock_offset(long *seconds);
 /* a game the browser could not join: kept, marked failed, for this run */
 void p2p_lobby_mark_failed(const unsigned char *identifier);
 /* a locked game's invite (into its invite), if the password is its own:

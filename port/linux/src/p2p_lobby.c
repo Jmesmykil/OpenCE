@@ -54,6 +54,13 @@ Checking signatures takes work, and anyone can send listings: at most
 VERIFY_BUDGET milliseconds of it each pass of the p2p thread, from a queue
 of MAXIMUM_QUEUED; the rest is dropped (hosts publish again).
 
+A game a browser cannot show is counted, by its host (p2p_lobby_hidden_games,
+for the browser to say how many there are): one of a newer network version,
+and a live listing whose time is more than LIVE_WINDOW from this machine's
+clock - a clock that is wrong, this one or the host's. A platform that learns
+the right time says how far off this machine's clock is
+(HALO_CLOCK_OFFSET, the Switch's from GitHub: p2p_lobby_clock_offset).
+
 Each game's host is probed for its ping (p2p_probe_start: the tunnel to it
 timed, p2p.c), a few at once, again each PROBE_REFRESH and on Refresh. A
 game with a password is not: its token is sealed.
@@ -202,15 +209,16 @@ static struct
 	/* the identifiers of games joining failed */
 	unsigned char failed[MAXIMUM_GAMES][P2P_IDENTIFIER_SIZE];
 	int failed_count;
-	/* the hosts heard listing a game of a newer network version, which are
-	not shown (an old build sees none of the games: the browser says why),
-	each forgotten as a game is (GAME_EXPIRY) */
+	/* the hosts heard listing a game that is not shown, and why (an old
+	build sees none of the games, nor does a wrong clock: the browser says
+	so), each forgotten as a game is (GAME_EXPIRY) */
 	struct
 	{
 		unsigned char key_hash[P2P_KEY_HASH_SIZE];
 		unsigned long heard_time;
 		int used;
-	} newer[MAXIMUM_GAMES];
+		int reason;
+	} hidden[MAXIMUM_GAMES];
 } lobby;
 
 static int elapsed(unsigned long since, unsigned long time)
@@ -586,6 +594,48 @@ void p2p_lobby_slot_heard(const char *hash_text, const unsigned char *payload, i
 	queued->retained = retained;
 }
 
+enum
+{
+	_hidden_newer,
+	_hidden_clock,
+};
+
+/* a host heard listing a game that is not shown (lobby.hidden) */
+static void hidden_heard(const unsigned char *key_hash, int reason)
+{
+	int index, free_index = -1;
+
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+	{
+		if (lobby.hidden[index].used && !memcmp(lobby.hidden[index].key_hash, key_hash, P2P_KEY_HASH_SIZE))
+		{
+			lobby.hidden[index].heard_time = p2p_now();
+			lobby.hidden[index].reason = reason;
+			return;
+		}
+		if (!lobby.hidden[index].used && free_index < 0)
+			free_index = index;
+	}
+	if (free_index < 0)
+		return;
+	memcpy(lobby.hidden[free_index].key_hash, key_hash, P2P_KEY_HASH_SIZE);
+	lobby.hidden[free_index].heard_time = p2p_now();
+	lobby.hidden[free_index].reason = reason;
+	lobby.hidden[free_index].used = 1;
+}
+
+/* a host whose game is shown now, or has stopped: no longer counted */
+static void hidden_forget(const unsigned char *key_hash)
+{
+	int index;
+
+	for (index = 0; index < MAXIMUM_GAMES; index++)
+	{
+		if (lobby.hidden[index].used && !memcmp(lobby.hidden[index].key_hash, key_hash, P2P_KEY_HASH_SIZE))
+			lobby.hidden[index].used = 0;
+	}
+}
+
 /* a queued listing, its signature checked: taken or not */
 static void listing_take(const struct queued *queued, const struct listing *listing)
 {
@@ -600,6 +650,7 @@ static void listing_take(const struct queued *queued, const struct listing *list
 		return;
 	if (game && listing->sequence <= game->sequence)
 		return;
+	hidden_forget(queued->key_hash);
 	if (listing->flags & _listing_closed)
 	{
 		if (!tombstone)
@@ -700,28 +751,6 @@ static void update_probes(void)
 	}
 }
 
-/* a host heard listing a game of a newer network version (lobby.newer) */
-static void newer_heard(const unsigned char *key_hash)
-{
-	int index, free_index = -1;
-
-	for (index = 0; index < MAXIMUM_GAMES; index++)
-	{
-		if (lobby.newer[index].used && !memcmp(lobby.newer[index].key_hash, key_hash, P2P_KEY_HASH_SIZE))
-		{
-			lobby.newer[index].heard_time = p2p_now();
-			return;
-		}
-		if (!lobby.newer[index].used && free_index < 0)
-			free_index = index;
-	}
-	if (free_index < 0)
-		return;
-	memcpy(lobby.newer[free_index].key_hash, key_hash, P2P_KEY_HASH_SIZE);
-	lobby.newer[free_index].heard_time = p2p_now();
-	lobby.newer[free_index].used = 1;
-}
-
 static void update_browsing(void)
 {
 	unsigned long start = p2p_now();
@@ -746,7 +775,7 @@ static void update_browsing(void)
 		if (lobby.browsing && listing_read(queued.payload, queued.size, &listing) &&
 			listing.version > HALO_PORT_NETWORK_VERSION && !(listing.flags & _listing_closed))
 		{
-			newer_heard(queued.key_hash);
+			hidden_heard(queued.key_hash, _hidden_newer);
 			continue;
 		}
 		if (!listing_read(queued.payload, queued.size, &listing) || listing.version != HALO_PORT_NETWORK_VERSION ||
@@ -762,7 +791,14 @@ static void update_browsing(void)
 			long window = queued.retained ? RETAINED_WINDOW : LIVE_WINDOW;
 
 			if (difference > window || difference < -window)
+			{
+				/* (a live one counted: a host listing now, whose clock or
+				this machine's is wrong. A retained copy may be one long
+				gone, which is no game) */
+				if (!queued.retained && lobby.browsing && !(listing.flags & _listing_closed))
+					hidden_heard(queued.key_hash, _hidden_clock);
 				continue;
+			}
 		}
 		/* (the work, without the lock: the game's threads need not wait) */
 		pthread_mutex_unlock(&p2p_lock);
@@ -777,8 +813,8 @@ static void update_browsing(void)
 	{
 		if (lobby.games[index].used && elapsed(lobby.games[index].heard_time, GAME_EXPIRY))
 			lobby.games[index].used = 0;
-		if (lobby.newer[index].used && elapsed(lobby.newer[index].heard_time, GAME_EXPIRY))
-			lobby.newer[index].used = 0;
+		if (lobby.hidden[index].used && elapsed(lobby.hidden[index].heard_time, GAME_EXPIRY))
+			lobby.hidden[index].used = 0;
 	}
 	if (lobby.browsing)
 		update_probes();
@@ -916,7 +952,7 @@ void p2p_lobby_browse(int on)
 		if (!on)
 		{
 			memset(lobby.games, 0, sizeof(lobby.games));
-			memset(lobby.newer, 0, sizeof(lobby.newer));
+			memset(lobby.hidden, 0, sizeof(lobby.hidden));
 			lobby.queue_count = 0;
 		}
 		lobby.query_wanted = on;
@@ -1011,16 +1047,34 @@ int p2p_listing_unlock(struct p2p_listing *listing, const char *password)
 	return opened;
 }
 
-int p2p_lobby_newer_games(void)
+int p2p_lobby_hidden_games(int *newer, int *wrong_clock)
 {
-	int count = 0;
 	int index;
 
+	*newer = *wrong_clock = 0;
 	pthread_mutex_lock(&p2p_lock);
 	for (index = 0; index < MAXIMUM_GAMES; index++)
-		count += lobby.newer[index].used;
+	{
+		if (lobby.hidden[index].used)
+			++*(lobby.hidden[index].reason == _hidden_newer ? newer : wrong_clock);
+	}
 	pthread_mutex_unlock(&p2p_lock);
-	return count;
+	return *newer + *wrong_clock;
+}
+
+int p2p_lobby_clock_offset(long *seconds)
+{
+	const char *text = getenv("HALO_CLOCK_OFFSET");
+	char *end;
+	long value;
+
+	if (!text || !*text)
+		return 0;
+	value = strtol(text, &end, 10);
+	if (*end)
+		return 0;
+	*seconds = value;
+	return 1;
 }
 
 void p2p_lobby_mark_failed(const unsigned char *identifier)

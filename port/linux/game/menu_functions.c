@@ -4431,6 +4431,9 @@ wait is longer) */
 join that failed */
 #define LOBBY_BROWSER_LOOK_TIME 6000
 #define LOBBY_BROWSER_FAILED_TIME 8000
+/* seconds: a clock off by more is wrong (p2p_lobby.c's retained window; the
+Switch's updater says it too, host_update.c) */
+#define LOBBY_BROWSER_CLOCK_TOLERANCE 600
 
 static struct
 {
@@ -4471,8 +4474,52 @@ static short browser_chosen_row(void)
 		row < BROWSER_ROWS ? row : NONE;
 }
 
+/* "3h 12 min", "25 min" */
+static void duration_text(long seconds, wchar_t *text, short size)
+{
+	long minutes = (seconds + 30) / 60;
+
+	if (minutes >= 48 * 60)
+		usnprintf(text, size - 1, L"%ld days", (minutes + 12 * 60) / (24 * 60));
+	else if (minutes >= 60)
+		usnprintf(text, size - 1, L"%ldh %ld min", minutes / 60, minutes % 60);
+	else
+		usnprintf(text, size - 1, L"%ld min", minutes);
+	text[size - 1] = 0;
+}
+
+/* how far this machine's clock is off, if the platform learned it and it is
+wrong (p2p_lobby_clock_offset): positive if it is behind */
+static boolean lobby_browser_clock_wrong(long *offset)
+{
+	return p2p_lobby_clock_offset(offset) &&
+		(*offset > LOBBY_BROWSER_CLOCK_TOLERANCE || *offset < -LOBBY_BROWSER_CLOCK_TOLERANCE);
+}
+
+/* whether the player has been told the clock is wrong: once a run (the
+dialog closing opens the browser again, which would tell them again) */
+static boolean lobby_browser_clock_warned = FALSE;
+
 static void lobby_browser_begin(void)
 {
+	long offset;
+
+	/* (a clock that is wrong sees no game: the player told, the first time
+	the browser opens) */
+	if (!lobby_browser_clock_warned && lobby_browser_clock_wrong(&offset))
+	{
+		static wchar_t text[256];
+		wchar_t duration[32];
+
+		duration_text(offset < 0 ? -offset : offset, duration, NUMBEROF(duration));
+		lobby_browser_clock_warned = TRUE;
+		usnprintf(text, NUMBEROF(text) - 1, L"This console's clock is %s %s, no games can be joined. Set the "
+			L"console's date and time in the settings.", duration, offset < 0 ? L"ahead" : L"behind");
+		text[NUMBEROF(text) - 1] = 0;
+		platform_log("menus: the server browser opened with the clock %ld s %s", offset < 0 ? -offset : offset,
+			offset < 0 ? "ahead" : "behind");
+		display_error_text_deferred(text, NONE);
+	}
 	lobby_browser.count = 0;
 	lobby_browser.first = 0;
 	lobby_browser.chosen = 0;
@@ -4692,6 +4739,8 @@ static void lobby_browser_update(struct widget_instance *list)
 	/* the line below the rows */
 	{
 		wchar_t name[P2P_LISTING_NAME_SIZE + 1];
+		int newer, wrong_clock;
+		int hidden = p2p_lobby_hidden_games(&newer, &wrong_clock);
 
 		if (!config_boolean("network.online"))
 			usnprintf(text, NUMBEROF(text) - 1, L"Internet play is off (Settings)");
@@ -4713,16 +4762,22 @@ static void lobby_browser_update(struct widget_instance *list)
 		}
 		else if (!lobby_browser.count)
 		{
-			/* (an old build sees none of the games: it says why) */
-			int newer = p2p_lobby_newer_games();
+			/* (an old build, or a wrong clock, sees none of the games: it
+			says why; the line below counts them) */
+			long offset;
 
 			if (now - lobby_browser.begin_time < LOBBY_BROWSER_LOOK_TIME)
 				usnprintf(text, NUMBEROF(text) - 1, L"Looking for public games...");
-			else if (newer)
+			else if (lobby_browser_clock_wrong(&offset))
 			{
-				usnprintf(text, NUMBEROF(text) - 1, L"%d %s on a newer version: update the game to join", newer,
-					newer == 1 ? L"game is" : L"games are");
+				wchar_t duration[32];
+
+				duration_text(offset < 0 ? -offset : offset, duration, NUMBEROF(duration));
+				usnprintf(text, NUMBEROF(text) - 1, L"The console's clock is %s %s: set it to see the games",
+					duration, offset < 0 ? L"ahead" : L"behind");
 			}
+			else if (hidden)
+				usnprintf(text, NUMBEROF(text) - 1, L"No public games this version can join");
 			else
 				usnprintf(text, NUMBEROF(text) - 1, L"No public games found");
 		}
@@ -4741,7 +4796,24 @@ static void lobby_browser_update(struct widget_instance *list)
 			text[0] = 0;
 		text[NUMBEROF(text) - 1] = 0;
 		text_set(named(list, "ticker_player_info", 0), text);
-		text_set(named(list, "ticker_rules_info", 0), L"");
+		/* (the games heard that are not shown, and why) */
+		if (hidden && config_boolean("network.online") && config_boolean("network.public_lobby"))
+		{
+			if (!newer || !wrong_clock)
+			{
+				usnprintf(text, NUMBEROF(text) - 1, L"%d not shown: %s", hidden,
+					newer ? L"on a newer or test version" : L"their clock or this console's is wrong");
+			}
+			else
+			{
+				usnprintf(text, NUMBEROF(text) - 1, L"%d not shown: %d on a newer or test version, %d with a "
+					L"wrong clock", hidden, newer, wrong_clock);
+			}
+			text[NUMBEROF(text) - 1] = 0;
+			text_set(named(list, "ticker_rules_info", 0), text);
+		}
+		else
+			text_set(named(list, "ticker_rules_info", 0), L"");
 	}
 	if (stats)
 	{

@@ -998,6 +998,18 @@ static void *game_main(void *unused)
 	host_logf(HOST_LOG_INFO, "rendering %sx480", width);
 	time_zone(zone, sizeof(zone));
 	environment_set(&environment, "TZ", zone);
+	/* how far the console's clock is behind GitHub's, if the updater learned
+	it (host_update.c): the server browser's (p2p_lobby.c) */
+	{
+		long long offset;
+		char text[32];
+
+		if (host_https_clock_offset(&offset))
+		{
+			snprintf(text, sizeof(text), "%lld", offset);
+			environment_set(&environment, "HALO_CLOCK_OFFSET", text);
+		}
+	}
 
 	setting = getenv("HALO_GUEST_IMAGE");
 	if (setting && *setting)
