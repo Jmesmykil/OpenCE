@@ -35,6 +35,12 @@ FILE *platform_fopen_host(const char *path, const char *mode)
 	return fopen(path, mode);
 }
 
+/* ... and one removed by it (msvc_crt.c's, for overlay_commands.c) */
+int platform_remove_host(const char *path)
+{
+	return remove(path);
+}
+
 FILE *halo_windows_freopen(const char *path, const char *mode, FILE *stream)
 {
 	char host_path[1024];
