@@ -21,6 +21,7 @@ is: looking for the file is one request a second to the file system.
 #include "cseries.h"
 #include "cseries/cseries_windows.h"
 #include "hs/hs.h"
+#include "../src/posix.h"
 
 #ifdef HALO_SWITCH
 
@@ -31,7 +32,6 @@ is: looking for the file is one request a second to the file system.
 extern const char *platform_data_root(void);
 extern FILE *platform_fopen_host(char const *path, char const *mode);
 extern int platform_remove_host(char const *path);
-extern int posix_make_directory(const char *path);
 extern int config_boolean(const char *name);
 extern int config_set_text(const char *name, const char *value, char *error, size_t error_size);
 extern void platform_log(const char *format, ...);
@@ -117,6 +117,14 @@ void overlay_commands_update(
 		folder_made = TRUE;
 	}
 	snprintf(path, sizeof(path), "%s/overlay/command.txt", platform_data_root());
+	/* (looked for first by the host, which says nothing of a file that is not there: the guest's open of a missing
+	file is logged, once a second) */
+	{
+		struct posix_file_information information;
+
+		if (posix_stat(path, &information) != 0)
+			return;
+	}
 	file = platform_fopen_host(path, "rb");
 	if (!file)
 		return;
