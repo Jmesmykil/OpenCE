@@ -52,6 +52,7 @@ a bitmap made is kept until the map goes, as anything may still hold it.
 
 #include "cseries.h"
 #include "errors.h"
+#include "cseries/cseries_windows.h"
 #include "bitmaps/bitmaps.h"
 #include "bitmaps/bitmap_group.h"
 #include "cache/cache_files.h"
@@ -147,6 +148,9 @@ typedef char verify_bitmap_data_size[sizeof(struct bitmap_data) == BITMAP_DATA_S
 /* ---------- structures */
 
 /* a bitmap tag file read, and what it makes */
+/* (mod_bitmaps_read: how often a mod bitmap's file is looked at for a change) */
+#define MOD_BITMAP_STAMP_MILLISECONDS 10000
+
 struct mod_bitmap
 {
 	struct mod_bitmap *next;
@@ -158,6 +162,9 @@ struct mod_bitmap
 	char *path;
 	unsigned long file_size;
 	unsigned long stamp[2];
+	/* when its file was last found unchanged (system_milliseconds; 0, never):
+	looked at again only after MOD_BITMAP_STAMP_MILLISECONDS */
+	unsigned long stamp_checked_at;
 	/* where its processed pixel data is in the file, and how much there is */
 	unsigned long pixel_data_offset;
 	unsigned long pixel_data_size;
@@ -1240,9 +1247,24 @@ boolean mod_bitmaps_read(
 		return FALSE;
 	}
 	/* (a file changed since it was read is read again by mods_reload: until
-	then its bitmaps are black) */
-	if (!port_mods_file_stamp(made->file, &size, stamp) || size != made->file_size ||
-		stamp[0] != made->stamp[0] || stamp[1] != made->stamp[1] ||
+	then its bitmaps are black. Looked at once every
+	MOD_BITMAP_STAMP_MILLISECONDS at most, not at each read: a bitmap is read
+	each time the texture cache takes it back, and each look was a request to
+	the Switch's file system, in the middle of a frame) */
+	{
+		unsigned long now = system_milliseconds();
+		boolean unchanged = TRUE;
+
+		if (!made->stamp_checked_at || now - made->stamp_checked_at >= MOD_BITMAP_STAMP_MILLISECONDS)
+		{
+			unchanged = port_mods_file_stamp(made->file, &size, stamp) && size == made->file_size &&
+				stamp[0] == made->stamp[0] && stamp[1] == made->stamp[1];
+			made->stamp_checked_at = unchanged ? (now ? now : 1) : 0;
+		}
+		if (!unchanged)
+			size = 0;
+	}
+	if (!made->stamp_checked_at ||
 		!port_mods_file_read(made->file, made->pixel_data_offset + (unsigned long)bitmap->pixels_offset, buffer,
 			(unsigned long)bitmap->pixels_size))
 	{
