@@ -112,7 +112,11 @@ static void overlay_folder_prepare(
 		posix_make_directory(path);
 }
 
-/* (once, at the first look) whether the overlay is installed, and if it is, its folders made ready */
+static void overlay_flags_update(void);
+
+/* (once, at the first look) whether the overlay is installed, and if it is, its folders made ready and the flags of
+what is on from the start written into flags at once (the settings' and the console's globals' values as the game
+starts: their defaults, or config.toml's) */
 static boolean overlay_present(
 	void)
 {
@@ -134,6 +138,7 @@ static boolean overlay_present(
 				if ((file = platform_fopen_host(path, "wb")) != NULL)
 					fclose(file);
 			}
+			overlay_flags_update();
 			platform_log("overlay: the Ultrahand package's folder is there (%s): its commands are taken",
 				OVERLAY_PACKAGE_FOLDER);
 		}
