@@ -31,6 +31,15 @@ It is not an emulator. The game's own code, decompiled from the Xbox build
 Its Direct3D 8 rendering is translated to **Vulkan** on Android and the PS5
 and to **deko3d**, the Switch's own GPU interface, on the Switch.
 
+> [!TIP]
+> **New on the Switch: cheats and settings from an overlay.** With
+> [OpenCE-Ultrahand](https://github.com/hardran3/OpenCE-Ultrahand), an
+> [Ultrahand Overlay](https://github.com/ppkantorski/Ultrahand-Overlay)
+> package by **hardran3**, you can turn on cheats (god mode, infinite ammo,
+> super jump and more), revert to the last checkpoint, and change VSync,
+> interpolation and the frame-rate display without leaving the game. It
+> needs Build 119 or later, and Ultrahand 2.5.3 or later.
+
 > [!IMPORTANT]
 > **No game data is included.** You need your own **Xbox** disc image of
 > Halo: Combat Evolved (`.iso` or `.xiso`, any region). The game unpacks
