@@ -817,8 +817,11 @@ static boolean rasterizer_screen_effect_port_small_blur(
 	real *scale_x,
 	real *scale_y)
 {
-	static real logged_radius = -1.0f;
+	/* (said when how it is drawn changes, not its radius: a blur that fades changes its radius every frame, and Lumoria's
+	logged a line a frame) */
+	static short logged_type = -1;
 	static short logged_passes = -1;
+	static short logged_small = -1;
 	real screen_scale;
 	real spread;
 	short viewport_width;
@@ -870,10 +873,11 @@ static boolean rasterizer_screen_effect_port_small_blur(
 	height = (short)(viewport_height * screen_scale / divisor + 0.5f);
 	spread /= (real)divisor;
 	small = spread >= RASTERIZER_SCREEN_EFFECT_PORT_BLUR_LEAST_SPREAD;
-	if (parameters->convolution_radius != logged_radius || pass_count != logged_passes)
+	if (parameters->convolution_type != logged_type || pass_count != logged_passes || small != logged_small)
 	{
-		logged_radius = parameters->convolution_radius;
+		logged_type = parameters->convolution_type;
 		logged_passes = pass_count;
+		logged_small = small;
 		platform_log("screen blur: %s, radius %.2f, %d passes, a spread of %.1f texels at %dx%d: %s",
 			parameters->convolution_type == _rasterizer_screen_effect_convolution_type_warp ? "warp" : "blur",
 			parameters->convolution_radius, pass_count, spread, width, height,

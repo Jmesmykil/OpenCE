@@ -124,6 +124,9 @@ static struct
 	double state_seconds, control_seconds, skipped_at;
 	/* the multiplayer setup's steps done */
 	boolean map_set, player_added, started;
+	/* (state_seconds when the start was asked for: a lobby frame can take seconds, as the Internet hosting's first
+	one took ten, and the game is given its ten from the start, not from the stage's beginning) */
+	double started_seconds;
 	double yaw, measured_seconds;
 	float *frame_ms;
 	long frame_count;
@@ -402,6 +405,7 @@ static void benchmark_multiplayer_setup(struct benchmark_stage const *stage)
 	if (!benchmark.started && benchmark.player_added && benchmark.state_seconds >= 3.0)
 	{
 		benchmark.started = TRUE;
+		benchmark.started_seconds = benchmark.state_seconds;
 		network_game_client_request_immediate_start();
 	}
 }
@@ -476,7 +480,8 @@ void benchmark_update(
 	case _benchmark_loading:
 		/* (a game that ended before it was measured, as a local game whose host went down, or one that never began:
 		the next map, this one's line saying so) */
-		if (main_menu_loaded && ((!stage->campaign && benchmark.started && benchmark.state_seconds >= 10.0) ||
+		if (main_menu_loaded && ((!stage->campaign && benchmark.started &&
+			benchmark.state_seconds - benchmark.started_seconds >= 10.0) ||
 			benchmark.state_seconds >= CONTROL_TIMEOUT_SECONDS))
 		{
 			snprintf(stage->failed, sizeof(stage->failed), "%s", benchmark.started ?
