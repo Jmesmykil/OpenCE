@@ -1,5 +1,21 @@
 # Changelog
 
+## Build 119
+
+- Switch: with a mod of high-resolution textures (Uncompressed Textures, say), textures the game lets go of are kept in the console's memory outside the game's own, 512 MB of them, and read back from there instead of the SD card: most of the hitches in busy matches with the mod. Blood Gulch and Battle Creek with 63 bots went from 53.9 and 48.6 to 59.3 and 53.8 frames a second. (thelinkin3000)
+- Switch: Custom Edition maps' textures are kept there too. (thelinkin3000)
+- Switch: Custom Edition maps load faster: Lumoria A from 79 to 50 seconds. (thelinkin3000)
+- Mods' files stay open between reads and are no longer checked for changes at each read, so their textures load without hitching. (thelinkin3000)
+- The sound mixer lets the game in between voices, rather than holding it off for a whole mix, which removed stutters in busy fights: Chill Out stays at 60 frames a second on the Switch. (thelinkin3000)
+- Switch: no more "Restart to get a 512 MB memory window" message at startup: the texture memory above makes up for the smaller window. (thelinkin3000)
+- Switch: an Ultrahand overlay can control the game: a console command or a "config <setting> <value>" line written to switch/halo/overlay/command.txt is run within a second (game.overlay_commands, on by default). (thelinkin3000)
+
+### From OpenCE
+
+- Network version 38: this build plays online only with other builds of this version or newer. (MrBruh)
+- The server browser names OpenCE gametypes (SWAT, HC CTF), for LAN and internet games. (MrBruh)
+- A host can leave the shield effects to each player's own setting (SHIELD EFFECTS: PLAYERS' OWN); they stay the host's by default. (MrBruh)
+
 ## Build 118
 
 - The game no longer stays on a black screen at startup with interpolation turned off (Video Setup, or display.interpolation in config.toml): its loading screen waited for a vertical blank that had not started yet. Seen on the Switch; the fix is in every renderer. (thelinkin3000)
