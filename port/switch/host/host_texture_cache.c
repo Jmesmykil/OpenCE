@@ -135,6 +135,11 @@ static void cache_empty(void)
 		budget = CACHE_MINIMUM;
 	if (budget > CACHE_MAXIMUM)
 		budget = CACHE_MAXIMUM;
+	if (hits || misses || puts)
+		host_logf(HOST_LOG_INFO, "texture cache (host): the map before had %lu textures read from here, %lu from the "
+			"card", hits, misses);
+	/* (the counts, the map's from now: the report's are since this) */
+	hits = misses = puts = refused = 0;
 	cache_budget = budget;
 	bytes_since_look = 0;
 	host_logf(HOST_LOG_INFO, "texture cache (host): emptied; up to %.0f MB from now (%.0f MB of the heap free)",
@@ -237,9 +242,9 @@ void host_texture_cache_report(void)
 {
 	pthread_mutex_lock(&cache_lock);
 	if (hits || misses || puts || cache_entries)
-		host_logf(HOST_LOG_INFO, "texture cache (host): %.0f MB of %.0f MB in %lu textures; %lu read from here, "
-			"%lu from the card, %lu kept, %lu not kept for want of memory", (double)cache_bytes / 1048576.0,
-			(double)cache_budget / 1048576.0, cache_entries, hits, misses, puts, refused);
-	hits = misses = puts = refused = 0;
+		host_logf(HOST_LOG_INFO, "texture cache (host): %.0f MB of %.0f MB in %lu textures; since the map loaded, %lu "
+			"read from here, %lu from the card, %lu kept, %lu not kept for want of memory",
+			(double)cache_bytes / 1048576.0, (double)cache_budget / 1048576.0, cache_entries, hits, misses, puts,
+			refused);
 	pthread_mutex_unlock(&cache_lock);
 }
