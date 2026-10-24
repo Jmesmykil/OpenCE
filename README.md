@@ -83,9 +83,6 @@ and to **deko3d**, the Switch's own GPU interface, on the Switch.
   ARM CPU.
 - **Android, Vulkan:** the first time a scene shows, a few parts can be
   missing for a moment while the phone compiles their shaders.
-- **Switch:** Custom Edition maps need a 512 MB memory window. Now and then
-  the console hands out only 256 MB; the main menu then says so, and
-  restarting the game usually fixes it.
 
 The current list is in the [issues](https://github.com/thelinkin3000/halo-ce-universal/issues).
 
