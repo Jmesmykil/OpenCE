@@ -550,7 +550,10 @@ static void frame_statistics(void)
 			static unsigned reports;
 
 			if (++reports % 6 == 0)
+			{
 				host_memory_report("in play");
+				host_texture_cache_report();
+			}
 		}
 		{
 			u64 busy = thread_ticks();

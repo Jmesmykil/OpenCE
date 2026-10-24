@@ -33,6 +33,11 @@ void host_logf(int priority, const char *format, ...) __attribute__((format(prin
 void host_exit(int code) __attribute__((noreturn));
 /* the memory the process and the application pool have and use, for the log (host_mman.c) */
 void host_memory_report(const char *when);
+/* mod textures' bytes kept in the host's memory (host_texture_cache.c): by a key, 1 and the bytes copied if kept */
+int host_texture_cache_get(uint64_t key, uint32_t buffer, uint32_t size);
+void host_texture_cache_put(uint64_t key, uint32_t buffer, uint32_t size);
+void host_texture_cache_clear(void);
+void host_texture_cache_report(void);
 /* puts back the clocks host_sdl2.c raised for the game */
 void host_restore_clocks(void);
 int host_errno(void);
