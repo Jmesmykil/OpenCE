@@ -188,6 +188,11 @@ def main() -> int:
     if args.platform != "android":
         shutil.copy2(ROOT / "port/assets/network/brokers.txt", dist / "brokers.txt")
     if args.platform == "switch":
+        # the controller buttons' pictures, Kenney's Input Prompts
+        # (port/assets/buttons/platforms), CC0: not required, but credited (the
+        # PS5's release has it in licenses/: tools/ps5_build.py)
+        shutil.copy2(ROOT / "port/assets/buttons/platforms/Kenney-LICENSE.txt", dist / "Kenney-LICENSE.txt")
+    if args.platform == "switch":
         # and the Switch's menus' title font (port/switch/host/host_ui.c),
         # under the same license
         shutil.copy2(ROOT / "port/assets/fonts/OpenCE-OFL.txt", dist / "OpenCE-OFL.txt")

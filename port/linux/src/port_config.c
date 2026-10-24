@@ -472,6 +472,14 @@ static const struct config_setting config_settings[] =
 		"Network games' text chat: type a line to your team." },
 
 #ifdef HALO_SWITCH
+	{ "controls.nintendo_menu_buttons", _config_boolean, "true", "HALO_NINTENDO_MENU_BUTTONS", _environment_value,
+		_platform_all,
+		"The menus' buttons as the Switch's own menus have them: the button\n"
+		"marked A (on the right) chooses and the one marked B (at the bottom)\n"
+		"goes back. false: as on an Xbox controller, the bottom button chooses\n"
+		"and the right one goes back. A game's controls are the same either\n"
+		"way. The buttons change at once; the menus' button pictures at the\n"
+		"next map (or the next start)." },
 	{ "game.overlay_commands", _config_boolean, "true", "HALO_OVERLAY_COMMANDS", _environment_value, _platform_all,
 		"Take commands from /switch/.packages/halo/overlay/command.txt, once a\n"
 		"second: a console command (cheat_deathless_player true, map_name a10)\n"

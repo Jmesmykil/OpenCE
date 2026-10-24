@@ -425,6 +425,8 @@ A profiling build plays with normal builds. It does not use
 - [deko3d](https://github.com/devkitPro/deko3d), [libnx](https://github.com/switchbrew/libnx)
   and devkitPro, for the Switch.
 - [SDL](https://www.libsdl.org/), on both platforms.
+- [Kenney](https://kenney.nl/)'s [Input Prompts](https://kenney.nl/assets/input-prompts)
+  (CC0), the controller buttons' pictures on the Switch and the PS5.
 
 Halo is a trademark of Microsoft. This project is not affiliated with or
 endorsed by Microsoft, Bungie or 343 Industries.
