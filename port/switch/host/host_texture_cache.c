@@ -15,11 +15,10 @@ The bytes kept are a file's, as read (port/linux/game/mod_bitmaps.c: before
 the channels are told and the hardware format rebuilt), so that what the
 game does with them after the read is the same either way.
 
-Its budget is set each time it is emptied (a map's tags let go, or the mods
-found again): 40% of the heap's free memory then, 256 MB more with a 256 MB
-window (the memory a 512 MB one would have used), at least 512 MB and at most
-1 GB. And while the heap's free memory is under 256 MB it keeps nothing more,
-and lets its oldest go, whatever its budget. */
+It keeps at most 512 MB, emptied with each map's mods (more was planned,
+sized from the heap's free memory, but a map with a mod of uncompressed
+textures needed under 50 MB of it); and while the heap's free memory is
+under 256 MB it keeps nothing more, and lets its oldest go. */
 
 #include "host.h"
 
@@ -30,9 +29,7 @@ and lets its oldest go, whatever its budget. */
 #include <string.h>
 
 #define CACHE_BUCKETS 4096
-#define CACHE_MINIMUM (512ull * 1024 * 1024)
-#define CACHE_MAXIMUM (1024ull * 1024 * 1024)
-#define CACHE_SMALL_WINDOW_BONUS (256ull * 1024 * 1024)
+#define CACHE_BUDGET (512ull * 1024 * 1024)
 #define CACHE_FLOOR (256ull * 1024 * 1024)
 /* the heap's free memory looked at again once this much more is kept */
 #define CACHE_FLOOR_LOOK_BYTES (32ull * 1024 * 1024)
@@ -128,13 +125,7 @@ static void cache_empty(void)
 	while (oldest)
 		entry_unlink(oldest);
 	free_bytes = heap_free();
-	budget = free_bytes * 4 / 10;
-	if (host_memory_window_size() <= 256u * 1024 * 1024)
-		budget += CACHE_SMALL_WINDOW_BONUS;
-	if (budget < CACHE_MINIMUM)
-		budget = CACHE_MINIMUM;
-	if (budget > CACHE_MAXIMUM)
-		budget = CACHE_MAXIMUM;
+	budget = CACHE_BUDGET;
 	if (hits || misses || puts)
 		host_logf(HOST_LOG_INFO, "texture cache (host): the map before had %lu textures read from here, %lu from the "
 			"card", hits, misses);
