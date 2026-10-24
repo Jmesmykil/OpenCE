@@ -11,9 +11,11 @@ a frame: most of a tester's hitches. The host has far more memory free (about
 the 32-bit guest cannot address, so the guest asks for a texture's bytes by a
 key and the host copies them (its buffer a guest address, as 32 bits) (host_texture_cache_get, _put).
 
-The bytes kept are a file's, as read (port/linux/game/mod_bitmaps.c: before
-the channels are told and the hardware format rebuilt), so that what the
-game does with them after the read is the same either way.
+The bytes kept are a file's, as read, so that what the game does with them
+after the read is the same either way: a mod's bitmaps
+(port/linux/game/mod_bitmaps.c: before the channels are told and the
+hardware format rebuilt), and a Custom Edition map's
+(port/linux/game/custom_edition_cache.c: before they are converted).
 
 It keeps at most 512 MB, emptied with each map's mods (more was planned,
 sized from the heap's free memory, but a map with a mod of uncompressed

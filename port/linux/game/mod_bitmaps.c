@@ -1248,7 +1248,7 @@ static boolean mod_bitmaps_pixels_read(
 	unsigned long size)
 {
 #ifdef HALO_SWITCH
-	unsigned long long key = ((unsigned long long)(port_mods_scans() & 0xFFFF) << 48) ^
+	unsigned long long key = ((unsigned long long)(port_mods_scans() & 0x7FFF) << 48) ^
 		((unsigned long long)(made->file & 0xFFFF) << 32) ^ (unsigned long long)offset;
 
 	memory_watch_prepare_write(buffer, size);
