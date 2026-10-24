@@ -11,8 +11,10 @@ config.toml has it), which sets and saves a setting as the menus do
 (config_set_text). result.txt, beside it, gets the command and what came of
 it, for looking at when one does not work. And what is on: each boolean the
 commands set, a console global (cheat_deathless_player) or a setting
-(display.vsync), has an empty file of its name in the folder's flags while it
-is true, however it was set, looked at once a second (overlay_flags_update). The whole protocol is the overlay's
+(display.vsync), has an empty file of its name in the folder's flags
+(cheat_deathless_player.flag) while it is true, however it was set, looked at
+once a second (overlay_flags_update); show_hud's is hud.flag. The folder's
+game has OpenCE.flag, the engine the package is talking to. The whole protocol is the overlay's
 spec, halo-overlay-command-spec.md; one command in the file at a time, and
 its contents are trusted.
 
@@ -30,6 +32,7 @@ Without that folder none of this is done, not even the look.
 #include "cseries/cseries_windows.h"
 #include "game/game.h"
 #include "hs/hs.h"
+#include "interface/hud.h"
 #include "interface/terminal.h"
 #include "../src/posix.h"
 
@@ -122,6 +125,15 @@ static boolean overlay_present(
 		{
 			overlay_folder_prepare("game");
 			overlay_folder_prepare("flags");
+			/* (the game the overlay is talking to: game/<engine>.flag, which the package shows) */
+			{
+				char path[1024];
+				FILE *file;
+
+				snprintf(path, sizeof(path), "%s/game/OpenCE.flag", OVERLAY_PACKAGE_FOLDER);
+				if ((file = platform_fopen_host(path, "wb")) != NULL)
+					fclose(file);
+			}
 			platform_log("overlay: the Ultrahand package's folder is there (%s): its commands are taken",
 				OVERLAY_PACKAGE_FOLDER);
 		}
@@ -234,14 +246,14 @@ static void overlay_command_take(
 		overlay_result_write(command, FALSE, "the console did not run it (debug.txt says why)");
 }
 
-/* A flag's file, flags/<name>: there while the boolean of that name is true. */
+/* A flag's file, flags/<name>.flag: there while the boolean of that name is true. */
 static void overlay_flag_write(
 	char const *name,
 	boolean value)
 {
 	char path[1024];
 
-	snprintf(path, sizeof(path), "%s/flags/%s", OVERLAY_PACKAGE_FOLDER, name);
+	snprintf(path, sizeof(path), "%s/flags/%s.flag", OVERLAY_PACKAGE_FOLDER, name);
 	if (value)
 	{
 		FILE *file = platform_fopen_host(path, "wb");
@@ -267,6 +279,7 @@ static void overlay_flags_update(
 	/* -1: not looked at yet */
 	static signed char globals_were[1024];
 	static signed char settings_were[MAXIMUM_SETTINGS];
+	static signed char hud_was = -1;
 	static boolean begun;
 	short index;
 	unsigned setting;
@@ -290,6 +303,19 @@ static void overlay_flags_update(
 			if (value || globals_were[index] >= 0)
 				overlay_flag_write(global->name, value);
 			globals_were[index] = (signed char)value;
+		}
+	}
+	/* (and show_hud, a function the console calls with true or false: its flag is hud, as the package names it; the
+	HUD's state is the map's, so looked at only with one loaded) */
+	if (hud_scripted_globals && game_map_loaded())
+	{
+		boolean value = hud_scripted_globals->show_hud != FALSE;
+
+		if (hud_was != (signed char)value)
+		{
+			if (value || hud_was >= 0)
+				overlay_flag_write("hud", value);
+			hud_was = (signed char)value;
 		}
 	}
 	for (setting = 0; setting < MAXIMUM_SETTINGS; setting++)
