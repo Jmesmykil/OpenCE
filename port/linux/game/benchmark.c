@@ -364,7 +364,8 @@ static void benchmark_start_stage(struct benchmark_stage const *stage)
 	}
 	/* a local game, as debug.network_test's "local:" sets one up (network_test.c), with its bots */
 	bots_set_count_override(config_integer("debug.benchmark_bots"));
-	main_set_multiplayer_map_name(stage->map);
+	/* (the level's name, as the menu gives it: a Custom Edition map's file is not named by its short name) */
+	main_set_multiplayer_map_name(stage->level);
 	ui_widgets_close_all();
 	dispose_global_network_game_server();
 	dispose_global_network_game_client();
