@@ -472,14 +472,12 @@ static const struct config_setting config_settings[] =
 
 #ifdef HALO_SWITCH
 	{ "game.overlay_commands", _config_boolean, "true", "HALO_OVERLAY_COMMANDS", _environment_value, _platform_all,
-#else
-	{ "game.overlay_commands", _config_boolean, "false", "HALO_OVERLAY_COMMANDS", _environment_value, _platform_all,
-#endif
 		"Take commands from overlay/command.txt in the data folder, once a\n"
 		"second: a console command (cheat_deathless_player true, map_name a10)\n"
 		"or config <setting> <value>, run and the file deleted; overlay/\n"
-		"result.txt says what came of it. For an overlay (the Switch's\n"
-		"Ultrahand) to control the game. Changes at once." },
+		"result.txt says what came of it. For an Ultrahand overlay to control\n"
+		"the game. Changes at once." },
+#endif
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
 		"(bans, players dropped for cheating, what refuses a command, and the\n"

@@ -13,14 +13,16 @@ for looking at when one does not work. The whole protocol is the overlay's
 spec, halo-overlay-command-spec.md; one command in the file at a time, and
 its contents are trusted.
 
-On every build but off unless game.overlay_commands (on by default on the
-Switch, whose overlays are the reason): looking for the file is one request
-a second to the file system.
+The Switch's only (its Ultrahand overlays are the reason; the other builds
+have an empty overlay_commands_update), and on while game.overlay_commands
+is: looking for the file is one request a second to the file system.
 */
 
 #include "cseries.h"
 #include "cseries/cseries_windows.h"
 #include "hs/hs.h"
+
+#ifdef HALO_SWITCH
 
 #include <stdio.h>
 #include <string.h>
@@ -150,3 +152,13 @@ void overlay_commands_update(
 	else
 		overlay_result_write(command, FALSE, "the console did not run it (debug.txt says why)");
 }
+
+#else
+
+void overlay_commands_update(
+	void)
+{
+	return;
+}
+
+#endif
