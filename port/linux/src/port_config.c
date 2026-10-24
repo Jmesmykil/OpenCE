@@ -473,13 +473,14 @@ static const struct config_setting config_settings[] =
 
 #ifdef HALO_SWITCH
 	{ "game.overlay_commands", _config_boolean, "true", "HALO_OVERLAY_COMMANDS", _environment_value, _platform_all,
-		"Take commands from overlay/command.txt in the data folder, once a\n"
+		"Take commands from /switch/.packages/halo/overlay/command.txt, once a\n"
 		"second: a console command (cheat_deathless_player true, map_name a10)\n"
-		"or config <setting> <value>, run and the file deleted; overlay/\n"
-		"result.txt says what came of it. For an Ultrahand overlay to control\n"
-		"the game, and only with its package installed (the folder\n"
-		"/switch/.packages/halo/overlay there when the game starts). Changes\n"
-		"at once." },
+		"or config <setting> <value>, run and the file deleted; result.txt\n"
+		"beside it says what came of it, and the folder's flags has an empty\n"
+		"file for each true/false command that is on (cheat_infinite_ammo,\n"
+		"display.vsync). For an Ultrahand overlay to control the game, and\n"
+		"only with its package installed (that overlay folder there when the\n"
+		"game starts). Changes at once." },
 #endif
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
@@ -2621,6 +2622,19 @@ int config_write_boolean(const char *name, int value)
 	long index = config_setting_index(name);
 
 	return index >= 0 && config_settings[index].type == _config_boolean && config_write(name, value ? "true" : "false");
+}
+
+/* the index'th setting, if it is a boolean this platform has: 1 with its name and value, 0 for one that is not, -1
+past the last (the Switch's overlay flags: port/linux/game/overlay_commands.c) */
+int config_boolean_setting(unsigned index, const char **name, int *value)
+{
+	if (index >= NUMBER_OF_CONFIG_SETTINGS)
+		return -1;
+	if (config_settings[index].type != _config_boolean || !(config_settings[index].platforms & CONFIG_PLATFORM))
+		return 0;
+	*name = config_settings[index].name;
+	*value = config_boolean(*name);
+	return 1;
 }
 
 /* sets a setting as config_write does, from its value as config.toml writes it ("true", "4096", "1.5", "\"900\"": a

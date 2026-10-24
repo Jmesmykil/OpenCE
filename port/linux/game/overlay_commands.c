@@ -2,14 +2,17 @@
 OVERLAY_COMMANDS.C
 
 Commands from outside the game, one at a time, through a file: an overlay
-(the Switch's Ultrahand, say) writes a line to overlay/command.txt in the
-data folder, and once a second the game looks for it, takes it (the file is
-deleted), and runs it. The line is a console command, run as typed at the
+(the Switch's Ultrahand, say) writes a line to command.txt in its package's
+overlay folder (OVERLAY_PACKAGE_FOLDER), and once a second the game looks for
+it, takes it (the file is deleted), and runs it. The line is a console command, run as typed at the
 console (hs_compile_and_evaluate: cheats, map_name, game_revert...), or
 "config <setting> <value>" (or "config <setting> = <value>", the line as
 config.toml has it), which sets and saves a setting as the menus do
-(config_set_text). overlay/result.txt gets the command and what came of it,
-for looking at when one does not work. The whole protocol is the overlay's
+(config_set_text). result.txt, beside it, gets the command and what came of
+it, for looking at when one does not work. And what is on: each boolean the
+commands set, a console global (cheat_deathless_player) or a setting
+(display.vsync), has an empty file of its name in the folder's flags while it
+is true, however it was set, looked at once a second (overlay_flags_update). The whole protocol is the overlay's
 spec, halo-overlay-command-spec.md; one command in the file at a time, and
 its contents are trusted.
 
@@ -36,13 +39,16 @@ Without that folder none of this is done, not even the look.
 #include <string.h>
 
 /* the platform layer's (port/linux/src) */
-extern const char *platform_data_root(void);
 extern FILE *platform_fopen_host(char const *path, char const *mode);
 extern int platform_remove_host(char const *path);
 extern int platform_remove_directory_host(char const *path);
 extern int config_boolean(const char *name);
 extern int config_set_text(const char *name, const char *value, char *error, size_t error_size);
+extern int config_boolean_setting(unsigned index, const char **name, int *value);
 extern void platform_log(const char *format, ...);
+/* the console's globals (hs_globals_external.c) */
+extern struct hs_external_global_definition *hs_external_globals[];
+extern short const hs_external_global_count;
 
 enum
 {
@@ -132,7 +138,7 @@ static void overlay_result_write(
 	char path[1024];
 	FILE *file;
 
-	snprintf(path, sizeof(path), "%s/overlay/result.txt", platform_data_root());
+	snprintf(path, sizeof(path), "%s/result.txt", OVERLAY_PACKAGE_FOLDER);
 	file = platform_fopen_host(path, "wb");
 	if (!file)
 		return;
@@ -174,42 +180,16 @@ static void overlay_config(
 	}
 }
 
-/* (main_loop's, every frame: a look at the file once a second) */
-void overlay_commands_update(
+/* the command in command.txt, if there is one: taken (the file deleted) and run */
+static void overlay_command_take(
 	void)
 {
-	static unsigned long looked_at;
-	static boolean folder_made;
-	unsigned long now = system_milliseconds();
 	char path[1024];
 	char command[OVERLAY_COMMAND_SIZE + 1];
 	size_t length;
 	FILE *file;
 
-	if (!overlay_present())
-		return;
-	/* (said once the main menu's map is loaded, where the game's messages are shown) */
-	{
-		static boolean said;
-
-		if (!said && game_map_loaded())
-		{
-			said = TRUE;
-			terminal_printf(global_real_argb_green, "Ultrahand Overlay present and enabled");
-		}
-	}
-	if (now - looked_at < OVERLAY_LOOK_MILLISECONDS)
-		return;
-	looked_at = now;
-	if (!config_boolean("game.overlay_commands"))
-		return;
-	if (!folder_made)
-	{
-		snprintf(path, sizeof(path), "%s/overlay", platform_data_root());
-		posix_make_directory(path);
-		folder_made = TRUE;
-	}
-	snprintf(path, sizeof(path), "%s/overlay/command.txt", platform_data_root());
+	snprintf(path, sizeof(path), "%s/command.txt", OVERLAY_PACKAGE_FOLDER);
 	/* (looked for first by the host, which says nothing of a file that is not there: the guest's open of a missing
 	file is logged, once a second) */
 	{
@@ -252,6 +232,112 @@ void overlay_commands_update(
 		overlay_result_write(command, TRUE, NULL);
 	else
 		overlay_result_write(command, FALSE, "the console did not run it (debug.txt says why)");
+}
+
+/* A flag's file, flags/<name>: there while the boolean of that name is true. */
+static void overlay_flag_write(
+	char const *name,
+	boolean value)
+{
+	char path[1024];
+
+	snprintf(path, sizeof(path), "%s/flags/%s", OVERLAY_PACKAGE_FOLDER, name);
+	if (value)
+	{
+		FILE *file = platform_fopen_host(path, "wb");
+
+		if (file)
+			fclose(file);
+		else
+			platform_log("overlay: could not make the flag %s", path);
+	}
+	else
+	{
+		platform_remove_host(path);
+	}
+}
+
+/* Each boolean the overlay's commands set, the console's globals and this platform's settings, compared with what it
+was at the last look, and its flag made or deleted when it changed. The flags folder was emptied at the start
+(overlay_present), so at the first look each true one is made and nothing deleted. */
+static void overlay_flags_update(
+	void)
+{
+	enum { MAXIMUM_SETTINGS = 1024 };
+	/* -1: not looked at yet */
+	static signed char globals_were[1024];
+	static signed char settings_were[MAXIMUM_SETTINGS];
+	static boolean begun;
+	short index;
+	unsigned setting;
+
+	if (!begun)
+	{
+		memset(globals_were, -1, sizeof(globals_were));
+		memset(settings_were, -1, sizeof(settings_were));
+		begun = TRUE;
+	}
+	for (index = 0; index < hs_external_global_count && index < (short)sizeof(globals_were); index++)
+	{
+		struct hs_external_global_definition const *global = hs_external_globals[index];
+		boolean value;
+
+		if (!global || global->type != _hs_type_boolean || !global->address)
+			continue;
+		value = *(boolean const *)global->address != FALSE;
+		if (globals_were[index] != (signed char)value)
+		{
+			if (value || globals_were[index] >= 0)
+				overlay_flag_write(global->name, value);
+			globals_were[index] = (signed char)value;
+		}
+	}
+	for (setting = 0; setting < MAXIMUM_SETTINGS; setting++)
+	{
+		char const *name;
+		int value;
+		int found = config_boolean_setting(setting, &name, &value);
+
+		if (found < 0)
+			break;
+		if (!found)
+			continue;
+		value = value != 0;
+		if (settings_were[setting] != (signed char)value)
+		{
+			if (value || settings_were[setting] >= 0)
+				overlay_flag_write(name, (boolean)value);
+			settings_were[setting] = (signed char)value;
+		}
+	}
+}
+
+/* (main_loop's, every frame: once a second, the command taken and the flags brought up to date) */
+void overlay_commands_update(
+	void)
+{
+	static unsigned long looked_at;
+	unsigned long now = system_milliseconds();
+
+	if (!overlay_present())
+		return;
+	/* (said once the main menu's map is loaded, where the game's messages are shown) */
+	{
+		static boolean said;
+
+		if (!said && game_map_loaded())
+		{
+			said = TRUE;
+			terminal_printf(global_real_argb_green, "Ultrahand Overlay present and enabled");
+		}
+	}
+	if (now - looked_at < OVERLAY_LOOK_MILLISECONDS)
+		return;
+	looked_at = now;
+	if (!config_boolean("game.overlay_commands"))
+		return;
+	overlay_command_take();
+	overlay_flags_update();
 }
 
 #else
