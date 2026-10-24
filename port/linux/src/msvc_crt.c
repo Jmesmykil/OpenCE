@@ -650,6 +650,12 @@ int platform_remove_host(const char *path)
 {
 	return remove(path);
 }
+
+/* ... and an empty folder */
+int platform_remove_directory_host(const char *path)
+{
+	return rmdir(path);
+}
 #endif
 
 FILE *halo_linux_freopen(const char *path, const char *mode, FILE *stream)

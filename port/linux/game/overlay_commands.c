@@ -14,13 +14,20 @@ spec, halo-overlay-command-spec.md; one command in the file at a time, and
 its contents are trusted.
 
 The Switch's only (its Ultrahand overlays are the reason; the other builds
-have an empty overlay_commands_update), and on while game.overlay_commands
-is: looking for the file is one request a second to the file system.
+have an empty overlay_commands_update), and only with the overlay installed:
+its package's folder, /switch/.packages/halo/overlay, there at the start
+(hardran3's OpenCE-Ultrahand). Then the game says so at the main menu, and
+empties the package's overlay/game and overlay/flags folders (making them if
+they are not there), which are the game's and the overlay's for this run;
+and looks for the command once a second while game.overlay_commands is on.
+Without that folder none of this is done, not even the look.
 */
 
 #include "cseries.h"
 #include "cseries/cseries_windows.h"
+#include "game/game.h"
 #include "hs/hs.h"
+#include "interface/terminal.h"
 #include "../src/posix.h"
 
 #ifdef HALO_SWITCH
@@ -32,6 +39,7 @@ is: looking for the file is one request a second to the file system.
 extern const char *platform_data_root(void);
 extern FILE *platform_fopen_host(char const *path, char const *mode);
 extern int platform_remove_host(char const *path);
+extern int platform_remove_directory_host(char const *path);
 extern int config_boolean(const char *name);
 extern int config_set_text(const char *name, const char *value, char *error, size_t error_size);
 extern void platform_log(const char *format, ...);
@@ -41,6 +49,79 @@ enum
 	OVERLAY_COMMAND_SIZE = 1024,
 	OVERLAY_LOOK_MILLISECONDS = 1000,
 };
+
+/* the Ultrahand package's folder: the overlay installed */
+#define OVERLAY_PACKAGE_FOLDER "sdmc:/switch/.packages/halo/overlay"
+
+static boolean overlay_is_folder(
+	char const *path)
+{
+	struct posix_file_information information;
+
+	return posix_stat(path, &information) == 0 && (information.flags & _posix_file_is_directory) != 0;
+}
+
+/* everything in a folder deleted, the folders in it with what they hold; the folder kept */
+static void overlay_folder_empty(
+	char const *path,
+	int depth)
+{
+	void *directory;
+	char name[256];
+
+	if (depth > 8 || !(directory = posix_directory_open(path)))
+		return;
+	while (posix_directory_next(directory, name, sizeof(name)))
+	{
+		char entry[1024];
+
+		snprintf(entry, sizeof(entry), "%s/%s", path, name);
+		if (overlay_is_folder(entry))
+		{
+			overlay_folder_empty(entry, depth + 1);
+			if (platform_remove_directory_host(entry) != 0)
+				platform_log("overlay: could not delete the folder %s", entry);
+		}
+		else if (platform_remove_host(entry) != 0)
+		{
+			platform_log("overlay: could not delete %s", entry);
+		}
+	}
+	posix_directory_close(directory);
+}
+
+/* one of the package's folders for this run: emptied, or made */
+static void overlay_folder_prepare(
+	char const *name)
+{
+	char path[1024];
+
+	snprintf(path, sizeof(path), "%s/%s", OVERLAY_PACKAGE_FOLDER, name);
+	if (overlay_is_folder(path))
+		overlay_folder_empty(path, 0);
+	else
+		posix_make_directory(path);
+}
+
+/* (once, at the first look) whether the overlay is installed, and if it is, its folders made ready */
+static boolean overlay_present(
+	void)
+{
+	static int present = -1;
+
+	if (present < 0)
+	{
+		present = overlay_is_folder(OVERLAY_PACKAGE_FOLDER);
+		if (present)
+		{
+			overlay_folder_prepare("game");
+			overlay_folder_prepare("flags");
+			platform_log("overlay: the Ultrahand package's folder is there (%s): its commands are taken",
+				OVERLAY_PACKAGE_FOLDER);
+		}
+	}
+	return present > 0;
+}
 
 /* the result, for debugging: the command, then ok or why not */
 static void overlay_result_write(
@@ -105,6 +186,18 @@ void overlay_commands_update(
 	size_t length;
 	FILE *file;
 
+	if (!overlay_present())
+		return;
+	/* (said once the main menu's map is loaded, where the game's messages are shown) */
+	{
+		static boolean said;
+
+		if (!said && game_map_loaded())
+		{
+			said = TRUE;
+			terminal_printf(global_real_argb_green, "Ultrahand Overlay present and enabled");
+		}
+	}
 	if (now - looked_at < OVERLAY_LOOK_MILLISECONDS)
 		return;
 	looked_at = now;

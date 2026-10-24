@@ -477,7 +477,9 @@ static const struct config_setting config_settings[] =
 		"second: a console command (cheat_deathless_player true, map_name a10)\n"
 		"or config <setting> <value>, run and the file deleted; overlay/\n"
 		"result.txt says what came of it. For an Ultrahand overlay to control\n"
-		"the game. Changes at once." },
+		"the game, and only with its package installed (the folder\n"
+		"/switch/.packages/halo/overlay there when the game starts). Changes\n"
+		"at once." },
 #endif
 	{ "game.console_log", _config_string, "\"important\"", "HALO_CONSOLE_LOG", _environment_value, _platform_all,
 		"What the game's console shows on screen of what it logs: \"important\"\n"
