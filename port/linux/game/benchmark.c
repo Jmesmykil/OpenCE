@@ -51,6 +51,7 @@ Called from the main loop every frame (main.c), as network_test.c is.
 #include "game/players.h"
 #include "hs/hs.h"
 #include "bots.h"
+#include "custom_edition_maps.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -94,6 +95,11 @@ enum
 struct benchmark_stage
 {
 	char map[32];
+	/* the level it loads: levels\<map>\<map> (a campaign level), custom_maps\<file> (a Custom Edition map's),
+	levels\test\<map>\<map> (a multiplayer map) */
+	char level[160];
+	/* started as a campaign level (the Solo menu's way, its cinematics skipped): the game's, or a Custom Edition
+	singleplayer map */
 	boolean campaign;
 	double seconds;
 	/* what was measured */
@@ -133,6 +139,38 @@ static boolean campaign_name(char const *name)
 		name[2] == '0';
 }
 
+/* a Custom Edition map whose file name starts as `name` (any case: the files may end in their version's digits),
+its level name in `level`; singleplayer ones (*campaign) looked at first. FALSE if there is none */
+static boolean custom_level(char const *name, char *level, size_t size, boolean *campaign)
+{
+	short pass, index;
+	size_t length = strlen(name);
+
+	for (pass = 0; pass < 2; pass++)
+	{
+		boolean singleplayer = pass == 0;
+
+		for (index = 0; index < custom_edition_maps_count(singleplayer); index++)
+		{
+			short display_index = custom_edition_maps_display_index_of(singleplayer, index);
+			char const *found = display_index == NONE ? NULL : custom_edition_maps_level_name(display_index);
+			char const *file;
+
+			if (!found || custom_edition_maps_campaign_level(display_index) != NONE)
+				continue;
+			file = strrchr(found, '\\');
+			file = file ? file + 1 : found;
+			if (!strncasecmp(file, name, length))
+			{
+				snprintf(level, size, "%s", found);
+				*campaign = singleplayer;
+				return TRUE;
+			}
+		}
+	}
+	return FALSE;
+}
+
 static void benchmark_read_settings(void)
 {
 	char list[512];
@@ -162,6 +200,13 @@ static void benchmark_read_settings(void)
 			continue;
 		snprintf(stage->map, sizeof(stage->map), "%s", item);
 		stage->campaign = campaign_name(stage->map);
+		if (stage->campaign)
+			snprintf(stage->level, sizeof(stage->level), "levels\\%s\\%s", stage->map, stage->map);
+		else if (custom_level(stage->map, stage->level, sizeof(stage->level), &stage->campaign))
+			platform_log("benchmark: %s is the Custom Edition map %s (%s)", stage->map, stage->level,
+				stage->campaign ? "singleplayer" : "multiplayer");
+		else
+			snprintf(stage->level, sizeof(stage->level), "levels\\test\\%s\\%s", stage->map, stage->map);
 		benchmark.stage_count++;
 	}
 	if (!benchmark.stage_count)
@@ -307,13 +352,10 @@ static void benchmark_start_stage(struct benchmark_stage const *stage)
 	benchmark.skipped_at = -SKIP_SECONDS;
 	if (stage->campaign)
 	{
-		char path[64];
-
 		/* as the Solo menu starts a level (menu_functions.c's campaign_start) */
-		snprintf(path, sizeof(path), "levels\\%s\\%s", stage->map, stage->map);
 		bots_set_count_override(-1);
 		game_connection_set(_game_connection_local);
-		main_set_map_name(path);
+		main_set_map_name(stage->level);
 		main_disallow_persistent_storage();
 		main_set_difficulty(_game_difficulty_level_normal);
 		main_menu_switch_to_single_player();
@@ -346,11 +388,9 @@ static void benchmark_multiplayer_setup(struct benchmark_stage const *stage)
 {
 	if (!benchmark.map_set && benchmark.state_seconds >= 1.0 && global_network_game_server_get())
 	{
-		char path[96];
 		struct game_variant variant;
 
-		snprintf(path, sizeof(path), "levels\\test\\%s\\%s", stage->map, stage->map);
-		network_game_server_change_map_name(global_network_game_server_get(), path);
+		network_game_server_change_map_name(global_network_game_server_get(), stage->level);
 		variant = *game_engine_get_variant_by_name(&variant, "slayer");
 		player_ui_set_game_variant(&variant);
 		network_game_server_change_game_variant(global_network_game_server_get(), &variant);
