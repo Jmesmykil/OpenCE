@@ -764,4 +764,11 @@ boolean game_engine_ctf_flag_state(long team_index, real_point3d *position, long
 /* port: whether touching one's own flag away from home returns it */
 boolean game_engine_ctf_touch_returns(void);
 
+/* port: (game_engine_king.c) the hill as the bots see it: its points, its height, its middle and its number;
+FALSE while there is none */
+boolean game_engine_king_hill(real_point3d *points, long maximum, long *point_count, real *bottom, real *top,
+	real_point3d *center, long *hill_id);
+/* port: whether a point is on the hill, as a player's middle is counted */
+boolean game_engine_king_point_on_hill(real_point3d const *position);
+
 #endif // __GAME_ENGINE_H

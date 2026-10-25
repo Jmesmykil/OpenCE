@@ -91,9 +91,10 @@ and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 int p2p_hosting_internet(void);
 int p2p_hosting_listed(void);
 
-/* capture the flag's (below) */
+/* capture the flag's and king of the hill's (below) */
 static boolean bots_ctf_active(void);
 static void bots_ctf_update(void);
+static boolean bots_king_active(void);
 
 #include <math.h>
 #include <stdio.h>
@@ -261,10 +262,16 @@ struct bots_bot
 	long searches;
 
 	/* capture the flag's defender: where about its flag it stands, until
-	when (bots_ctf_choose_goal) */
+	when (bots_ctf_choose_goal); king of the hill's guard of the hill's
+	approaches the same */
 	real_point3d guard_point;
 	long guard_surface_index;
 	long guard_until_tick;
+	/* king of the hill: the place on the hill it goes to, and until when; the
+	hill it was for (bots_king_choose_goal) */
+	real_point3d hill_point;
+	long hill_until_tick;
+	long hill_id;
 };
 
 /* ---------- globals */
@@ -313,6 +320,17 @@ static struct
 		real_point3d home[2];
 		boolean touch_returns;
 	} ctf;
+	/* king of the hill: the hill as the tick began (bots_king_update) */
+	struct
+	{
+		long tick;
+		boolean present;
+		real_point3d points[12];
+		long point_count;
+		real bottom, top;
+		real_point3d center;
+		long hill_id;
+	} king;
 } bots_globals;
 
 /* the walkable surfaces the bots' searches read: a copy of the structure's
@@ -1598,6 +1616,9 @@ static boolean bots_target_score(struct bots_bot *bot, struct player_datum *play
 			candidate->score -= 30.0f;
 		}
 	}
+	/* (king of the hill: who stands on the hill, before anyone) */
+	if (bots_king_active() && game_engine_king_point_on_hill(&object->object.bounding_sphere_center))
+		candidate->score -= 20.0f;
 	return TRUE;
 }
 
@@ -1920,18 +1941,177 @@ static boolean bots_ctf_choose_goal(struct bots_bot *bot, struct player_datum *p
 	return FALSE;
 }
 
+/* ---------- king of the hill
+
+Quake III Arena's bots have no king of the hill; its rules here are their
+key area's defence (LTG_DEFENDKEYAREA, ai_dmq3.c) on the hill the game
+draws (game_engine_king_hill), which scores each team (each player, free
+for all) with anyone on it every tick, contested or not:
+
+- a bot goes to a place on the hill (a random one inside its outline, so
+  that they spread over it), and on it, from place to place inside it every
+  few seconds, fighting from there: its strafing turns back at the hill's
+  edge (bots_bot_fight), and it chases no one off it;
+- whoever stands on the hill is fought before anyone (bots_target_score);
+- the hill moved: to the new one at once;
+- in a team game of five or more, the team's first bot (and its second of
+  eight or more) guards the hill's approaches instead: a roaming place 8 to
+  16 units from the hill at a time;
+- a better weapon is fetched on the way, not while on the hill. */
+
+static boolean bots_king_active(void)
+{
+	return game_engine_running() && game_engine_get_variant()->game_engine_index == game_engine_king;
+}
+
+/* the hill, once a tick */
+static void bots_king_update(void)
+{
+	long now = game_time_get();
+
+	if (bots_globals.king.tick == now)
+		return;
+	bots_globals.king.tick = now;
+	bots_globals.king.present = game_engine_king_hill(bots_globals.king.points,
+		(long)NUMBEROF(bots_globals.king.points), &bots_globals.king.point_count, &bots_globals.king.bottom,
+		&bots_globals.king.top, &bots_globals.king.center, &bots_globals.king.hill_id);
+}
+
+/* whether the bot's unit (its middle, as the game counts it) is on the hill */
+static boolean bots_king_on_hill(long unit_index)
+{
+	bots_king_update();
+	return bots_globals.king.present && unit_index != NONE &&
+		game_engine_king_point_on_hill(&object_get(unit_index)->object.bounding_sphere_center);
+}
+
+/* whether the bot guards the hill's approaches: a team's first bot of five
+or more, and its second of eight or more */
+static boolean bots_king_guard(struct bots_bot *bot, struct player_datum *player)
+{
+	long own_bot_index = (long)(bot - bots_globals.bots);
+	struct data_iterator iterator;
+	struct player_datum *other;
+	long team_size = 0;
+	long rank = 0;
+
+	if (!game_engine_has_teams())
+		return FALSE;
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		if (other->team_index != player->team_index)
+			continue;
+		team_size++;
+		if (bots_machine_is_bot(other->network_player_data.machine_index) &&
+			other->network_player_data.machine_index - BOTS_FIRST_MACHINE < own_bot_index)
+		{
+			rank++;
+		}
+	}
+	return rank < (team_size >= 8 ? 2 : team_size >= 5 ? 1 : 0);
+}
+
+/* a walkable place inside the hill: between its middle and one of its
+points, the ground under it */
+static boolean bots_king_place(struct bots_bot *bot, real_point3d *place)
+{
+	long tries;
+
+	for (tries = 0; tries < 6; tries++)
+	{
+		real_point3d const *corner = &bots_globals.king.points[bots_random(bot) %
+			(unsigned long)bots_globals.king.point_count];
+		real along = bots_random_real(bot) * 0.75f;
+		real_point3d probe;
+
+		probe.x = bots_globals.king.center.x + (corner->x - bots_globals.king.center.x) * along;
+		probe.y = bots_globals.king.center.y + (corner->y - bots_globals.king.center.y) * along;
+		probe.z = bots_globals.king.center.z + (corner->z - bots_globals.king.center.z) * along + 0.5f;
+		if (bots_surface_below(&probe, place) != NONE)
+		{
+			/* (a place the game counts: a player's middle half a unit up) */
+			real_point3d middle = *place;
+
+			middle.z += 0.5f;
+			if (game_engine_king_point_on_hill(&middle))
+				return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+/* where the bot goes in king of the hill; FALSE to let it roam */
+static boolean bots_king_choose_goal(struct bots_bot *bot, struct player_datum *player, real_point3d const *position)
+{
+	long now = game_time_get();
+	real_point3d ground;
+	long surface_index;
+
+	bots_king_update();
+	if (!bots_globals.king.present || bots_globals.king.point_count <= 0)
+		return FALSE;
+	if (bots_king_guard(bot, player))
+	{
+		if (now >= bot->guard_until_tick || bots_distance2d(&bot->guard_point, &bots_globals.king.center) > 18.0f)
+		{
+			long index, tries;
+
+			bot->guard_point = bots_globals.king.center;
+			for (tries = 0; tries < 10 && bots_globals.roam_point_count > 0; tries++)
+			{
+				real distance;
+
+				index = (long)(bots_random(bot) % (unsigned long)bots_globals.roam_point_count);
+				distance = bots_distance2d(&bots_globals.roam_points[index], &bots_globals.king.center);
+				if (distance >= 8.0f && distance <= 16.0f)
+				{
+					bot->guard_point = bots_globals.roam_points[index];
+					break;
+				}
+			}
+			bot->guard_until_tick = now + TICKS_PER_SECOND * (8 + (long)(bots_random(bot) % 7));
+		}
+		surface_index = bots_surface_below(&bot->guard_point, &ground);
+		if (surface_index == NONE)
+			return FALSE;
+		bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
+		return TRUE;
+	}
+	/* (a new place: the hill moved, this one reached, or its time up: a few
+	seconds on the hill, longer on the way) */
+	if (bot->hill_id != bots_globals.king.hill_id || now >= bot->hill_until_tick ||
+		bot->goal_kind != _bots_goal_objective || bots_distance2d(position, &bot->hill_point) < 1.0f)
+	{
+		boolean on_hill = bots_king_on_hill(player->unit_index);
+
+		if (!bots_king_place(bot, &bot->hill_point))
+			bot->hill_point = bots_globals.king.center;
+		bot->hill_id = bots_globals.king.hill_id;
+		bot->hill_until_tick = now + TICKS_PER_SECOND * (on_hill ? 2 + (long)(bots_random(bot) % 3) : 12);
+	}
+	surface_index = bots_surface_below(&bot->hill_point, &ground);
+	if (surface_index == NONE)
+		return FALSE;
+	bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
+	return TRUE;
+}
+
 /* where the bot goes: the enemy last seen, a better weapon near, or about
 the map */
 static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point3d const *position, boolean fighting)
 {
 	long now = game_time_get();
 	boolean ctf = bots_ctf_active();
+	boolean king = bots_king_active();
+	boolean on_hill = king && bots_king_on_hill(player_get(player_index)->unit_index);
 
 	/* (carrying a flag: home, nothing else) */
 	if (ctf && bots_ctf_carrying(bot) && bots_ctf_choose_goal(bot, player_get(player_index), position))
 		return;
-	/* (capture the flag's bots go for the flags, not after whom they last saw) */
-	if (!ctf && !fighting && bot->target_player_index != NONE && bot->target_last_surface_index != NONE &&
+	/* (capture the flag's and king of the hill's bots go for the flags and
+	the hill, not after whom they last saw) */
+	if (!ctf && !king && !fighting && bot->target_player_index != NONE && bot->target_last_surface_index != NONE &&
 		now - bot->target_seen_tick < TICKS_PER_SECOND * 8)
 	{
 		bots_set_goal(bot, _bots_goal_enemy, &bot->target_last_position, bot->target_last_surface_index);
@@ -1955,7 +2135,8 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 		bot->goal_kind = _bots_goal_none;
 		bot->item_check_tick = now + TICKS_PER_SECOND * 2;
 	}
-	if (now >= bot->item_check_tick)
+	/* (not while holding the hill) */
+	if (now >= bot->item_check_tick && !on_hill)
 	{
 		long item_index = bots_find_item(bot, unit_get(player_get(player_index)->unit_index), position, fighting ? 8.0f : 20.0f);
 
@@ -1974,6 +2155,8 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 		}
 	}
 	if (ctf && bots_ctf_choose_goal(bot, player_get(player_index), position))
+		return;
+	if (king && bots_king_choose_goal(bot, player_get(player_index), position))
 		return;
 	if (bot->goal_kind != _bots_goal_roam || bots_distance2d(&bot->goal_point, position) < 1.5f ||
 		now - bot->goal_tick > TICKS_PER_SECOND * (bot->hunting ? 12 : 40))
@@ -2277,6 +2460,22 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 			(real)cos(to_target) * forward + (real)cos(to_target + BOTS_PI * 0.5f) * side);
 		tick->moving = TRUE;
 		tick->throttle_scale = 1.0f;
+		/* (king of the hill: a bot on the hill strafes on it, the other way at
+		its edge, and back towards its middle if both ways leave it) */
+		if (bots_king_active() && bots_king_on_hill(tick->player->unit_index) &&
+			!bots_king_guard(bot, tick->player))
+		{
+			real_point3d ahead = tick->object->object.bounding_sphere_center;
+
+			ahead.x += (real)cos(tick->move_direction) * 1.2f;
+			ahead.y += (real)sin(tick->move_direction) * 1.2f;
+			if (!game_engine_king_point_on_hill(&ahead))
+			{
+				bot->strafe_sign = -bot->strafe_sign;
+				tick->move_direction = (real)atan2(bots_globals.king.center.y - tick->position.y,
+					bots_globals.king.center.x - tick->position.x);
+			}
+		}
 	}
 	if (bots_random_real(bot) < skill->jump_chance / TICKS_PER_SECOND)
 		tick->flags |= FLAG(_unit_control_jump_bit);
@@ -2664,6 +2863,37 @@ static void bots_report(void)
 				bots_globals.ctf.carrier_player_index[0] != NONE ? "carried" : "dropped", defenders[0],
 			grabs[1], returns[1], scores[1], !bots_globals.ctf.present[1] ? "none" : bots_globals.ctf.at_home[1] ? "home" :
 				bots_globals.ctf.carrier_player_index[1] != NONE ? "carried" : "dropped", defenders[1]);
+	}
+	/* (king of the hill: the time on the hill, seconds, by team or the bots'
+	and the players' in free for all; the hill's number and who is on it) */
+	if (bots_king_active())
+	{
+		long seconds[2] = { 0, 0 }, on[2] = { 0, 0 }, guards = 0;
+		struct data_iterator iterator;
+		struct player_datum *player;
+		boolean teams = game_engine_has_teams();
+
+		bots_king_update();
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			boolean bot = bots_machine_is_bot(player->network_player_data.machine_index);
+			long side = teams ? (player->team_index == 1) : bot ? 0 : 1;
+
+			seconds[side] += player->statistics.multiplayer_statistics.king_statistics.time_on_hill / TICKS_PER_SECOND;
+			if (bots_king_on_hill(player->unit_index))
+				on[side]++;
+			if (bot)
+			{
+				struct bots_bot *own = &bots_globals.bots[player->network_player_data.machine_index - BOTS_FIRST_MACHINE];
+
+				if (own->player_index == iterator.datum_index && bots_king_guard(own, player))
+					guards++;
+			}
+		}
+		platform_log("bots: king: hill %ld%s; %s %ld s on the hill, %ld on it now; %s %ld s, %ld on it now; %ld guarding",
+			bots_globals.king.hill_id, bots_globals.king.present ? "" : " (none)", teams ? "red" : "bots", seconds[0],
+			on[0], teams ? "blue" : "players", seconds[1], on[1], guards);
 	}
 }
 

@@ -1528,7 +1528,7 @@ static void network_game_server_list(
 }
 
 /* port: the bots (port/linux/game/bots.c, the settings' bots.count and
-bots.teams): in the lobby of a local (split screen) Slayer or CTF game, as many bot
+bots.teams): in the lobby of a local (split screen) Slayer, CTF or King of the Hill game, as many bot
 players as the settings ask for, as far as the game has room, each the one
 player of a machine of its own (BOTS_FIRST_MACHINE up, which no real machine
 is). In a team game they even the teams with the players or, for bots.teams
@@ -1553,7 +1553,8 @@ static void network_game_server_port_bots(
 	if (server->state != _network_game_server_state_pregame || server->sent_start_game_message)
 		return;
 	if (bots_game_allowed() && (server->game.variant.game_engine_index == game_engine_slayer ||
-		server->game.variant.game_engine_index == game_engine_ctf))
+		server->game.variant.game_engine_index == game_engine_ctf ||
+		server->game.variant.game_engine_index == game_engine_king))
 	{
 		wanted = PIN(bots_wanted_count(), 0, BOTS_MAXIMUM);
 	}
@@ -1632,7 +1633,7 @@ static void network_game_server_port_bots(
 
 /* port: the console's add_bot, add_bot_red, add_bot_blue, drop_bot,
 drop_bot_red and drop_bot_blue (hs.c): one bot joins or leaves a local
-(split screen), system link or private internet Slayer or CTF game in progress (bots_game_allowed), as a player joining it in progress
+(split screen), system link or private internet Slayer, CTF or King of the Hill game in progress (bots_game_allowed), as a player joining it in progress
 does (every machine of the game told, which spawns it: _message_server_add_player_ingame)
 and as one who quits. team_index: 0 red, 1 blue, NONE for a game without
 teams, which the game must be of. The lobby's own bots are bots.count's
@@ -1662,9 +1663,10 @@ static struct network_game_server *network_game_server_port_bot_game(
 		return NULL;
 	}
 	if (server->game.variant.game_engine_index != game_engine_slayer &&
-		server->game.variant.game_engine_index != game_engine_ctf)
+		server->game.variant.game_engine_index != game_engine_ctf &&
+		server->game.variant.game_engine_index != game_engine_king)
 	{
-		snprintf(said, said_size, "bots play only Slayer and Capture the Flag");
+		snprintf(said, said_size, "bots play only Slayer, Capture the Flag and King of the Hill");
 		return NULL;
 	}
 	if (team_index == NONE && game_engine_has_teams())
