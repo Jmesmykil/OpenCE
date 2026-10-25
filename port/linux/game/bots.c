@@ -51,8 +51,8 @@ The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), and its path searches run in the
 tick, so the bots do the same in two runs of the same input. Nothing of a
 bot is in the game state: multiplayer games are never saved. Bots are in
-local and system link games (bots_game_allowed), not those hosted for
-internet play: on the host alone, whose tick writes each bot's action into
+local, system link and private internet games (bots_game_allowed), not
+public ones: on the host alone, whose tick writes each bot's action into
 the update it ran (update_server_note_bot_action), from which the
 distributed netcode relays it to the clients as any player's input; they
 drive the bot with it, and take its unit's state from the host as any
@@ -87,8 +87,9 @@ and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 #include "bots.h"
 #include "game/player_queues_new.h"
 
-/* p2p.c's */
+/* p2p.c's, p2p_lobby.c's */
 int p2p_hosting_internet(void);
+int p2p_hosting_listed(void);
 
 /* capture the flag's (below) */
 static boolean bots_ctf_active(void);
@@ -368,14 +369,15 @@ short bots_teams(void)
 }
 
 /* whether this machine hosts a game bots may play in: a local (split screen)
-one, or one for the local network (system link), whose clients drive the
-bots with the input the host relays (network_distributed.c); not one hosted
-for internet play */
+one, one for the local network (system link), or one for internet play that
+the server browser does not list (a private game, joined by its invite), whose
+clients drive the bots with the input the host relays (network_distributed.c);
+not a public one */
 int bots_game_allowed(void)
 {
 	if (!global_network_game_server_get())
 		return FALSE;
-	return network_game_is_splitscreen_local() || !p2p_hosting_internet();
+	return network_game_is_splitscreen_local() || !p2p_hosting_internet() || !p2p_hosting_listed();
 }
 
 int bots_machine_is_bot(long machine_index)

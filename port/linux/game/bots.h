@@ -37,7 +37,8 @@ short bots_teams(void);
 
 /* a machine is a bot's */
 int bots_machine_is_bot(long machine_index);
-/* whether this machine hosts a game bots may play in: local (split screen) or system link, not internet play */
+/* whether this machine hosts a game bots may play in: local (split screen), system link, or a private internet game
+(not listed in the server browser) */
 int bots_game_allowed(void);
 /* the network player for bot number `bot_index` (0 up): its machine,
 controller, name and no team or colour yet */

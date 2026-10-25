@@ -548,11 +548,12 @@ static const struct config_setting config_settings[] =
 		"as the game's own maps' are before they run; false refuses them\n"
 		"(docs/custom_edition_caches.md)." },
 	{ "bots.count", _config_integer, "0", "HALO_BOTS", _environment_value, _platform_all,
-		"Computer players (bots) in a local (split screen) or system link Slayer\n"
-		"or Capture the Flag game: 0 to 63 join its lobby with the players, as\n"
-		"far as the game has room. Not in games hosted for internet play. In a\n"
-		"game, the console's add_bot and drop_bot (add_bot_red, drop_bot_blue...)\n"
-		"add or take one. 0: none, as in the stock game." },
+		"Computer players (bots) in a Slayer or Capture the Flag game hosted\n"
+		"here, local (split screen), system link or a private internet one (not\n"
+		"a public one, which the server browser lists): 0 to 63 join its lobby\n"
+		"with the players, as far as the game has room. In a game, the\n"
+		"console's add_bot and drop_bot (add_bot_red, drop_bot_blue...) add or\n"
+		"take one. 0: none, as in the stock game." },
 	{ "bots.skill", _config_string, "\"normal\"", "HALO_BOT_SKILL", _environment_value, _platform_all,
 		"How well the bots play: \"easy\", \"normal\", \"heroic\" or \"legendary\"\n"
 		"(how soon they react, how well they aim, how far they see)." },

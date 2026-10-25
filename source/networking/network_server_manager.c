@@ -1537,8 +1537,8 @@ teams in the lobby, and the bots follow. They leave when the setting asks
 for fewer, or the game is another gametype. Not once the game has been
 started (the console's add_bot and drop_bot then: network_game_server_port_bot_add),
 and in a system link game as in a local one (its clients drive the bots
-with the input the host relays: bots.c), but not in one hosted for internet
-play (bots_game_allowed) */
+with the input the host relays: bots.c), and in a private internet game,
+but not in a public one, which the server browser lists (bots_game_allowed) */
 static void network_game_server_port_bots(
 	struct network_game_server *server)
 {
@@ -1632,7 +1632,7 @@ static void network_game_server_port_bots(
 
 /* port: the console's add_bot, add_bot_red, add_bot_blue, drop_bot,
 drop_bot_red and drop_bot_blue (hs.c): one bot joins or leaves a local
-(split screen) or system link Slayer or CTF game in progress (bots_game_allowed), as a player joining it in progress
+(split screen), system link or private internet Slayer or CTF game in progress (bots_game_allowed), as a player joining it in progress
 does (every machine of the game told, which spawns it: _message_server_add_player_ingame)
 and as one who quits. team_index: 0 red, 1 blue, NONE for a game without
 teams, which the game must be of. The lobby's own bots are bots.count's
@@ -1658,7 +1658,7 @@ static struct network_game_server *network_game_server_port_bot_game(
 	}
 	if (!bots_game_allowed())
 	{
-		snprintf(said, said_size, "bots play only in local (split screen) and system link games, not internet ones");
+		snprintf(said, said_size, "bots play only in local, system link and private internet games, not public ones");
 		return NULL;
 	}
 	if (server->game.variant.game_engine_index != game_engine_slayer &&
