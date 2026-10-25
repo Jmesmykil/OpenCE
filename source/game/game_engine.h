@@ -757,4 +757,11 @@ real game_engine_get_damage_multiplier(
 	long damaging_player_index,
 	long damaged_player_index);
 
+/* port: (game_engine_ctf.c) a team's flag as the bots see it: where it is, who carries it, whether it is home,
+and where home is; FALSE for a team with no flag this game */
+boolean game_engine_ctf_flag_state(long team_index, real_point3d *position, long *carrier_player_index,
+	boolean *at_home, real_point3d *home);
+/* port: whether touching one's own flag away from home returns it */
+boolean game_engine_ctf_touch_returns(void);
+
 #endif // __GAME_ENGINE_H
