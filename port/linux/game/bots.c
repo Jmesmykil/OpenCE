@@ -45,7 +45,10 @@ What a bot does each tick, in a player's terms:
 
 Skill (bots.skill): easy, normal, heroic, legendary - how soon it reacts,
 how far and how wide it sees, how large its aim error is and how fast that
-settles, how fast it turns, how tight its shots must be before it fires.
+settles, how fast it turns, how tight its shots must be before it fires,
+and how often it goes for the head (the pistol and the sniper rifle at an
+unshielded target, every weapon in SWAT: legendary always, easy seldom) and
+the feet (rockets and the fuel rod, whose blast hurts: never easy).
 
 The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), and its path searches run in the
@@ -174,14 +177,21 @@ struct bots_skill_definition
 	/* the ticks of a burst, and of a pause between bursts */
 	short burst_ticks;
 	short pause_ticks;
+	/* the chance it aims at the head with a weapon whose headshots count (the
+	pistol and the sniper rifle at an unshielded target; SWAT's every
+	weapon), and at the feet with one whose blast hurts (rockets, the fuel
+	rod: Quake III's aim at the ground beside a target for splash damage),
+	taken once a target and again every couple of seconds */
+	real headshot_chance;
+	real feet_chance;
 };
 
 static struct bots_skill_definition const bots_skills[NUMBER_OF_BOTS_SKILLS] =
 {
-	{ "easy", 0.75f, 22.0f, 100.0f, 12.0f, 1.4f, 8.0f, 2.2f, 0.3f, 0.04f, 0.00f, 6, 14 },
-	{ "normal", 0.45f, 32.0f, 120.0f, 7.0f, 0.9f, 13.0f, 1.8f, 0.7f, 0.10f, 0.05f, 9, 9 },
-	{ "heroic", 0.30f, 42.0f, 140.0f, 4.0f, 0.6f, 20.0f, 1.5f, 0.8f, 0.16f, 0.15f, 12, 6 },
-	{ "legendary", 0.18f, 55.0f, 160.0f, 2.2f, 0.35f, 30.0f, 1.25f, 1.0f, 0.22f, 0.25f, 16, 4 },
+	{ "easy", 0.75f, 22.0f, 100.0f, 12.0f, 1.4f, 8.0f, 2.2f, 0.3f, 0.04f, 0.00f, 6, 14, 0.15f, 0.0f },
+	{ "normal", 0.45f, 32.0f, 120.0f, 7.0f, 0.9f, 13.0f, 1.8f, 0.7f, 0.10f, 0.05f, 9, 9, 0.4f, 0.4f },
+	{ "heroic", 0.30f, 42.0f, 140.0f, 4.0f, 0.6f, 20.0f, 1.5f, 0.8f, 0.16f, 0.15f, 12, 6, 0.7f, 0.8f },
+	{ "legendary", 0.18f, 55.0f, 160.0f, 2.2f, 0.35f, 30.0f, 1.25f, 1.0f, 0.22f, 0.25f, 16, 4, 1.0f, 1.0f },
 };
 
 struct bots_bot
@@ -269,6 +279,12 @@ struct bots_bot
 	real_point3d guard_point;
 	long guard_surface_index;
 	long guard_until_tick;
+	/* where it aims at its target (the head, the feet, the middle), taken by
+	its skill's chances once a target and again until then (bots_bot_fight) */
+	long aim_choice_target;
+	long aim_choice_until_tick;
+	boolean aim_head;
+	boolean aim_feet;
 	/* king of the hill: the place on the hill it goes to, and until when; the
 	hill it was for (bots_king_choose_goal) */
 	real_point3d hill_point;
@@ -647,10 +663,21 @@ functions above read only its tag, its name and its trigger, which a map
 never changes (a bot asked them of its weapon every tick: a dozen name
 searches and a few tag lookups) */
 #define BOTS_WEAPON_KINDS 32
+/* where a weapon is best aimed (bots_weapon_aim_compute) */
+enum
+{
+	_bots_aim_body = 0,
+	/* its headshots count (the pistol, the sniper rifle) */
+	_bots_aim_precision,
+	/* its blast hurts (rockets, the fuel rod) */
+	_bots_aim_explosive,
+};
+
 struct bots_weapon_kind
 {
 	long definition_index;
 	short value;
+	short aim;
 	short tap_ticks;
 	real range;
 	real projectile_speed;
@@ -663,6 +690,20 @@ static struct
 	/* (the one made when the table is full) */
 	struct bots_weapon_kind spare;
 } bots_weapon_kinds;
+
+/* where the stock weapons are best aimed, by their tags' names */
+static short bots_weapon_aim_compute(long definition_index)
+{
+	char const *name = tag_get_name(definition_index);
+
+	if (!name)
+		return _bots_aim_body;
+	if (strstr(name, "sniper") || (strstr(name, "pistol") && !strstr(name, "plasma")))
+		return _bots_aim_precision;
+	if (strstr(name, "rocket") || strstr(name, "fuel rod") || strstr(name, "plasma_cannon"))
+		return _bots_aim_explosive;
+	return _bots_aim_body;
+}
 
 static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 {
@@ -681,6 +722,7 @@ static struct bots_weapon_kind const *bots_weapon_kind(long definition_index)
 	kind->tap_ticks = bots_weapon_tap_ticks_compute(definition_index);
 	kind->range = bots_weapon_range_compute(definition_index);
 	kind->projectile_speed = bots_projectile_speed_compute(definition_index);
+	kind->aim = bots_weapon_aim_compute(definition_index);
 	return kind;
 }
 
@@ -2498,9 +2540,39 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 
 	tick->fighting = TRUE;
 	bots_tick_eye(tick);
-	/* (SWAT: a shot to the head kills: at the head) */
-	if (game_modes_mode() == _game_mode_swat)
-		unit_get_head_position(target_player->unit_index, &aim_point);
+	/* where on the target: the head with a weapon whose headshots count (any
+	in SWAT, where a shot to the head kills; the pistol and the sniper rifle
+	once its shields are down), the ground at its feet with one whose blast
+	hurts (when it stands no higher than the bot's eyes), each by the skill's
+	chance, taken once a target and again every couple of seconds */
+	{
+		short aim = tick->weapon_index != NONE ?
+			bots_weapon_kind(weapon_get(tick->weapon_index)->definition_index)->aim : _bots_aim_body;
+		boolean swat = game_modes_mode() == _game_mode_swat;
+
+		if (bot->aim_choice_target != bot->target_player_index || now >= bot->aim_choice_until_tick)
+		{
+			bot->aim_choice_target = bot->target_player_index;
+			bot->aim_choice_until_tick = now + TICKS_PER_SECOND * 2 + (long)(bots_random(bot) % TICKS_PER_SECOND);
+			bot->aim_head = bots_random_real(bot) < skill->headshot_chance;
+			bot->aim_feet = bots_random_real(bot) < skill->feet_chance;
+		}
+		if (bot->aim_head && (swat || (aim == _bots_aim_precision && target_object->object.shield_vitality <= 0.0f)))
+		{
+			unit_get_head_position(target_player->unit_index, &aim_point);
+		}
+		else if (bot->aim_feet && aim == _bots_aim_explosive && aim_point.z <= tick->eye.z + 0.3f)
+		{
+			real_point3d ground;
+
+			if (bots_surface_below(&target_object->object.position, &ground) != NONE &&
+				target_object->object.position.z - ground.z < 1.5f)
+			{
+				aim_point = ground;
+				aim_point.z += 0.1f;
+			}
+		}
+	}
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
 	/* (leading a moving target by the projectile's flight) */
 	if (tick->weapon_index != NONE && skill->lead > 0.0f)
