@@ -1,5 +1,16 @@
 # Changelog
 
+## Build 122
+
+- Switch: Join Game > Direct Link shows a QR code: scan it with a phone (or open the address under it) and paste an invite link there, and the Switch joins its game. The page is served on the local network only while Direct Link is open (network.link_page). (thelinkin3000)
+- Switch: Server Setup's invite row opens the game's invite link as a QR code, for a phone to read; B closes it. (thelinkin3000)
+- Bots play Capture the Flag, by Quake III Arena's bots' rules: defenders and attackers, carriers run home, the team's flag is chased and returned. (thelinkin3000)
+- Bots play King of the Hill, fixed or moving: they take the hill and hold it, and fight whoever stands on it first. (thelinkin3000)
+- Bots in Infection hunt as zombies and hold together as humans; in SWAT they aim for the head. (thelinkin3000)
+- Bots aim at the head with the pistol and the sniper rifle once shields are down, and at the feet with rockets and the fuel rod: legendary always, easy seldom. (thelinkin3000)
+- Bots can join private internet games (hosted, not listed in the server browser), as well as split screen and system link ones. (thelinkin3000)
+- Switch: on the carnage report, A picks the next game and B quits, as in the menus. (thelinkin3000)
+
 ## Build 121
 
 - Bots can join and leave a Slayer game in progress, one at a time, from the console or the Switch's overlay: add_bot and drop_bot in free for all, add_bot_red, add_bot_blue, drop_bot_red and drop_bot_blue in team games. Only the host adds and drops them. (thelinkin3000)
