@@ -1535,8 +1535,10 @@ is). In a team game they even the teams with the players or, for bots.teams
 "against", all take the team the players are not on; the players may change
 teams in the lobby, and the bots follow. They leave when the setting asks
 for fewer, or the game is another gametype. Not once the game has been
-started, nor in a game other machines may join (system link and internet
-games: no bots there, which would need the clients told) */
+started (the console's add_bot and drop_bot then: network_game_server_port_bot_add),
+and in a system link game as in a local one (its clients drive the bots
+with the input the host relays: bots.c), but not in one hosted for internet
+play (bots_game_allowed) */
 static void network_game_server_port_bots(
 	struct network_game_server *server)
 {
@@ -1550,7 +1552,7 @@ static void network_game_server_port_bots(
 
 	if (server->state != _network_game_server_state_pregame || server->sent_start_game_message)
 		return;
-	if (network_game_is_splitscreen_local() && server->game.variant.game_engine_index == game_engine_slayer)
+	if (bots_game_allowed() && server->game.variant.game_engine_index == game_engine_slayer)
 		wanted = PIN(bots_wanted_count(), 0, BOTS_MAXIMUM);
 	for (bot_index = 0; bot_index < BOTS_MAXIMUM; bot_index++)
 		slot_of_bot[bot_index] = NONE;
@@ -1627,7 +1629,7 @@ static void network_game_server_port_bots(
 
 /* port: the console's add_bot, add_bot_red, add_bot_blue, drop_bot,
 drop_bot_red and drop_bot_blue (hs.c): one bot joins or leaves a local
-(split screen) Slayer game in progress, as a player joining it in progress
+(split screen) or system link Slayer game in progress (bots_game_allowed), as a player joining it in progress
 does (every machine of the game told, which spawns it: _message_server_add_player_ingame)
 and as one who quits. team_index: 0 red, 1 blue, NONE for a game without
 teams, which the game must be of. The lobby's own bots are bots.count's
@@ -1645,9 +1647,9 @@ static struct network_game_server *network_game_server_port_bot_game(
 		snprintf(said, said_size, "bots join a game in progress (in its lobby, bots.count sets them)");
 		return NULL;
 	}
-	if (!network_game_is_splitscreen_local())
+	if (!bots_game_allowed())
 	{
-		snprintf(said, said_size, "bots play only in local (split screen) games");
+		snprintf(said, said_size, "bots play only in local (split screen) and system link games, not internet ones");
 		return NULL;
 	}
 	if (server->game.variant.game_engine_index != game_engine_slayer)
@@ -4818,7 +4820,13 @@ static boolean network_game_server_add_new_client(
 	load the game is told so, network_game_server_handle_message_client_join_game_request) */
 	if (TEST_FLAG(server->flags, _network_game_server_game_open_bit))
 	{
-		for (i = 0; i < MAXIMUM_NETWORK_MACHINE_COUNT; i++)
+		/* port: in a game bots may join, a machine's slot is below the bots'
+		machine indices (BOTS_FIRST_MACHINE: bots.h), which the players' 64
+		leave room for */
+		long slots = bots_game_allowed() ? MIN(BOTS_FIRST_MACHINE, MAXIMUM_NETWORK_MACHINE_COUNT) :
+			MAXIMUM_NETWORK_MACHINE_COUNT;
+
+		for (i = 0; i < slots; i++)
 		{
 			if (server->client_machines[i].machine_index == NONE)
 			{
@@ -4902,7 +4910,7 @@ static boolean network_game_server_add_new_client(
 			}
 		}
 
-		if (i == MAXIMUM_NETWORK_MACHINE_COUNT)
+		if (i == slots)
 		{
 			network_event(
 				"failed to find an available machine slot in network_game_server_add_new_client()");

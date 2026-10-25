@@ -51,9 +51,12 @@ The simulation: a bot decides from the game state at the tick and its own
 random numbers (seeded per bot and game), and its path searches run in the
 tick, so the bots do the same in two runs of the same input. Nothing of a
 bot is in the game state: multiplayer games are never saved. Bots are in
-local games only, which no other machine sees: no message of the network
-protocol changes, and bots_update_actions does nothing unless a local game
-runs. halo.log has the map's preparation and each minute of play's bots
+local and system link games (bots_game_allowed), not those hosted for
+internet play: on the host alone, whose tick writes each bot's action into
+the update it ran (update_server_note_bot_action), from which the
+distributed netcode relays it to the clients as any player's input; they
+drive the bot with it, and take its unit's state from the host as any
+player's. No message of the network protocol changes. halo.log has the map's preparation and each minute of play's bots
 line: the searches and how many failed, the times a bot stood stuck, shots
 and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 */
@@ -82,6 +85,11 @@ and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 #include "tag_files/tag_files.h"
 
 #include "bots.h"
+#include "networking/network_game_globals.h"
+#include "game/player_queues_new.h"
+
+/* p2p.c's */
+int p2p_hosting_internet(void);
 
 #include <math.h>
 #include <stdio.h>
@@ -333,6 +341,17 @@ short bots_skill(void)
 short bots_teams(void)
 {
 	return strcmp(config_string("bots.teams"), "against") ? _bots_teams_even : _bots_teams_against;
+}
+
+/* whether this machine hosts a game bots may play in: a local (split screen)
+one, or one for the local network (system link), whose clients drive the
+bots with the input the host relays (network_distributed.c); not one hosted
+for internet play */
+int bots_game_allowed(void)
+{
+	if (!global_network_game_server_get())
+		return FALSE;
+	return network_game_is_splitscreen_local() || !p2p_hosting_internet();
 }
 
 int bots_machine_is_bot(long machine_index)
@@ -2401,8 +2420,8 @@ void bots_update_actions(struct player_action *actions)
 	struct player_datum *player;
 	long count = 0;
 
-	/* (local games alone: no other machine sees a bot) */
-	if (!game_engine_running() || !network_game_is_splitscreen_local())
+	/* (the host's alone: a client drives the bots with the input it relays) */
+	if (!game_engine_running() || !bots_game_allowed())
 		return;
 	data_iterator_new(&iterator, player_data);
 	while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
@@ -2428,7 +2447,11 @@ void bots_update_actions(struct player_action *actions)
 		if (bot->player_index != iterator.datum_index)
 			bots_bot_reset(bot, iterator.datum_index, bot_index);
 		if (absolute_index >= 0 && absolute_index < HALO_PORT_MAXIMUM_NETWORK_PLAYERS)
+		{
 			bots_bot_update(bot, bot_index, &actions[absolute_index]);
+			/* (what the clients are relayed of it) */
+			update_server_note_bot_action((short)absolute_index, &actions[absolute_index]);
+		}
 		count++;
 	}
 	if (count)
