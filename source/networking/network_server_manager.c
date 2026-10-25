@@ -1642,9 +1642,15 @@ static struct network_game_server *network_game_server_port_bot_game(
 {
 	struct network_game_server *server = global_network_game_server_get();
 
+	/* (a client's: the host decides the game, its bots too, as it does its cheats) */
+	if (!server && global_network_game_client_get())
+	{
+		snprintf(said, said_size, "only the game's host adds and drops bots");
+		return NULL;
+	}
 	if (!server || network_game_server_get_state(server, NULL) != _network_game_server_state_ingame)
 	{
-		snprintf(said, said_size, "bots join a game in progress (in its lobby, bots.count sets them)");
+		snprintf(said, said_size, "bots join a multiplayer game in progress (in its lobby, bots.count sets them)");
 		return NULL;
 	}
 	if (!bots_game_allowed())
