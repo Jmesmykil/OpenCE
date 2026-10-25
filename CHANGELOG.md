@@ -1,5 +1,11 @@
 # Changelog
 
+## Build 120
+
+- Switch: in the menus, the button marked A (on the right) chooses and B (at the bottom) goes back, as in the console's own menus; in a game the buttons are as before. controls.nintendo_menu_buttons = false in config.toml brings back the Xbox layout in the menus. (thelinkin3000)
+- Switch and PS5: the controller buttons on screen are the console's own, from Kenney's Input Prompts: the menus' buttons, the "Press (A)" icons in text and the game's prompts, with the shoulders, triggers and sticks. (thelinkin3000)
+- Switch: the Ultrahand overlay (hardran3's OpenCE-Ultrahand package) works only with the package installed, and the main menu says "Ultrahand Overlay present and enabled". Its command file is now /switch/.packages/halo/overlay/command.txt, and the game keeps an empty file in that folder's flags for each true/false command that is on (cheat_infinite_ammo.flag, display.vsync.flag), so the overlay can show its toggles' state. (thelinkin3000)
+
 ## Build 119
 
 - Switch: with a mod of high-resolution textures (Uncompressed Textures, say), textures the game lets go of are kept in the console's memory outside the game's own, 512 MB of them, and read back from there instead of the SD card: most of the hitches in busy matches with the mod. Blood Gulch and Battle Creek with 63 bots went from 53.9 and 48.6 to 59.3 and 53.8 frames a second. (thelinkin3000)
