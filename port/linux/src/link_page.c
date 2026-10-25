@@ -38,6 +38,9 @@ char const *link_page_address(void);
 /* the address's QR code: its side in modules (0 for none) and whether a module is dark */
 int link_page_qr_size(void);
 int link_page_qr_dark(int x, int y);
+/* (the Switch's) a QR code of any text (Server Setup's invite link): made, then as the address's */
+int link_page_text_qr(char const *text);
+int link_page_text_qr_dark(int x, int y);
 /* a link it took, since this was last asked (1 once a link was sent and joined) */
 int link_page_took_link(void);
 
@@ -59,6 +62,7 @@ enum
 	LINK_PAGE_REQUEST_SIZE = 4096,
 	/* (the address: version 3 holds 53 characters at medium correction) */
 	LINK_PAGE_QR_VERSION = 4,
+	LINK_PAGE_TEXT_QR_VERSION = 10,
 };
 
 static struct
@@ -74,6 +78,9 @@ static struct
 	char address[64];
 	uint8_t qr[qrcodegen_BUFFER_LEN_FOR_VERSION(LINK_PAGE_QR_VERSION)];
 	int qr_ready;
+	/* (any text's: an invite link, 76 characters, version 5) */
+	uint8_t text_qr[qrcodegen_BUFFER_LEN_FOR_VERSION(LINK_PAGE_TEXT_QR_VERSION)];
+	int text_qr_ready;
 	int took_link;
 } link_page = { -1, -1 };
 
@@ -373,6 +380,20 @@ int link_page_qr_dark(int x, int y)
 	return link_page.qr_ready && qrcodegen_getModule(link_page.qr, x, y);
 }
 
+int link_page_text_qr(char const *text)
+{
+	uint8_t scratch[qrcodegen_BUFFER_LEN_FOR_VERSION(LINK_PAGE_TEXT_QR_VERSION)];
+
+	link_page.text_qr_ready = text && *text && qrcodegen_encodeText(text, scratch, link_page.text_qr,
+		qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN, LINK_PAGE_TEXT_QR_VERSION, qrcodegen_Mask_AUTO, true);
+	return link_page.text_qr_ready ? qrcodegen_getSize(link_page.text_qr) : 0;
+}
+
+int link_page_text_qr_dark(int x, int y)
+{
+	return link_page.text_qr_ready && qrcodegen_getModule(link_page.text_qr, x, y);
+}
+
 int link_page_took_link(void)
 {
 	int took = link_page.took_link;
@@ -410,6 +431,19 @@ int link_page_qr_dark(int x, int y)
 
 int link_page_took_link(void)
 {
+	return 0;
+}
+
+int link_page_text_qr(char const *text)
+{
+	(void)text;
+	return 0;
+}
+
+int link_page_text_qr_dark(int x, int y)
+{
+	(void)x;
+	(void)y;
 	return 0;
 }
 

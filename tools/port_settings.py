@@ -1952,6 +1952,28 @@ def _map_kind() -> list:
     return lines
 
 
+def _invite_qr_screen() -> list:
+    """(the Switch's) Server Setup's invite link as a QR code, for a phone
+    to read: its own screen, opened by the invite row's A (menu_functions.c's
+    invite_copy), which only B closes; the code is drawn above its line of
+    text (menu_functions.c's link_qr_draw)"""
+    base = f"{MT}/server_settings/invite_qr"
+    lines = _widget(f"{base}/invite_qr_screen", [("width", 640), ("height", 480), ("flags", "pause_game"),
+                                                 ("bitmap", "bitmaps/gradient")],
+                    ['<on event="b" run="ss invite qr back"/>',
+                     f'<child widget="{base}/invite_qr_title"/>',
+                     f'<child widget="{base}/invite_qr_text"/>'])
+    lines += _widget(f"{base}/invite_qr_title", [("type", "text"), ("controller", 1), ("left", 35), ("top", 24),
+                                                 ("width", 570), ("height", 30), ("text", "INVITE LINK"),
+                                                 ("font", "ui\\large_ui"), ("color", "#FF2896FF")], [])
+    lines += _widget(f"{base}/invite_qr_text", [("type", "text"), ("controller", 1), ("left", 40), ("top", 410),
+                                                ("width", 560), ("height", 18),
+                                                ("text", "Scan it with your phone for the invite link. B: back"),
+                                                ("font", "ui\\small_ui"), ("color", "#FFFFFFFF"), ("align", "center"),
+                                                ("text_flags", "no_focus_test")], [])
+    return lines
+
+
 def multiplayer_files() -> dict:
     """the port's multiplayer widgets: the browser's additions, the server
     settings, the lobby"""
@@ -1959,7 +1981,8 @@ def multiplayer_files() -> dict:
             "<!-- The port's multiplayer screens, in the PC version's style (tools/port_settings.py) -->", "<menus>"]
     return {
         f"{MT}/join_game".replace("/", ".") + ".port.xml": head + _join_game_extras() + ["</menus>", ""],
-        f"{MT}/server_settings".replace("/", ".") + ".xml": head + _server_settings() + ["</menus>", ""],
+        f"{MT}/server_settings".replace("/", ".") + ".xml": head + _server_settings() + _invite_qr_screen() +
+        ["</menus>", ""],
         f"{MT}/lobby".replace("/", ".") + ".xml": head + _lobby() + ["</menus>", ""],
         f"{MT}/coop".replace("/", ".") + ".xml": head + _coop() + ["</menus>", ""],
         "main_menu/new_select".replace("/", ".") + ".port.xml": head + _map_kind() + ["</menus>", ""],
