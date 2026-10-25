@@ -1,5 +1,11 @@
 # Changelog
 
+## Build 121
+
+- Bots can join and leave a Slayer game in progress, one at a time, from the console or the Switch's overlay: add_bot and drop_bot in free for all, add_bot_red, add_bot_blue, drop_bot_red and drop_bot_blue in team games. Only the host adds and drops them. (thelinkin3000)
+- Bots play in system link games too, not only split screen: the host plays them and the other machines see them as any player (bots.count fills the lobby, and the commands above work in game). Not in games hosted for internet play. (thelinkin3000)
+- Switch: pressing + and − together (or Home and +) no longer quits the game at once, mid-match. (thelinkin3000)
+
 ## Build 120
 
 - Switch: in the menus, the button marked A (on the right) chooses and B (at the bottom) goes back, as in the console's own menus; in a game the buttons are as before. controls.nintendo_menu_buttons = false in config.toml brings back the Xbox layout in the menus. (thelinkin3000)
