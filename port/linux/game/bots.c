@@ -85,7 +85,6 @@ and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 #include "tag_files/tag_files.h"
 
 #include "bots.h"
-#include "networking/network_game_globals.h"
 #include "game/player_queues_new.h"
 
 /* p2p.c's */
