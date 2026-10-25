@@ -360,7 +360,7 @@ static char const *const port_function_names[] =
 	"color picker menu initialize", "color picker menu dispose", "color picker select color",
 	"player profile list initialize", "player profile list dispose", "request del player profile",
 	"final del player profile",
-	"ss copy invite", "join controller to mp game", "mp level list initialize", "mp level list dispose",
+	"ss copy invite", "ss invite qr back", "join controller to mp game", "mp level list initialize", "mp level list dispose",
 	"mp level select", "mp profiles list initialize", "mp profiles list dispose", "mp profile set for game",
 	"port lobby preview join",
 	"port setup edit",
