@@ -1709,3 +1709,12 @@ boolean game_engine_ctf_touch_returns(
 {
 	return !game_engine_get_variant()->game_engine_variant.ctf.flag_must_reset;
 }
+
+/* port: (the bots') whether a capture needs the capturer's own flag at home
+(the variant's flag at home to score, two flags) */
+boolean game_engine_ctf_home_to_score(
+	void)
+{
+	return game_engine_get_variant()->game_engine_variant.ctf.flag_at_home_to_score &&
+		game_engine_get_variant()->game_engine_variant.ctf.single_flag_time == 0;
+}

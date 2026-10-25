@@ -763,6 +763,8 @@ boolean game_engine_ctf_flag_state(long team_index, real_point3d *position, long
 	boolean *at_home, real_point3d *home);
 /* port: whether touching one's own flag away from home returns it */
 boolean game_engine_ctf_touch_returns(void);
+/* port: whether a capture needs the capturer's own flag at home */
+boolean game_engine_ctf_home_to_score(void);
 
 /* port: (game_engine_king.c) the hill as the bots see it: its points, its height, its middle and its number;
 FALSE while there is none */

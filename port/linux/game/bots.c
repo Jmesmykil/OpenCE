@@ -85,6 +85,8 @@ and each bot's kills and deaths; debug.bot_trace logs each bot's state.
 #include "tag_files/tag_files.h"
 
 #include "bots.h"
+#include "game_modes.h"
+#include "infection.h"
 #include "game/player_queues_new.h"
 
 /* p2p.c's, p2p_lobby.c's */
@@ -319,6 +321,7 @@ static struct
 		boolean at_home[2];
 		real_point3d home[2];
 		boolean touch_returns;
+		boolean home_to_score;
 	} ctf;
 	/* king of the hill: the hill as the tick began (bots_king_update) */
 	struct
@@ -1808,6 +1811,7 @@ static void bots_ctf_update(void)
 		return;
 	bots_globals.ctf.tick = now;
 	bots_globals.ctf.touch_returns = game_engine_ctf_touch_returns();
+	bots_globals.ctf.home_to_score = game_engine_ctf_home_to_score();
 	for (team = 0; team < 2; team++)
 	{
 		bots_globals.ctf.present[team] = game_engine_ctf_flag_state(team, &bots_globals.ctf.position[team],
@@ -1895,6 +1899,14 @@ static boolean bots_ctf_choose_goal(struct bots_bot *bot, struct player_datum *p
 	/* carrying theirs: home */
 	if (bots_globals.ctf.present[other] && bots_globals.ctf.carrier_player_index[other] == bot->player_index)
 		return bots_ctf_set_goal(bot, &bots_globals.ctf.home[team], 1.0f);
+	/* (a gametype whose captures need the team's own flag at home, ours
+	carried off while a team mate carries theirs: everyone after our flag,
+	or the carrier waits at home for ever, Quake III's flag standoff) */
+	if (bots_globals.ctf.home_to_score && bots_globals.ctf.present[team] && bots_globals.ctf.present[other] &&
+		bots_globals.ctf.carrier_player_index[team] != NONE && bots_globals.ctf.carrier_player_index[other] != NONE)
+	{
+		return bots_ctf_set_goal(bot, &bots_globals.ctf.position[team], 4.0f);
+	}
 	if (bots_globals.ctf.present[team] && !bots_globals.ctf.at_home[team])
 	{
 		real distance = bots_distance3d(position, &bots_globals.ctf.position[team]);
@@ -2097,6 +2109,123 @@ static boolean bots_king_choose_goal(struct bots_bot *bot, struct player_datum *
 	return TRUE;
 }
 
+/* ---------- OpenCE's modes of Slayer
+
+Infection (infection.c): the zombies, blue, carry the skull and fight with
+it close up; the humans, red, keep their weapons. A zombie bot goes after
+the nearest human where they are (the zombies hunt), runs straight at them
+and strikes, and fetches nothing; a human bot stays with the other humans
+(the roaming place nearest the living humans' middle, or, alone, the one
+furthest from the zombies), backs away from a zombie close by, and goes
+after no one it last saw. SWAT (game_modes.c): a shot to the head kills, so
+the bots aim at the head (bots_bot_fight). */
+
+static boolean bots_zombie(struct player_datum *player)
+{
+	return infection_enabled() && player->unit_index != NONE && infection_unit_is_zombie(player->unit_index);
+}
+
+/* where an Infection bot goes; FALSE to let it roam */
+static boolean bots_infection_choose_goal(struct bots_bot *bot, struct player_datum *player, real_point3d const *position)
+{
+	struct data_iterator iterator;
+	struct player_datum *other;
+	long now = game_time_get();
+	real_point3d humans = { 0.0f, 0.0f, 0.0f };
+	long human_count = 0;
+	long nearest_human = NONE;
+	real nearest_distance = REAL_MAX;
+	boolean zombie = bots_zombie(player);
+
+	data_iterator_new(&iterator, player_data);
+	while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+	{
+		real_point3d const *where;
+		real distance;
+
+		if (other->unit_index == NONE || other == player || infection_unit_is_zombie(other->unit_index) ||
+			TEST_FLAG(object_get(other->unit_index)->object.damage_flags, _object_dead_bit))
+		{
+			continue;
+		}
+		where = &object_get(other->unit_index)->object.position;
+		humans.x += where->x;
+		humans.y += where->y;
+		humans.z += where->z;
+		human_count++;
+		distance = bots_distance3d(position, where);
+		if (distance < nearest_distance)
+		{
+			nearest_distance = distance;
+			nearest_human = other->unit_index;
+		}
+	}
+	if (zombie)
+	{
+		real_point3d ground;
+		long surface_index;
+		real_point3d const *where;
+
+		if (nearest_human == NONE)
+			return FALSE;
+		where = &object_get(nearest_human)->object.position;
+		if (bot->goal_kind == _bots_goal_objective && bots_distance3d(&bot->goal_point, where) < 3.0f)
+			return TRUE;
+		surface_index = bots_surface_below(where, &ground);
+		if (surface_index == NONE)
+			return bot->goal_kind == _bots_goal_objective;
+		bots_set_goal(bot, _bots_goal_objective, &ground, surface_index);
+		return TRUE;
+	}
+	/* a human: with the others (their middle), or alone, away from the zombies */
+	if (bot->goal_kind == _bots_goal_objective && now < bot->guard_until_tick)
+		return TRUE;
+	{
+		long index, best = NONE;
+		real best_score = REAL_MAX;
+
+		if (human_count > 0)
+		{
+			humans.x /= (real)human_count;
+			humans.y /= (real)human_count;
+			humans.z /= (real)human_count;
+		}
+		for (index = 0; index < bots_globals.roam_point_count; index++)
+		{
+			real score;
+
+			if (human_count > 0)
+				score = bots_distance3d(&bots_globals.roam_points[index], &humans);
+			else
+			{
+				real zombie_distance = REAL_MAX;
+
+				data_iterator_new(&iterator, player_data);
+				while ((other = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+				{
+					if (other->unit_index != NONE && infection_unit_is_zombie(other->unit_index))
+					{
+						zombie_distance = MIN(zombie_distance,
+							bots_distance3d(&bots_globals.roam_points[index], &object_get(other->unit_index)->object.position));
+					}
+				}
+				score = -zombie_distance;
+			}
+			score += bots_random_real(bot) * 4.0f;
+			if (score < best_score)
+			{
+				best_score = score;
+				best = index;
+			}
+		}
+		if (best == NONE)
+			return FALSE;
+		bots_set_goal(bot, _bots_goal_objective, &bots_globals.roam_points[best], bots_globals.roam_surfaces[best]);
+		bot->guard_until_tick = now + TICKS_PER_SECOND * (8 + (long)(bots_random(bot) % 6));
+		return TRUE;
+	}
+}
+
 /* where the bot goes: the enemy last seen, a better weapon near, or about
 the map */
 static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point3d const *position, boolean fighting)
@@ -2105,13 +2234,15 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 	boolean ctf = bots_ctf_active();
 	boolean king = bots_king_active();
 	boolean on_hill = king && bots_king_on_hill(player_get(player_index)->unit_index);
+	boolean infection = infection_enabled();
+	boolean zombie = infection && bots_zombie(player_get(player_index));
 
 	/* (carrying a flag: home, nothing else) */
 	if (ctf && bots_ctf_carrying(bot) && bots_ctf_choose_goal(bot, player_get(player_index), position))
 		return;
 	/* (capture the flag's and king of the hill's bots go for the flags and
 	the hill, not after whom they last saw) */
-	if (!ctf && !king && !fighting && bot->target_player_index != NONE && bot->target_last_surface_index != NONE &&
+	if (!ctf && !king && !infection && !fighting && bot->target_player_index != NONE && bot->target_last_surface_index != NONE &&
 		now - bot->target_seen_tick < TICKS_PER_SECOND * 8)
 	{
 		bots_set_goal(bot, _bots_goal_enemy, &bot->target_last_position, bot->target_last_surface_index);
@@ -2135,8 +2266,8 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 		bot->goal_kind = _bots_goal_none;
 		bot->item_check_tick = now + TICKS_PER_SECOND * 2;
 	}
-	/* (not while holding the hill) */
-	if (now >= bot->item_check_tick && !on_hill)
+	/* (not while holding the hill, nor a zombie, which carries its skull alone) */
+	if (now >= bot->item_check_tick && !on_hill && !zombie)
 	{
 		long item_index = bots_find_item(bot, unit_get(player_get(player_index)->unit_index), position, fighting ? 8.0f : 20.0f);
 
@@ -2157,6 +2288,8 @@ static void bots_choose_goal(struct bots_bot *bot, long player_index, real_point
 	if (ctf && bots_ctf_choose_goal(bot, player_get(player_index), position))
 		return;
 	if (king && bots_king_choose_goal(bot, player_get(player_index), position))
+		return;
+	if (infection && bots_infection_choose_goal(bot, player_get(player_index), position))
 		return;
 	if (bot->goal_kind != _bots_goal_roam || bots_distance2d(&bot->goal_point, position) < 1.5f ||
 		now - bot->goal_tick > TICKS_PER_SECOND * (bot->hunting ? 12 : 40))
@@ -2357,6 +2490,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	struct player_datum *target_player = player_get(bot->target_player_index);
 	struct object_datum *target_object = object_get(target_player->unit_index);
 	real_point3d aim_point = target_object->object.bounding_sphere_center;
+	boolean zombie = bots_zombie(tick->player);
 	long reaction_ticks = (long)(skill->reaction_seconds * TICKS_PER_SECOND);
 	long now = tick->now;
 	real desired_yaw, desired_pitch, dx, dy, dz, horizontal, turn, yaw_off, pitch_off, cone;
@@ -2364,6 +2498,9 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 
 	tick->fighting = TRUE;
 	bots_tick_eye(tick);
+	/* (SWAT: a shot to the head kills: at the head) */
+	if (game_modes_mode() == _game_mode_swat)
+		unit_get_head_position(target_player->unit_index, &aim_point);
 	tick->target_distance = bots_distance3d(&tick->eye, &aim_point);
 	/* (leading a moving target by the projectile's flight) */
 	if (tick->weapon_index != NONE && skill->lead > 0.0f)
@@ -2401,7 +2538,7 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 	yaw_off = (real)fabs(bots_angle_difference((real)atan2(dy, dx), bot->yaw));
 	pitch_off = (real)fabs((real)atan2(dz, horizontal) - bot->pitch);
 	cone = (real)atan(0.35f / MAX(tick->target_distance, 0.5f)) * skill->fire_cone + 0.01f;
-	if (now - bot->target_first_seen_tick >= reaction_ticks && now - bot->target_seen_tick <= 3 &&
+	if (!zombie && now - bot->target_first_seen_tick >= reaction_ticks && now - bot->target_seen_tick <= 3 &&
 		yaw_off < cone && pitch_off < cone * 1.5f && tick->weapon_index != NONE)
 	{
 		short tap_ticks = bots_weapon_tap_ticks(tick->weapon_index);
@@ -2426,14 +2563,15 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 			tick->flags |= FLAG(_unit_control_weapon_primary_trigger_bit);
 		}
 	}
-	/* a blow close up */
-	if (tick->target_distance < 1.1f && now >= bot->melee_tick)
+	/* a blow close up (a zombie's, its skull's, a little further and more
+	often: its only one) */
+	if (tick->target_distance < (zombie ? 1.6f : 1.1f) && now >= bot->melee_tick)
 	{
 		tick->flags |= FLAG(_unit_control_use_equipment_bit);
-		bot->melee_tick = now + TICKS_PER_SECOND;
+		bot->melee_tick = now + (zombie ? TICKS_PER_SECOND / 2 : TICKS_PER_SECOND);
 	}
 	/* a grenade at middle range, now and then */
-	if (tick->target_distance > 6.0f && tick->target_distance < 22.0f && now >= bot->grenade_tick &&
+	if (!zombie && tick->target_distance > 6.0f && tick->target_distance < 22.0f && now >= bot->grenade_tick &&
 		(tick->unit->unit.grenade_counts[0] > 0 || tick->unit->unit.grenade_counts[1] > 0) &&
 		bots_random_real(bot) < skill->grenade_chance / TICKS_PER_SECOND * 3.0f &&
 		now - bot->target_first_seen_tick >= reaction_ticks)
@@ -2455,6 +2593,19 @@ static void bots_bot_fight(struct bots_bot *bot, struct bots_tick *tick)
 		real range = bots_weapon_range(tick->weapon_index);
 		real forward = tick->target_distance > range * 1.3f ? 0.8f : tick->target_distance < range * 0.6f ? -0.5f : 0.0f;
 		real side = bot->strafe_sign;
+
+		/* (Infection: a zombie straight at them, little to the side; a human
+		backs away from a zombie close by) */
+		if (zombie)
+		{
+			forward = 1.0f;
+			side *= 0.2f;
+		}
+		else if (infection_enabled() && infection_unit_is_zombie(target_player->unit_index) &&
+			tick->target_distance < 7.0f)
+		{
+			forward = -1.0f;
+		}
 
 		tick->move_direction = (real)atan2((real)sin(to_target) * forward + (real)sin(to_target + BOTS_PI * 0.5f) * side,
 			(real)cos(to_target) * forward + (real)cos(to_target + BOTS_PI * 0.5f) * side);
@@ -2762,7 +2913,27 @@ static void bots_bot_update(struct bots_bot *bot, long bot_index, struct player_
 		bots_bot_walk(bot, &tick);
 		bots_bot_yield(bot_index, &tick);
 	}
-	else if (bot->goal_kind == _bots_goal_item)
+	/* (carrying a flag near home: straight onto its place, which a capture
+	needs within a unit of, past where its path ends; a jump if it stands
+	still there) */
+	if (carrying && (tick.player->team_index == 0 || tick.player->team_index == 1) &&
+		bots_globals.ctf.present[tick.player->team_index])
+	{
+		real_point3d const *home = &bots_globals.ctf.home[tick.player->team_index];
+
+		if (bots_distance2d(&tick.position, home) < 4.0f && (real)fabs(home->z - tick.position.z) < 2.5f)
+		{
+			tick.move_direction = (real)atan2(home->y - tick.position.y, home->x - tick.position.x);
+			tick.moving = TRUE;
+			tick.throttle_scale = 1.0f;
+			if (bots_distance2d(&tick.position, home) < 1.5f && home->z > tick.position.z + 0.4f &&
+				(tick.now & 15) == 0)
+			{
+				tick.flags |= FLAG(_unit_control_jump_bit);
+			}
+		}
+	}
+	else if (tick.fighting && bot->goal_kind == _bots_goal_item)
 	{
 		real direction;
 
