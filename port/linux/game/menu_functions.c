@@ -72,6 +72,9 @@ their handlers open opens.
 #include "interface/event_manager.h"
 #include "interface/player_ui.h"
 #include "interface/ui_widget.h"
+#include "bitmaps/bitmap_group.h"
+#include "bitmaps/bitmaps.h"
+#include "rasterizer/xbox/rasterizer_xbox_hardware_bitmaps.h"
 #include "interface/ui_widget_event_handler_functions.h"
 #include "main/main.h"
 #include "networking/network_game_manager.h"
@@ -113,6 +116,11 @@ void halo_input_shown_name(char const *binding, char *shown, unsigned int size);
 short pc_menu_string_index(long definition_index);
 /* cseries_windows.c's */
 unsigned long system_milliseconds(void);
+/* the Switch's link page (port/linux/src/link_page.c) */
+void link_page_wanted(void);
+char const *link_page_address(void);
+int link_page_qr_size(void);
+int link_page_qr_dark(int x, int y);
 
 /* the game's (port) */
 boolean ui_widget_port_dispatch_event(struct widget_instance *widget, short event_type, short controller_index,
@@ -4374,7 +4382,12 @@ static boolean browser_initialize(struct widget_instance *screen, struct event_r
 		visible_set(named(screen, titles[index], 0), !strcmp(titles[index], title));
 	for (index = 0; index < NUMBEROF(unused); index++)
 		visible_set(named(screen, unused[index], 0), FALSE);
+#ifdef HALO_SWITCH
+	/* (the Switch's clipboard is the game's own: its link comes from the link page's QR code instead) */
+	visible_set(named(screen, "button_clipboard", 0), FALSE);
+#else
 	visible_set(named(screen, "button_clipboard", 0), multiplayer.mode == _multiplayer_mode_direct_link);
+#endif
 	visible_set(named(screen, "join_game_button_refresh", 0), multiplayer.mode == _multiplayer_mode_server_browser);
 	{
 		struct widget_instance *list = named(screen, "join_game_items_list", 0);
@@ -5098,6 +5111,11 @@ the one chosen's line, the counts over the titles (the PC version's: its
 players, page, servers) */
 static void browser_update(struct widget_instance *list)
 {
+#ifdef HALO_SWITCH
+	/* (the link page while Direct Link's page is up: link_page.c) */
+	if (multiplayer.mode == _multiplayer_mode_direct_link)
+		link_page_wanted();
+#endif
 	struct widget_instance *row;
 	struct widget_instance *stats = list->parameters.list.extended_description;
 	short focused = browser_row_index(list->focused_child);
@@ -5146,6 +5164,27 @@ static void browser_update(struct widget_instance *list)
 
 		if (multiplayer.mode == _multiplayer_mode_server_browser)
 			text[0] = 0;
+#ifdef HALO_SWITCH
+		/* (Direct Link's way in: the link page, on the local network, and its QR code above this line) */
+		else if (multiplayer.mode == _multiplayer_mode_direct_link && !multiplayer.game_count)
+		{
+			if (link_page_address()[0])
+			{
+				wchar_t address[64];
+				short index;
+
+				for (index = 0; index < NUMBEROF(address) - 1 && link_page_address()[index]; index++)
+					address[index] = (wchar_t)link_page_address()[index];
+				address[index] = 0;
+				usnprintf(text, NUMBEROF(text) - 1, L"Scan the code with your phone, or open %s, and paste the invite link",
+					address);
+			}
+			else if (!config_boolean("network.link_page"))
+				usnprintf(text, NUMBEROF(text) - 1, L"%s", L"The link page is off (network.link_page in config.toml)");
+			else
+				usnprintf(text, NUMBEROF(text) - 1, L"%s", L"Connect the Switch to a network to send it an invite link");
+		}
+#endif
 		else if (!multiplayer.game_count)
 		{
 			usnprintf(text, NUMBEROF(text) - 1, L"%s", multiplayer.mode == _multiplayer_mode_direct_link ?
@@ -5604,6 +5643,92 @@ static struct
 	unsigned long updated_at;
 } lobby_icons;
 
+#ifdef HALO_SWITCH
+/* Direct Link's QR code of the link page's address (link_page.c), in the
+games' list while it has none: centred over it, drawn from where the ticker
+line under the list is (UI units: the list's rows from y 102 to 357, the
+ticker's text from x 100 at y 402). Its picture is made again when the
+address changes: four texels a module (and the white margin a QR code
+wants, four modules), in a 256 by 256 texture */
+enum
+{
+	LINK_QR_TEXTURE = 256,
+	LINK_QR_MARGIN = 4,
+	LINK_QR_SIDE = 200,
+};
+
+static struct
+{
+	struct bitmap_data *bitmap;
+	char address[64];
+	/* the texels the code fills */
+	short texels;
+} link_qr;
+
+static boolean link_qr_make(void)
+{
+	long modules = link_page_qr_size();
+	long side = modules + 2 * LINK_QR_MARGIN;
+	long scale = side > 0 ? LINK_QR_TEXTURE / side : 0;
+	unsigned long *pixels;
+	long x, y;
+
+	if (!modules || scale < 1)
+		return FALSE;
+	if (!link_qr.bitmap)
+	{
+		link_qr.bitmap = bitmap_2d_new(LINK_QR_TEXTURE, LINK_QR_TEXTURE, 0, 11 /* a8r8g8b8 */);
+		if (link_qr.bitmap && !rasterizer_bitmap_new(link_qr.bitmap))
+		{
+			bitmap_delete(link_qr.bitmap);
+			link_qr.bitmap = NULL;
+		}
+		if (!link_qr.bitmap)
+			return FALSE;
+	}
+	pixels = (unsigned long *)link_qr.bitmap->base_address;
+	for (y = 0; y < LINK_QR_TEXTURE; y++)
+	{
+		for (x = 0; x < LINK_QR_TEXTURE; x++)
+		{
+			long module_x = x / scale - LINK_QR_MARGIN;
+			long module_y = y / scale - LINK_QR_MARGIN;
+			boolean inside = x < side * scale && y < side * scale;
+			boolean dark = inside && module_x >= 0 && module_y >= 0 && module_x < modules && module_y < modules &&
+				link_page_qr_dark((int)module_x, (int)module_y);
+
+			pixels[y * LINK_QR_TEXTURE + x] = !inside ? 0 : dark ? 0xFF000000UL : 0xFFFFFFFFUL;
+		}
+	}
+	rasterizer_bitmap_changed(link_qr.bitmap);
+	link_qr.texels = (short)(side * scale);
+	csstrncpy(link_qr.address, link_page_address(), sizeof(link_qr.address) - 1);
+	return TRUE;
+}
+
+static void link_qr_draw(rectangle2d const *ticker)
+{
+	real scale = (real)(ticker->y1 - ticker->y0) / 18.0f;
+	rectangle2d square;
+	rectangle2d source;
+	short side = (short)(LINK_QR_SIDE * scale);
+	short centre_x = (short)(ticker->x0 + (320 - 100) * scale);
+	short centre_y = (short)(ticker->y0 - (402 - (102 + 357) / 2) * scale);
+
+	if (multiplayer.mode != _multiplayer_mode_direct_link || multiplayer.game_count || !link_page_address()[0])
+		return;
+	if ((!link_qr.bitmap || strcmp(link_qr.address, link_page_address())) && !link_qr_make())
+		return;
+	square.x0 = (short)(centre_x - side / 2);
+	square.y0 = (short)(centre_y - side / 2);
+	square.x1 = (short)(square.x0 + side);
+	square.y1 = (short)(square.y0 + side);
+	source.x0 = source.y0 = 0;
+	source.x1 = source.y1 = link_qr.texels;
+	draw_bitmap_in_rect(link_qr.bitmap, &square, &source, NULL, 0xFFFFFFFFUL, NULL, TRUE);
+}
+#endif
+
 /* ui_widget.c's: a text box drawn, at the bounds its text was drawn in
 (its font and justification still set): a lobby row's player talking in
 voice chat (or muted) has a speaker just left of their name
@@ -5612,6 +5737,10 @@ void menu_functions_text_box_drawn(struct widget_instance *widget, rectangle2d c
 {
 	short row;
 
+#ifdef HALO_SWITCH
+	if (widget->name && strstr(widget->name, "join_game/ticker_player_info"))
+		link_qr_draw(bounds);
+#endif
 	/* (the Mods screen's texts: the fonts and widths their lines are
 	measured in, mods_text_fits) */
 	for (row = 0; widget->name && row < NUMBER_OF_MOD_TEXT_BOXES; row++)

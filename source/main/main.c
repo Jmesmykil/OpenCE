@@ -686,6 +686,8 @@ void network_test_update(boolean main_menu_loaded, real seconds);
 void benchmark_update(boolean main_menu_loaded);
 /* port: commands from an overlay, through a file (port/linux/game/overlay_commands.c) */
 void overlay_commands_update(void);
+/* port: the Switch's link page (port/linux/src/link_page.c) */
+void link_page_update(void);
 
 /* ---------- prototypes */
 
@@ -3308,6 +3310,7 @@ void main_loop_of_death(
 		event_manager_update();
 		telnet_console_process();
 		overlay_commands_update();
+		link_page_update();
 		process_ui_widgets();
 		main_pregame_render();
 		main_rasterizer_throttle();
@@ -3582,6 +3585,7 @@ static boolean main_loop_iteration(
 		event_manager_update();
 		telnet_console_process();
 		overlay_commands_update();
+		link_page_update();
 		profile_scope_exit(main_platform_events_section)
 
 		if (!shell_application_is_paused())

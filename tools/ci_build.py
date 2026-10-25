@@ -192,6 +192,10 @@ def main() -> int:
         # (port/assets/buttons/platforms), CC0: not required, but credited (the
         # PS5's release has it in licenses/: tools/ps5_build.py)
         shutil.copy2(ROOT / "port/assets/buttons/platforms/Kenney-LICENSE.txt", dist / "Kenney-LICENSE.txt")
+        # the link page's QR code (port/third_party/qrcodegen, Project
+        # Nayuki's, in the Switch's build alone), whose MIT license asks
+        # copies to carry its notice
+        shutil.copy2(ROOT / "port/third_party/qrcodegen/LICENSE", dist / "qrcodegen-LICENSE.txt")
     if args.platform == "switch":
         # and the Switch's menus' title font (port/switch/host/host_ui.c),
         # under the same license
