@@ -5176,7 +5176,7 @@ static void browser_update(struct widget_instance *list)
 				for (index = 0; index < NUMBEROF(address) - 1 && link_page_address()[index]; index++)
 					address[index] = (wchar_t)link_page_address()[index];
 				address[index] = 0;
-				usnprintf(text, NUMBEROF(text) - 1, L"Scan the code with your phone, or open %s, and paste the invite link",
+				usnprintf(text, NUMBEROF(text) - 1, L"Scan with your phone, or open %s",
 					address);
 			}
 			else if (!config_boolean("network.link_page"))
@@ -5738,7 +5738,7 @@ void menu_functions_text_box_drawn(struct widget_instance *widget, rectangle2d c
 	short row;
 
 #ifdef HALO_SWITCH
-	if (widget->name && strstr(widget->name, "join_game/ticker_player_info"))
+	if (widget->name && !strcmp(widget->name, "ticker_player_info"))
 		link_qr_draw(bounds);
 #endif
 	/* (the Mods screen's texts: the fonts and widths their lines are
