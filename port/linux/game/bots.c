@@ -2629,6 +2629,40 @@ static void bots_report(void)
 		bots_skills[bots_globals.skill].name, bots_globals.searches, bots_globals.search_failures,
 		bots_globals.search_partials, bots_globals.search_overflows, bots_globals.search_unavoided,
 		bots_globals.search_unsmoothed, bots_globals.stuck_events, bots_globals.stuck_giveups, line);
+	/* (capture the flag: each team's grabs, returns and captures, its flag's
+	state, and its bots that defend) */
+	if (bots_ctf_active())
+	{
+		long grabs[2] = { 0, 0 }, returns[2] = { 0, 0 }, scores[2] = { 0, 0 }, defenders[2] = { 0, 0 };
+		struct data_iterator iterator;
+		struct player_datum *player;
+		long team;
+
+		bots_ctf_update();
+		data_iterator_new(&iterator, player_data);
+		while ((player = (struct player_datum *)data_iterator_next(&iterator)) != NULL)
+		{
+			team = player->team_index;
+			if (team != 0 && team != 1)
+				continue;
+			grabs[team] += player->statistics.multiplayer_statistics.ctf_statistics.flag_grabs;
+			returns[team] += player->statistics.multiplayer_statistics.ctf_statistics.flag_returns;
+			scores[team] += player->statistics.multiplayer_statistics.ctf_statistics.flag_scores;
+			if (bots_machine_is_bot(player->network_player_data.machine_index))
+			{
+				struct bots_bot *bot = &bots_globals.bots[player->network_player_data.machine_index - BOTS_FIRST_MACHINE];
+
+				if (bot->player_index == iterator.datum_index && bots_ctf_defender(bot, player))
+					defenders[team]++;
+			}
+		}
+		platform_log("bots: ctf: red %ld grabs, %ld returns, %ld captures, flag %s, %ld defending; blue %ld grabs, "
+			"%ld returns, %ld captures, flag %s, %ld defending",
+			grabs[0], returns[0], scores[0], !bots_globals.ctf.present[0] ? "none" : bots_globals.ctf.at_home[0] ? "home" :
+				bots_globals.ctf.carrier_player_index[0] != NONE ? "carried" : "dropped", defenders[0],
+			grabs[1], returns[1], scores[1], !bots_globals.ctf.present[1] ? "none" : bots_globals.ctf.at_home[1] ? "home" :
+				bots_globals.ctf.carrier_player_index[1] != NONE ? "carried" : "dropped", defenders[1]);
+	}
 }
 
 void bots_update_actions(struct player_action *actions)
